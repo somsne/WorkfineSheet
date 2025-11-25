@@ -330,6 +330,129 @@ export class FormulaEngine {
   }
 
   /**
+   * 调整公式中的引用（用于插入/删除行列）
+   * @param formula 原始公式
+   * @param operation 操作类型：'insertRow' | 'deleteRow' | 'insertCol' | 'deleteCol'
+   * @param index 插入/删除的行号或列号
+   * @param count 插入/删除的数量（默认为1）
+   * @returns 调整后的公式
+   */
+  adjustFormulaReferences(
+    formula: string,
+    operation: 'insertRow' | 'deleteRow' | 'insertCol' | 'deleteCol',
+    index: number,
+    count: number = 1
+  ): string {
+    if (!this.isFormula(formula)) {
+      return formula
+    }
+
+    const expression = formula.substring(1) // 移除 '='
+    let adjustedExpression = expression
+
+    // 匹配所有单元格引用：A1, $A1, A$1, $A$1, A1:B2 等
+    const cellRegex = /(\$?)([A-Za-z]+)(\$?)(\d+)/g
+    const replacements: Array<{ original: string; adjusted: string; index: number }> = []
+
+    let match
+    while ((match = cellRegex.exec(expression)) !== null) {
+      const fullMatch = match[0]
+      const colAbsMarker = match[1] || ''
+      const colLetters = (match[2] || '').toUpperCase()
+      const rowAbsMarker = match[3] || ''
+      const rowStr = match[4] || '0'
+      
+      if (!colLetters || !rowStr) continue
+
+      const col = this.colLettersToNumber(colLetters)
+      const row = parseInt(rowStr, 10) - 1
+      const isColAbsolute = !!colAbsMarker
+      const isRowAbsolute = !!rowAbsMarker
+
+      let newRow = row
+      let newCol = col
+      let shouldAdjust = false
+
+      // 根据操作类型调整引用
+      switch (operation) {
+        case 'insertRow':
+          // 相对引用：如果引用的行 >= 插入位置，行号增加
+          if (!isRowAbsolute && row >= index) {
+            newRow = row + count
+            shouldAdjust = true
+          }
+          break
+
+        case 'deleteRow':
+          // 相对引用：如果引用的行 > 删除位置，行号减少
+          if (!isRowAbsolute) {
+            if (row === index) {
+              // 引用的行被删除，标记为 #REF!
+              replacements.push({
+                original: fullMatch,
+                adjusted: '#REF!',
+                index: match.index
+              })
+              continue
+            } else if (row > index) {
+              newRow = row - count
+              shouldAdjust = true
+            }
+          }
+          break
+
+        case 'insertCol':
+          // 相对引用：如果引用的列 >= 插入位置，列号增加
+          if (!isColAbsolute && col >= index) {
+            newCol = col + count
+            shouldAdjust = true
+          }
+          break
+
+        case 'deleteCol':
+          // 相对引用：如果引用的列 > 删除位置，列号减少
+          if (!isColAbsolute) {
+            if (col === index) {
+              // 引用的列被删除，标记为 #REF!
+              replacements.push({
+                original: fullMatch,
+                adjusted: '#REF!',
+                index: match.index
+              })
+              continue
+            } else if (col > index) {
+              newCol = col - count
+              shouldAdjust = true
+            }
+          }
+          break
+      }
+
+      if (shouldAdjust) {
+        const newColLetter = this.numberToColLetters(newCol)
+        const newRowNum = newRow + 1
+        const adjustedRef = `${colAbsMarker}${newColLetter}${rowAbsMarker}${newRowNum}`
+        replacements.push({
+          original: fullMatch,
+          adjusted: adjustedRef,
+          index: match.index
+        })
+      }
+    }
+
+    // 从后往前替换，避免索引错位
+    replacements.sort((a, b) => b.index - a.index)
+    for (const { original, adjusted, index } of replacements) {
+      adjustedExpression =
+        adjustedExpression.substring(0, index) +
+        adjusted +
+        adjustedExpression.substring(index + original.length)
+    }
+
+    return '=' + adjustedExpression
+  }
+
+  /**
    * 清空缓存
    */
   clear(): void {

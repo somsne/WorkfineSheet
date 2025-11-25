@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel 公式性能测试</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #2c3e50;
+      border-bottom: 3px solid #3498db;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #3498db;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .test-section h2::before {
+      content: '⚡';
+      font-size: 24px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin: 15px 0;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    button.run-all {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+    .result {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #3498db;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .metric {
+      display: inline-block;
+      padding: 4px 8px;
+      margin: 2px;
+      background: #e3f2fd;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .metric.fast {
+      background: #c8e6c9;
+      color: #2e7d32;
+    }
+    .metric.medium {
+      background: #fff9c4;
+      color: #f57c00;
+    }
+    .metric.slow {
+      background: #ffcdd2;
+      color: #c62828;
+    }
+    .summary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    .summary h3 {
+      margin-top: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+      background: white;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    th {
+      background: #3498db;
+      color: white;
+      font-weight: 600;
+    }
+    tr:hover {
+      background: #f5f5f5;
+    }
+    .progress {
+      width: 100%;
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.success { background: #4caf50; color: white; }
+    .badge.warning { background: #ff9800; color: white; }
+    .badge.error { background: #f44336; color: white; }
+  </style>
+</head>
+<body>
+  <h1>📊 Excel 公式性能测试套件</h1>
+  
+  <div class="controls">
+    <button class="run-all" onclick="runAllTests()">🚀 运行所有测试</button>
+    <button onclick="clearResults()">🗑️ 清除结果</button>
+  </div>
+
+  <div class="progress" id="globalProgress">
+    <div class="progress-bar" id="globalProgressBar"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 1: 大量公式创建性能</h2>
+    <p>创建公式单元格，测试解析和存储元数据的性能</p>
+    <div class="controls">
+      <button onclick="test1(100)">100 个公式</button>
+      <button onclick="test1(500)">500 个公式</button>
+      <button onclick="test1(1000)">1000 个公式</button>
+      <button onclick="test1(5000)">5000 个公式</button>
+      <button onclick="test1(10000)">10000 个公式</button>
+      <button onclick="test1(100000)" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">🔥 100K 个公式</button>
+      <button onclick="test1(1000000)" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">⚡ 1M 个公式</button>
+    </div>
+    <div id="result1" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 2: 插入行列性能</h2>
+    <p>在包含大量公式的表格中插入行列，测试引用调整性能</p>
+    <div class="controls">
+      <button onclick="test2(100, 10)">100 公式 / 10 行</button>
+      <button onclick="test2(500, 10)">500 公式 / 10 行</button>
+      <button onclick="test2(1000, 10)">1000 公式 / 10 行</button>
+      <button onclick="test2(1000, 50)">1000 公式 / 50 行</button>
+      <button onclick="test2(5000, 100)">5000 公式 / 100 行</button>
+      <button onclick="test2(10000, 1000)" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">🔥 10K 公式 / 1K 行</button>
+      <button onclick="test2(100000, 50000)" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">⚡ 100K 公式 / 50K 行</button>
+    </div>
+    <div id="result2" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 2B: 插入列性能（极限测试）</h2>
+    <p>测试大量列插入操作的性能</p>
+    <div class="controls">
+      <button onclick="test2b(1000, 10)">1000 公式 / 10 列</button>
+      <button onclick="test2b(1000, 50)">1000 公式 / 50 列</button>
+      <button onclick="test2b(5000, 100)">5000 公式 / 100 列</button>
+      <button onclick="test2b(10000, 500)" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">⚡ 10K 公式 / 500 列</button>
+    </div>
+    <div id="result2b" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 3: 复制粘贴性能</h2>
+    <p>复制包含公式的区域，测试基于元数据重建的性能</p>
+    <div class="controls">
+      <button onclick="test3(10, 10)">10x10 区域</button>
+      <button onclick="test3(20, 20)">20x20 区域</button>
+      <button onclick="test3(50, 50)">50x50 区域</button>
+      <button onclick="test3(100, 100)">100x100 区域</button>
+    </div>
+    <div id="result3" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 4: 公式计算性能</h2>
+    <p>测试包含嵌套公式的计算性能和缓存效果</p>
+    <div class="controls">
+      <button onclick="test4(100)">100 个公式</button>
+      <button onclick="test4(500)">500 个公式</button>
+      <button onclick="test4(1000)">1000 个公式</button>
+    </div>
+    <div id="result4" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 5: 复杂公式处理</h2>
+    <p>测试包含范围引用、混合引用的复杂公式</p>
+    <div class="controls">
+      <button onclick="test5()">基础复杂公式</button>
+      <button onclick="test5Nested(10)">10层嵌套</button>
+      <button onclick="test5Nested(20)">20层嵌套</button>
+      <button onclick="test5Nested(50)" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">⚡ 50层嵌套</button>
+    </div>
+    <div id="result5" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 6: 内存占用分析</h2>
+    <p>分析公式元数据的内存占用情况</p>
+    <div class="controls">
+      <button onclick="test6()">运行测试</button>
+    </div>
+    <div id="result6" class="result"></div>
+  </div>
+
+  <div id="summary" class="summary" style="display: none;">
+    <h3>📈 测试总结</h3>
+    <div id="summaryContent"></div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from './src/lib/SheetModel.js'
+    import { FormulaSheet } from './src/lib/FormulaSheet.js'
+    import { FormulaMetadataParser } from './src/lib/FormulaMetadata.js'
+
+    window.SheetModel = SheetModel
+    window.FormulaSheet = FormulaSheet
+    window.FormulaMetadataParser = FormulaMetadataParser
+
+    const testResults = []
+
+    function formatTime(ms) {
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+
+    function formatMemory(bytes) {
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+      return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+    }
+
+    function getMetricClass(ms, thresholds = { fast: 10, medium: 50 }) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+
+    function displayResult(elementId, content) {
+      const element = document.getElementById(elementId)
+      element.innerHTML = content
+    }
+
+    // 测试 1: 大量公式创建
+    window.test1 = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 测试创建公式
+      const startCreate = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 10)
+        const col = i % 10
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+      }
+      const createTime = performance.now() - startCreate
+
+      // 验证元数据
+      let metadataCount = 0
+      model.forEach((r, c, cell) => {
+        if (cell.formulaMetadata) metadataCount++
+      })
+
+      const avgCreateTime = createTime / count
+
+      const result = `
+✅ <strong>测试完成</strong>
+
+<strong>测试规模：</strong>${count} 个公式
+
+<strong>创建耗时：</strong>
+  - 总时间: <span class="metric ${getMetricClass(createTime, { fast: 100, medium: 500 })}">${formatTime(createTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgCreateTime, { fast: 0.5, medium: 2 })}">${formatTime(avgCreateTime)}/公式</span>
+  - 创建速率: <span class="metric">${Math.round(count / (createTime / 1000))} 公式/秒</span>
+
+<strong>验证结果：</strong>
+  - 包含元数据的单元格: ${metadataCount} / ${count}
+  - 成功率: ${((metadataCount / count) * 100).toFixed(1)}%
+
+<strong>性能评估：</strong>
+  ${avgCreateTime < 0.5 ? '🚀 优秀 - 创建速度非常快' : 
+    avgCreateTime < 2 ? '✅ 良好 - 创建速度正常' : 
+    '⚠️ 需要优化 - 创建速度较慢'}
+`
+      displayResult('result1', result)
+      
+      testResults.push({
+        name: `创建 ${count} 个公式`,
+        time: createTime,
+        avgTime: avgCreateTime,
+        status: avgCreateTime < 2 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 2: 插入行列性能
+    window.test2 = async function(formulaCount, insertCount) {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      // 创建公式
+      for (let i = 0; i < formulaCount; i++) {
+        const row = Math.floor(i / 10)
+        const col = i % 10
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+      }
+
+      // 测试插入行
+      const startInsertRow = performance.now()
+      for (let i = 0; i < insertCount; i++) {
+        sheet.adjustAllFormulas('insertRow', 5, 1)
+      }
+      const insertRowTime = performance.now() - startInsertRow
+
+      // 重新创建测试删除行
+      const model2 = new SheetModel()
+      const sheet2 = new FormulaSheet(model2)
+      for (let i = 0; i < formulaCount; i++) {
+        const row = Math.floor(i / 10) + insertCount
+        const col = i % 10
+        sheet2.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+      }
+
+      const startDeleteRow = performance.now()
+      for (let i = 0; i < insertCount; i++) {
+        sheet2.adjustAllFormulas('deleteRow', 5, 1)
+      }
+      const deleteRowTime = performance.now() - startDeleteRow
+
+      const avgInsert = insertRowTime / insertCount
+      const avgDelete = deleteRowTime / insertCount
+
+      const result = `
+✅ <strong>测试完成</strong>
+
+<strong>测试规模：</strong>${formulaCount} 个公式，操作 ${insertCount} 次
+
+<strong>插入行性能：</strong>
+  - 总时间: <span class="metric ${getMetricClass(insertRowTime, { fast: 50, medium: 200 })}">${formatTime(insertRowTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgInsert, { fast: 5, medium: 20 })}">${formatTime(avgInsert)}/次</span>
+  - 影响公式: ${formulaCount} 个
+
+<strong>删除行性能：</strong>
+  - 总时间: <span class="metric ${getMetricClass(deleteRowTime, { fast: 50, medium: 200 })}">${formatTime(deleteRowTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgDelete, { fast: 5, medium: 20 })}">${formatTime(avgDelete)}/次</span>
+
+<strong>性能对比：</strong>
+  - 插入比删除 ${insertRowTime > deleteRowTime ? '慢' : '快'} ${Math.abs(((insertRowTime - deleteRowTime) / deleteRowTime * 100)).toFixed(1)}%
+
+<strong>性能评估：</strong>
+  ${avgInsert < 5 ? '🚀 优秀 - 可以实时响应用户操作' : 
+    avgInsert < 20 ? '✅ 良好 - 用户体验流畅' : 
+    '⚠️ 需要优化 - 可能影响用户体验'}
+`
+      displayResult('result2', result)
+
+      testResults.push({
+        name: `插入/删除行 (${formulaCount} 公式, ${insertCount} 次)`,
+        time: insertRowTime + deleteRowTime,
+        avgTime: (avgInsert + avgDelete) / 2,
+        status: avgInsert < 20 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 3: 复制粘贴性能
+    window.test3 = async function(rows, cols) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      // 创建源区域（包含公式）
+      const createStart = performance.now()
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          sheet.setValue(r, c, `=A${r + 1}+B${c + 1}`)
+        }
+      }
+      const createTime = performance.now() - createStart
+
+      // 测试复制粘贴
+      const copyStart = performance.now()
+      sheet.copyRange(0, 0, rows - 1, cols - 1, rows + 10, cols + 10)
+      const copyTime = performance.now() - copyStart
+
+      const totalCells = rows * cols
+      const avgCopyTime = copyTime / totalCells
+
+      // 验证几个单元格
+      const sample1 = sheet.getDisplayValue(rows + 10, cols + 10)
+      const sample2 = sheet.getDisplayValue(rows + 11, cols + 11)
+
+      const result = `
+✅ <strong>测试完成</strong>
+
+<strong>测试规模：</strong>${rows} × ${cols} = ${totalCells} 个单元格
+
+<strong>创建源区域：</strong>
+  - 总时间: <span class="metric">${formatTime(createTime)}</span>
+  - 平均: ${formatTime(createTime / totalCells)}/单元格
+
+<strong>复制粘贴性能：</strong>
+  - 总时间: <span class="metric ${getMetricClass(copyTime, { fast: 50, medium: 200 })}">${formatTime(copyTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgCopyTime, { fast: 0.1, medium: 0.5 })}">${formatTime(avgCopyTime)}/单元格</span>
+  - 复制速率: <span class="metric">${Math.round(totalCells / (copyTime / 1000))} 单元格/秒</span>
+
+<strong>验证结果：</strong>
+  - 源位置 (0,0): ${sheet.getDisplayValue(0, 0)}
+  - 目标位置 (${rows + 10},${cols + 10}): ${sample1}
+  - 目标位置 (${rows + 11},${cols + 11}): ${sample2}
+
+<strong>性能评估：</strong>
+  ${avgCopyTime < 0.1 ? '🚀 优秀 - 复制速度非常快' : 
+    avgCopyTime < 0.5 ? '✅ 良好 - 复制速度正常' : 
+    '⚠️ 需要优化 - 复制速度较慢'}
+`
+      displayResult('result3', result)
+
+      testResults.push({
+        name: `复制 ${rows}×${cols} 区域`,
+        time: copyTime,
+        avgTime: avgCopyTime,
+        status: avgCopyTime < 0.5 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 4: 公式计算性能
+    window.test4 = async function(count) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      // 创建数值
+      for (let i = 0; i < count; i++) {
+        sheet.setValue(i, 0, String(i + 1))
+      }
+
+      // 创建公式
+      for (let i = 0; i < count; i++) {
+        sheet.setValue(i, 1, `=A${i + 1}*2`)
+      }
+
+      // 第一次计算（无缓存）
+      const calcStart1 = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const calcTime1 = performance.now() - calcStart1
+
+      // 第二次计算（有缓存）
+      const calcStart2 = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const calcTime2 = performance.now() - calcStart2
+
+      // 清除缓存后再计算
+      sheet.clearFormulaCache()
+      const calcStart3 = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const calcTime3 = performance.now() - calcStart3
+
+      const cacheSpeedup = ((calcTime1 - calcTime2) / calcTime1 * 100).toFixed(1)
+
+      const result = `
+✅ <strong>测试完成</strong>
+
+<strong>测试规模：</strong>${count} 个公式
+
+<strong>首次计算（无缓存）：</strong>
+  - 总时间: <span class="metric ${getMetricClass(calcTime1, { fast: 10, medium: 50 })}">${formatTime(calcTime1)}</span>
+  - 平均: ${formatTime(calcTime1 / count)}/公式
+  - 计算速率: ${Math.round(count / (calcTime1 / 1000))} 公式/秒
+
+<strong>二次计算（有缓存）：</strong>
+  - 总时间: <span class="metric fast">${formatTime(calcTime2)}</span>
+  - 平均: ${formatTime(calcTime2 / count)}/公式
+  - 速度提升: <span class="metric fast">${cacheSpeedup}%</span>
+
+<strong>清除缓存后：</strong>
+  - 总时间: <span class="metric">${formatTime(calcTime3)}</span>
+  - 与首次计算差异: ${Math.abs(calcTime3 - calcTime1).toFixed(2)} ms
+
+<strong>缓存效果：</strong>
+  ${calcTime2 < calcTime1 / 10 ? '🚀 缓存非常有效，性能提升显著' : 
+    calcTime2 < calcTime1 / 2 ? '✅ 缓存有效，性能有所提升' : 
+    '⚠️ 缓存效果不明显'}
+`
+      displayResult('result4', result)
+
+      testResults.push({
+        name: `计算 ${count} 个公式`,
+        time: calcTime1,
+        avgTime: calcTime1 / count,
+        status: calcTime1 / count < 0.1 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 5: 复杂公式
+    window.test5 = async function() {
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      const testCases = [
+        { formula: '=A1+B1', desc: '简单相对引用' },
+        { formula: '=$A$1+B1', desc: '混合引用' },
+        { formula: '=SUM(A1:A10)', desc: '范围引用' },
+        { formula: '=A1+B1+C1+D1+E1', desc: '多个引用' },
+        { formula: '=IF(A1>0,B1,C1)', desc: '函数嵌套' },
+      ]
+
+      let results = []
+
+      for (let i = 0; i < testCases.length; i++) {
+        const { formula, desc } = testCases[i]
+        
+        const parseStart = performance.now()
+        sheet.setValue(i, 0, formula)
+        const parseTime = performance.now() - parseStart
+
+        const cell = model.getCell(i, 0)
+        const hasMetadata = !!cell.formulaMetadata
+        const tokenCount = cell.formulaMetadata?.tokens.length || 0
+
+        // 测试插入行后的调整
+        const adjustStart = performance.now()
+        sheet.adjustAllFormulas('insertRow', 0, 1)
+        const adjustTime = performance.now() - adjustStart
+
+        const adjustedFormula = sheet.getDisplayValue(i + 1, 0)
+
+        results.push({
+          desc,
+          formula,
+          parseTime,
+          hasMetadata,
+          tokenCount,
+          adjustTime,
+          adjustedFormula
+        })
+      }
+
+      let resultText = '✅ <strong>测试完成</strong>\n\n'
+      resultText += '<table>'
+      resultText += '<tr><th>类型</th><th>原公式</th><th>解析时间</th><th>Token数</th><th>调整时间</th><th>调整后</th></tr>'
+      
+      for (const r of results) {
+        resultText += '<tr>'
+        resultText += `<td>${r.desc}</td>`
+        resultText += `<td><code>${r.formula}</code></td>`
+        resultText += `<td><span class="metric ${getMetricClass(r.parseTime, { fast: 1, medium: 5 })}">${formatTime(r.parseTime)}</span></td>`
+        resultText += `<td>${r.tokenCount}</td>`
+        resultText += `<td><span class="metric ${getMetricClass(r.adjustTime, { fast: 1, medium: 5 })}">${formatTime(r.adjustTime)}</span></td>`
+        resultText += `<td><code>${r.adjustedFormula}</code></td>`
+        resultText += '</tr>'
+      }
+      
+      resultText += '</table>'
+
+      displayResult('result5', resultText)
+    }
+
+    // 测试 5 嵌套: 深度嵌套公式性能
+    window.test5Nested = async function(depth) {
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 测试进行中，请稍候...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      // 构建嵌套公式
+      // 第一行：基础值
+      sheet.setValue(0, 0, '1')
+      sheet.setValue(0, 1, '2')
+
+      // 构建深度嵌套的公式链
+      const buildStart = performance.now()
+      for (let i = 1; i <= depth; i++) {
+        // 每一层依赖上一层：B{i+1} = A{i} + B{i}
+        sheet.setValue(i, 0, `=A${i}+1`)
+        sheet.setValue(i, 1, `=A${i + 1}+B${i}`)
+      }
+      const buildTime = performance.now() - buildStart
+
+      // 测试计算性能（深度嵌套会递归计算）
+      const calcStart = performance.now()
+      const result = sheet.getValue(depth, 1)
+      const calcTime = performance.now() - calcStart
+
+      // 测试缓存效果
+      const calcStart2 = performance.now()
+      const result2 = sheet.getValue(depth, 1)
+      const calcTime2 = performance.now() - calcStart2
+
+      // 测试调整性能
+      const adjustStart = performance.now()
+      sheet.adjustAllFormulas('insertRow', 0, 1)
+      const adjustTime = performance.now() - adjustStart
+
+      // 验证调整后的计算
+      const calcStart3 = performance.now()
+      const result3 = sheet.getValue(depth + 1, 1)
+      const calcTime3 = performance.now() - calcStart3
+
+      const resultText = `
+✅ <strong>测试完成 - ${depth} 层嵌套公式</strong>
+
+<strong>公式结构：</strong>
+  - 嵌套深度: ${depth} 层
+  - 公式数量: ${depth * 2} 个
+  - 依赖链长度: ${depth}
+
+<strong>构建性能：</strong>
+  - 构建时间: <span class="metric ${getMetricClass(buildTime, { fast: 50, medium: 200 })}">${formatTime(buildTime)}</span>
+  - 平均时间: ${formatTime(buildTime / (depth * 2))}/公式
+
+<strong>首次计算（无缓存）：</strong>
+  - 计算时间: <span class="metric ${getMetricClass(calcTime, { fast: 10, medium: 100 })}">${formatTime(calcTime)}</span>
+  - 计算结果: ${result}
+  - 递归深度: ${depth}
+
+<strong>二次计算（有缓存）：</strong>
+  - 计算时间: <span class="metric fast">${formatTime(calcTime2)}</span>
+  - 速度提升: <span class="metric fast">${((calcTime - calcTime2) / calcTime * 100).toFixed(1)}%</span>
+
+<strong>调整性能：</strong>
+  - 调整时间: <span class="metric ${getMetricClass(adjustTime, { fast: 50, medium: 200 })}">${formatTime(adjustTime)}</span>
+  - 影响公式: ${depth * 2} 个
+
+<strong>调整后重新计算：</strong>
+  - 计算时间: <span class="metric ${getMetricClass(calcTime3, { fast: 10, medium: 100 })}">${formatTime(calcTime3)}</span>
+  - 计算结果: ${result3}
+
+<strong>性能评估：</strong>
+  ${calcTime < 10 ? '🚀 优秀 - 深度嵌套计算非常快' : 
+    calcTime < 100 ? '✅ 良好 - 嵌套计算性能正常' : 
+    calcTime < 1000 ? '⚠️ 一般 - 深度嵌套略慢' :
+    '❌ 较差 - 需要优化嵌套计算'}
+`
+      displayResult('result5', resultText)
+
+      testResults.push({
+        name: `${depth} 层嵌套公式`,
+        time: calcTime,
+        avgTime: calcTime / depth,
+        status: calcTime < 100 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 2B: 插入列性能
+    window.test2b = async function(formulaCount, insertCount) {
+      const resultDiv = document.getElementById('result2b')
+      resultDiv.innerHTML = '⏳ 测试进行中，大规模操作需要较长时间...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      // 创建公式（分散在多列）
+      const createStart = performance.now()
+      for (let i = 0; i < formulaCount; i++) {
+        const row = Math.floor(i / 100)
+        const col = i % 100
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+      }
+      const createTime = performance.now() - createStart
+
+      // 测试插入列
+      const startInsertCol = performance.now()
+      for (let i = 0; i < insertCount; i++) {
+        sheet.adjustAllFormulas('insertCol', 5, 1)
+        // 每100次更新一次进度
+        if (i % 100 === 0 && insertCount > 1000) {
+          await new Promise(resolve => setTimeout(resolve, 0))
+          resultDiv.innerHTML = `⏳ 插入列进度: ${i}/${insertCount} (${(i/insertCount*100).toFixed(1)}%)`
+        }
+      }
+      const insertColTime = performance.now() - startInsertCol
+
+      // 测试删除列
+      const startDeleteCol = performance.now()
+      for (let i = 0; i < Math.min(insertCount, 100); i++) {
+        sheet.adjustAllFormulas('deleteCol', 5, 1)
+      }
+      const deleteColTime = performance.now() - startDeleteCol
+
+      const avgInsert = insertColTime / insertCount
+      const avgDelete = deleteColTime / Math.min(insertCount, 100)
+
+      const result = `
+✅ <strong>测试完成 - 列操作性能</strong>
+
+<strong>测试规模：</strong>
+  - 公式数量: ${formulaCount} 个
+  - 插入列数: ${insertCount}
+  - 删除列数: ${Math.min(insertCount, 100)}
+
+<strong>创建公式：</strong>
+  - 创建时间: <span class="metric">${formatTime(createTime)}</span>
+
+<strong>插入列性能：</strong>
+  - 总时间: <span class="metric ${getMetricClass(insertColTime, { fast: 500, medium: 5000 })}">${formatTime(insertColTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgInsert, { fast: 5, medium: 50 })}">${formatTime(avgInsert)}/列</span>
+  - 插入速率: <span class="metric">${Math.round(insertCount / (insertColTime / 1000))} 列/秒</span>
+
+<strong>删除列性能：</strong>
+  - 总时间: <span class="metric ${getMetricClass(deleteColTime, { fast: 100, medium: 1000 })}">${formatTime(deleteColTime)}</span>
+  - 平均时间: <span class="metric ${getMetricClass(avgDelete, { fast: 5, medium: 50 })}">${formatTime(avgDelete)}/列</span>
+
+<strong>性能评估：</strong>
+  ${avgInsert < 5 ? '🚀 优秀 - 列操作非常快' : 
+    avgInsert < 50 ? '✅ 良好 - 列操作性能正常' : 
+    avgInsert < 500 ? '⚠️ 一般 - 大规模列操作略慢' :
+    '❌ 较差 - 需要优化列操作'}
+
+${insertCount >= 1000 ? '<strong>⚠️ 注意：</strong>大规模列插入是极限测试，实际使用中很少需要插入如此多的列。' : ''}
+`
+      displayResult('result2b', result)
+
+      testResults.push({
+        name: `插入 ${insertCount} 列 (${formulaCount} 公式)`,
+        time: insertColTime,
+        avgTime: avgInsert,
+        status: avgInsert < 50 ? 'success' : 'warning'
+      })
+    }
+
+    // 测试 6: 内存占用
+    window.test6 = async function() {
+      const resultDiv = document.getElementById('result6')
+      resultDiv.innerHTML = '⏳ 测试进行中...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const counts = [100, 500, 1000, 5000]
+      let results = []
+
+      for (const count of counts) {
+        const model = new SheetModel()
+        const sheet = new FormulaSheet(model)
+
+        // 创建公式
+        for (let i = 0; i < count; i++) {
+          sheet.setValue(i, 0, `=A${i + 1}+B${i + 1}`)
+        }
+
+        // 估算内存（通过 JSON 序列化大小）
+        let totalSize = 0
+        model.forEach((r, c, cell) => {
+          const cellJson = JSON.stringify(cell)
+          totalSize += cellJson.length * 2 // UTF-16, 每字符2字节
+        })
+
+        const avgSize = totalSize / count
+
+        results.push({
+          count,
+          totalSize,
+          avgSize
+        })
+      }
+
+      let resultText = '✅ <strong>测试完成</strong>\n\n'
+      resultText += '<strong>内存占用分析（估算值）：</strong>\n\n'
+      resultText += '<table>'
+      resultText += '<tr><th>公式数量</th><th>总内存</th><th>平均内存/公式</th><th>开销评估</th></tr>'
+      
+      for (const r of results) {
+        const overhead = r.avgSize < 500 ? '低' : r.avgSize < 1000 ? '中等' : '高'
+        const overheadClass = r.avgSize < 500 ? 'success' : r.avgSize < 1000 ? 'warning' : 'error'
+        
+        resultText += '<tr>'
+        resultText += `<td>${r.count}</td>`
+        resultText += `<td>${formatMemory(r.totalSize)}</td>`
+        resultText += `<td>${formatMemory(r.avgSize)}</td>`
+        resultText += `<td><span class="badge ${overheadClass}">${overhead}</span></td>`
+        resultText += '</tr>'
+      }
+      
+      resultText += '</table>\n\n'
+      resultText += '<strong>分析：</strong>\n'
+      resultText += `- 普通单元格（纯文本）: ~50-100 bytes\n`
+      resultText += `- 公式单元格（含元数据）: ~${formatMemory(results[0].avgSize)}\n`
+      resultText += `- 元数据额外开销: ~${formatMemory(results[0].avgSize - 75)} (${((results[0].avgSize - 75) / 75 * 100).toFixed(0)}%)\n\n`
+      resultText += results[0].avgSize < 500 ? 
+        '✅ 内存开销合理，适合大规模应用' : 
+        '⚠️ 内存开销较大，注意优化'
+
+      displayResult('result6', resultText)
+    }
+
+    // 运行所有测试
+    window.runAllTests = async function() {
+      testResults.length = 0
+      const progressBar = document.getElementById('globalProgressBar')
+      
+      const tests = [
+        () => test1(1000),
+        () => test2(500, 10),
+        () => test3(20, 20),
+        () => test4(500),
+        () => test5(),
+        () => test6()
+      ]
+
+      for (let i = 0; i < tests.length; i++) {
+        await tests[i]()
+        progressBar.style.width = ((i + 1) / tests.length * 100) + '%'
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+
+      showSummary()
+    }
+
+    function showSummary() {
+      const summary = document.getElementById('summary')
+      const content = document.getElementById('summaryContent')
+      
+      const totalTime = testResults.reduce((sum, r) => sum + r.time, 0)
+      const avgTime = totalTime / testResults.length
+      const successCount = testResults.filter(r => r.status === 'success').length
+      
+      let html = '<table>'
+      html += '<tr><th>测试项目</th><th>总时间</th><th>平均时间</th><th>状态</th></tr>'
+      
+      for (const result of testResults) {
+        html += '<tr>'
+        html += `<td>${result.name}</td>`
+        html += `<td>${formatTime(result.time)}</td>`
+        html += `<td>${formatTime(result.avgTime)}</td>`
+        html += `<td><span class="badge ${result.status}">${result.status === 'success' ? '优秀' : '一般'}</span></td>`
+        html += '</tr>'
+      }
+      
+      html += '</table>'
+      html += `\n<p><strong>总体评分：</strong>${successCount}/${testResults.length} 项测试达到优秀标准</p>`
+      html += `<p><strong>总耗时：</strong>${formatTime(totalTime)}</p>`
+      
+      content.innerHTML = html
+      summary.style.display = 'block'
+    }
+
+    window.clearResults = function() {
+      for (let i = 1; i <= 6; i++) {
+        document.getElementById(`result${i}`).innerHTML = ''
+      }
+      document.getElementById('summary').style.display = 'none'
+      document.getElementById('globalProgressBar').style.width = '0%'
+      testResults.length = 0
+    }
+
+    console.log('📊 性能测试页面已加载')
+  </script>
+</body>
+</html>

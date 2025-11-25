@@ -1,3 +1,5 @@
+import type { FormulaMetadata } from './FormulaMetadata'
+
 export type CellKey = string
 
 export function keyFor(r: number, c: number) {
@@ -6,6 +8,8 @@ export function keyFor(r: number, c: number) {
 
 export interface Cell {
   value: string
+  // 如果单元格包含公式，存储其元数据
+  formulaMetadata?: FormulaMetadata
 }
 
 export class SheetModel {
@@ -28,6 +32,16 @@ export class SheetModel {
       this.cells.delete(k)
     } else {
       this.cells.set(k, { value })
+    }
+  }
+
+  // 设置完整的单元格对象（用于包含元数据的情况）
+  setCell(r: number, c: number, cell: Cell) {
+    const k = keyFor(r, c)
+    if (!cell.value || cell.value === '') {
+      this.cells.delete(k)
+    } else {
+      this.cells.set(k, cell)
     }
   }
 

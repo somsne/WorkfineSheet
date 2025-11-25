@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>异步计算性能测试 - WorkfineSheet</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 32px;
+    }
+
+    .description {
+      color: #666;
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    .system-info {
+      display: flex;
+      gap: 20px;
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .system-info-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .system-info-label {
+      color: #666;
+      font-weight: 500;
+    }
+
+    .system-info-value {
+      color: #333;
+      font-family: 'Courier New', monospace;
+      background: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .test-section {
+      background: white;
+      padding: 25px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .test-section h2 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .test-section p {
+      color: #666;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #45a049;
+    }
+
+    .btn-secondary {
+      background: #2196F3;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #0b7dda;
+    }
+
+    .btn-warning {
+      background: #FF9800;
+      color: white;
+    }
+
+    .btn-warning:hover {
+      background: #e68900;
+    }
+
+    .btn-danger {
+      background: #f44336;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #da190b;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    button:disabled:hover {
+      transform: none;
+      box-shadow: none;
+    }
+
+    .result-box {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      border-left: 4px solid #4CAF50;
+      white-space: pre-line;
+      line-height: 1.8;
+      font-size: 14px;
+      color: #333;
+      min-height: 100px;
+      margin-top: 15px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+
+    .result-box::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .result-box::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 4px;
+    }
+
+    .result-box::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 4px;
+    }
+
+    .result-box::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+
+    .metric {
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e8f5e9;
+    }
+
+    .metric.fast {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .metric.medium {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+
+    .metric.slow {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .ui-test-area {
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      border: 2px dashed #ddd;
+      margin-top: 20px;
+    }
+
+    .ui-test-area h3 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 16px;
+    }
+
+    .animation-box {
+      width: 100px;
+      height: 100px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      margin: 20px 0;
+      animation: float 3s ease-in-out infinite;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      font-size: 24px;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-20px); }
+    }
+
+    .counter {
+      font-size: 48px;
+      font-weight: bold;
+      color: #4CAF50;
+      font-family: 'Courier New', monospace;
+    }
+
+    .fps-meter {
+      display: inline-block;
+      padding: 8px 16px;
+      background: #333;
+      color: #0f0;
+      font-family: 'Courier New', monospace;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 30px;
+      background: #e0e0e0;
+      border-radius: 15px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4CAF50, #8BC34A);
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+    }
+
+    .highlight {
+      background: #ffeb3b;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      background: #2196F3;
+      color: white;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge.new {
+      background: #f44336;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .stat-card {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #2196F3;
+    }
+
+    .stat-label {
+      color: #666;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .stat-value {
+      color: #333;
+      font-size: 24px;
+      font-weight: bold;
+      font-family: 'Courier New', monospace;
+    }
+
+    .test-running {
+      animation: shimmer 2s infinite;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -1000px 0; }
+      100% { background-position: 1000px 0; }
+    }
+
+    .comparison-table {
+      width: 100%;
+      margin-top: 15px;
+      border-collapse: collapse;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .comparison-table th {
+      background: #f5f5f5;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .comparison-table tr:hover {
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚡ 异步计算队列性能测试</h1>
+      <p class="description">
+        测试 WorkfineSheet 异步公式计算队列的性能，验证在大量计算任务执行时 UI 是否保持流畅。
+        <span class="highlight">关键指标</span>：FPS 应保持在 55 以上，动画流畅，计数器持续递增。
+      </p>
+      <div class="system-info">
+        <div class="system-info-item">
+          <span class="system-info-label">浏览器:</span>
+          <span class="system-info-value" id="browserInfo">检测中...</span>
+        </div>
+        <div class="system-info-item">
+          <span class="system-info-label">CPU 核心:</span>
+          <span class="system-info-value" id="cpuInfo">检测中...</span>
+        </div>
+        <div class="system-info-item">
+          <span class="system-info-label">内存:</span>
+          <span class="system-info-value" id="memoryInfo">检测中...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- UI 响应性测试区域 -->
+    <div class="test-section">
+      <h2>
+        🎯 UI 响应性监控
+        <span class="badge new">实时</span>
+      </h2>
+      <p>在计算任务执行期间，这些UI元素应该保持流畅。如果出现卡顿，说明计算阻塞了主线程。</p>
+      
+      <div class="ui-test-area">
+        <h3>FPS 计数器：<span class="fps-meter" id="fpsDisplay">60 FPS</span></h3>
+        <h3>实时计数器：<span class="counter" id="counter">0</span></h3>
+        <div class="animation-box" id="animBox">🚀</div>
+        <input type="range" id="slider" min="0" max="100" value="50" style="width: 100%; margin: 10px 0;">
+        <p style="color: #666;">尝试拖动滑块，应该非常流畅没有延迟</p>
+      </div>
+    </div>
+
+    <!-- 测试 1: 创建大量公式 -->
+    <div class="test-section">
+      <h2>测试 1: 创建大量公式（异步 vs 同步）</h2>
+      <p>对比同步和异步模式下创建大量公式的性能表现。异步模式应该保持 UI 流畅。</p>
+      <div class="button-group">
+        <button class="btn-primary" onclick="test1Async(1000)" id="btn1a-1k">异步: 1K 公式</button>
+        <button class="btn-primary" onclick="test1Async(10000)" id="btn1a-10k">异步: 10K 公式</button>
+        <button class="btn-primary" onclick="test1Async(50000)" id="btn1a-50k">异步: 50K 公式</button>
+        <button class="btn-warning" onclick="test1Async(100000)" id="btn1a-100k">异步: 100K 公式 ⚡</button>
+        <button class="btn-secondary" onclick="test1Sync(1000)" id="btn1s-1k">同步: 1K 公式</button>
+        <button class="btn-secondary" onclick="test1Sync(5000)" id="btn1s-5k">同步: 5K 公式</button>
+        <button class="btn-danger" onclick="test1Sync(10000)" id="btn1s-10k">同步: 10K ⚠️</button>
+      </div>
+      <div id="result1" class="result-box">点击按钮开始测试...</div>
+    </div>
+
+    <!-- 测试 2: 插入行列 -->
+    <div class="test-section">
+      <h2>测试 2: 插入行列（异步处理）</h2>
+      <p>测试在有大量公式的情况下插入行列的性能。</p>
+      <div class="button-group">
+        <button class="btn-primary" onclick="test2(1000, 10)">1K 公式 / 插入 10 行</button>
+        <button class="btn-primary" onclick="test2(10000, 50)">10K 公式 / 插入 50 行</button>
+        <button class="btn-warning" onclick="test2(50000, 100)">50K 公式 / 插入 100 行 ⚡</button>
+      </div>
+      <div id="result2" class="result-box">点击按钮开始测试...</div>
+      <div class="progress-bar" style="margin-top: 15px;">
+        <div id="progress2" class="progress-fill" style="width: 0%">0%</div>
+      </div>
+    </div>
+
+    <!-- 测试 3: 嵌套公式测试 -->
+    <div class="test-section">
+      <h2>测试 3: 嵌套公式计算</h2>
+      <p>测试深度嵌套的公式计算性能，验证递归依赖关系处理是否正确。</p>
+      <div class="button-group">
+        <button class="btn-primary" onclick="test3Nested(10)">10 层嵌套</button>
+        <button class="btn-primary" onclick="test3Nested(50)">50 层嵌套</button>
+        <button class="btn-warning" onclick="test3Nested(100)">100 层嵌套 ⚡</button>
+      </div>
+      <div id="result3" class="result-box">点击按钮开始测试...</div>
+    </div>
+
+    <!-- 测试 4: 混合操作压力测试 -->
+    <div class="test-section">
+      <h2>测试 4: 混合操作压力测试</h2>
+      <p>在计算队列繁忙时进行各种操作，持续测试 UI 响应性。</p>
+      <div class="button-group">
+        <button class="btn-primary" onclick="test4()" id="btn4-start">启动混合压力测试</button>
+        <button class="btn-danger" onclick="stopTest4()" id="btn4-stop" disabled>停止测试</button>
+      </div>
+      <div id="result4" class="result-box">点击按钮开始测试...</div>
+    </div>
+
+    <!-- 测试 5: 性能对比总结 -->
+    <div class="test-section">
+      <h2>测试 5: 全面性能对比</h2>
+      <p>运行一系列标准测试，生成完整的性能对比报告。</p>
+      <div class="button-group">
+        <button class="btn-primary" onclick="test5()" id="btn5-run">运行完整测试套件</button>
+      </div>
+      <div id="result5" class="result-box">点击按钮开始测试...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from './src/lib/SheetModel.js'
+    import { FormulaSheet } from './src/lib/FormulaSheet.js'
+
+    // 系统信息检测
+    function detectSystemInfo() {
+      // 浏览器信息
+      const ua = navigator.userAgent
+      let browserName = 'Unknown'
+      if (ua.includes('Chrome')) browserName = 'Chrome'
+      else if (ua.includes('Safari')) browserName = 'Safari'
+      else if (ua.includes('Firefox')) browserName = 'Firefox'
+      else if (ua.includes('Edge')) browserName = 'Edge'
+      document.getElementById('browserInfo').textContent = browserName
+
+      // CPU 核心数
+      document.getElementById('cpuInfo').textContent = navigator.hardwareConcurrency || 'Unknown'
+
+      // 内存信息（仅部分浏览器支持）
+      if (navigator.deviceMemory) {
+        document.getElementById('memoryInfo').textContent = navigator.deviceMemory + ' GB'
+      } else {
+        document.getElementById('memoryInfo').textContent = 'Unknown'
+      }
+    }
+    detectSystemInfo()
+
+    // FPS 监控
+    let lastFrameTime = performance.now()
+    let frameCount = 0
+    let fps = 60
+    let minFPSGlobal = 60
+    let maxFPSGlobal = 60
+
+    function updateFPS() {
+      frameCount++
+      const now = performance.now()
+      const delta = now - lastFrameTime
+
+      if (delta >= 1000) {
+        fps = Math.round((frameCount * 1000) / delta)
+        document.getElementById('fpsDisplay').textContent = fps + ' FPS'
+        document.getElementById('fpsDisplay').style.color = fps >= 55 ? '#0f0' : fps >= 30 ? '#ff0' : '#f00'
+        
+        if (fps < minFPSGlobal) minFPSGlobal = fps
+        if (fps > maxFPSGlobal) maxFPSGlobal = fps
+        
+        frameCount = 0
+        lastFrameTime = now
+      }
+
+      requestAnimationFrame(updateFPS)
+    }
+    updateFPS()
+
+    // 实时计数器
+    let counter = 0
+    setInterval(() => {
+      counter++
+      document.getElementById('counter').textContent = counter
+    }, 100)
+
+    // 滑块交互测试
+    document.getElementById('slider').addEventListener('input', (e) => {
+      document.getElementById('animBox').style.opacity = e.target.value / 100
+    })
+
+    // 辅助函数：禁用所有测试按钮
+    function disableAllButtons(disabled) {
+      document.querySelectorAll('button').forEach(btn => {
+        if (!btn.id.includes('stop')) {
+          btn.disabled = disabled
+        }
+      })
+    }
+
+    // 测试 1: 异步创建公式
+    window.test1Async = async function(count) {
+      disableAllButtons(true)
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = `⏳ 异步创建 ${count.toLocaleString()} 个公式...\n<span class="highlight">注意观察：UI 应该保持流畅！</span>`
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, true) // 启用异步模式
+
+      const startTime = performance.now()
+      const startFPS = fps
+      let minFPS = fps
+      let maxFPS = fps
+
+      // 监控最低/最高 FPS
+      const fpsMonitor = setInterval(() => {
+        if (fps < minFPS) minFPS = fps
+        if (fps > maxFPS) maxFPS = fps
+      }, 100)
+
+      // 创建公式
+      let progressCount = 0
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 100)
+        const col = i % 100
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+        
+        progressCount++
+        // 每1000个暂停一帧并更新进度
+        if (progressCount % 1000 === 0) {
+          resultDiv.innerHTML = `⏳ 创建进度: ${progressCount.toLocaleString()} / ${count.toLocaleString()} (${(progressCount/count*100).toFixed(1)}%)\n当前 FPS: ${fps}`
+          await new Promise(resolve => requestAnimationFrame(resolve))
+        }
+      }
+
+      const createTime = performance.now() - startTime
+
+      // 等待所有计算完成
+      resultDiv.innerHTML = `⏳ 等待计算完成...\n已创建: ${count.toLocaleString()} 个公式`
+      const calcStart = performance.now()
+      while (sheet.getQueueStats().pending > 0 || sheet.getQueueStats().processing > 0) {
+        const stats = sheet.getQueueStats()
+        resultDiv.innerHTML = `⏳ 计算中...\n待处理: ${stats.pending} | 处理中: ${stats.processing} | 已完成: ${stats.completed}\n当前 FPS: ${fps}`
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      const calcTime = performance.now() - calcStart
+      const totalTime = performance.now() - startTime
+
+      clearInterval(fpsMonitor)
+
+      const result = `
+✅ <strong>异步模式测试完成</strong>
+
+<strong>测试规模：</strong>
+  - 公式数量: ${count.toLocaleString()} 个
+  - 公式类型: 简单运算 (A+B)
+
+<strong>创建性能：</strong>
+  - 创建时间: <span class="metric fast">${createTime.toFixed(2)} ms</span>
+  - 创建速率: ${Math.round(count / (createTime / 1000)).toLocaleString()} 公式/秒
+
+<strong>计算性能：</strong>
+  - 计算时间: <span class="metric ${calcTime < 2000 ? 'fast' : calcTime < 5000 ? 'medium' : 'slow'}">${calcTime.toFixed(2)} ms</span>
+  - 计算速率: ${Math.round(count / (calcTime / 1000)).toLocaleString()} 公式/秒
+  - 总耗时: <span class="metric">${totalTime.toFixed(2)} ms</span>
+
+<strong>队列统计：</strong>
+  - 已完成: ${sheet.getQueueStats().completed}
+  - 失败: ${sheet.getQueueStats().failed}
+
+<strong>UI 流畅度：</strong>
+  - 测试前 FPS: ${startFPS}
+  - 最低 FPS: <span class="metric ${minFPS >= 55 ? 'fast' : minFPS >= 30 ? 'medium' : 'slow'}">${minFPS}</span>
+  - 最高 FPS: <span class="metric fast">${maxFPS}</span>
+  - FPS 评价: ${minFPS >= 55 ? '🎉 UI 非常流畅！' : minFPS >= 30 ? '✅ UI 基本流畅' : '⚠️ UI 有卡顿'}
+
+<strong>性能结论：</strong>
+  ${minFPS >= 55 ? '✅ 异步计算成功避免了 UI 阻塞，用户体验优秀' : minFPS >= 30 ? '✅ 异步处理有效，但可以进一步优化批处理大小' : '⚠️ 需要优化：考虑减小批处理大小或增加帧间隔'}
+`
+      resultDiv.innerHTML = result
+      disableAllButtons(false)
+    }
+
+    // 测试 1: 同步创建公式（对比）
+    window.test1Sync = async function(count) {
+      if (count > 10000) {
+        if (!confirm(`警告：同步创建 ${count.toLocaleString()} 个公式可能导致浏览器卡死！\n建议数量不超过 10000。\n\n确定要继续吗？`)) {
+          return
+        }
+      }
+
+      disableAllButtons(true)
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = `⏳ 同步创建 ${count.toLocaleString()} 个公式...\n<span class="highlight">警告：UI 将会冻结！</span>`
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, false) // 禁用异步模式
+
+      const startTime = performance.now()
+      const startFPS = fps
+      let minFPS = fps
+
+      const fpsMonitor = setInterval(() => {
+        if (fps < minFPS) minFPS = fps
+      }, 100)
+
+      // 创建并同步计算公式（这会阻塞主线程）
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 100)
+        const col = i % 100
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+        sheet.getValueSync(row, col) // 强制同步计算
+      }
+
+      const totalTime = performance.now() - startTime
+      clearInterval(fpsMonitor)
+
+      const result = `
+✅ <strong>同步模式测试完成</strong>
+
+<strong>测试规模：</strong>
+  - 公式数量: ${count.toLocaleString()} 个
+  - 公式类型: 简单运算 (A+B)
+
+<strong>总体性能：</strong>
+  - 总时间: <span class="metric ${totalTime < 1000 ? 'fast' : totalTime < 5000 ? 'medium' : 'slow'}">${totalTime.toFixed(2)} ms</span>
+  - 速率: ${Math.round(count / (totalTime / 1000)).toLocaleString()} 公式/秒
+
+<strong>UI 流畅度：</strong>
+  - 测试前 FPS: ${startFPS}
+  - 最低 FPS: <span class="metric ${minFPS >= 55 ? 'fast' : minFPS >= 30 ? 'medium' : 'slow'}">${minFPS}</span>
+  - FPS 下降: <span class="metric ${startFPS - minFPS < 10 ? 'fast' : startFPS - minFPS < 30 ? 'medium' : 'slow'}">${startFPS - minFPS}</span>
+
+<strong>阻塞时长：</strong>
+  - 估算阻塞: <span class="metric slow">~${totalTime.toFixed(0)} ms</span>
+  - 用户体验: ${minFPS >= 55 ? '✅ 意外良好（数据量小）' : minFPS >= 30 ? '⚠️ 明显卡顿' : '❌ 完全冻结'}
+
+<strong>性能结论：</strong>
+  ${minFPS < 30 ? '❌ 同步计算严重阻塞主线程，不适合生产环境' : minFPS < 55 ? '⚠️ 同步模式会影响用户体验，建议使用异步' : '✅ 小规模数据下同步模式可接受'}
+`
+      resultDiv.innerHTML = result
+      disableAllButtons(false)
+    }
+
+    // 测试 2: 插入行列
+    window.test2 = async function(formulaCount, insertCount) {
+      const resultDiv = document.getElementById('result2')
+      const progressBar = document.getElementById('progress2')
+      resultDiv.innerHTML = '⏳ 初始化测试...'
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, true)
+
+      // 创建公式
+      resultDiv.innerHTML = `⏳ 创建 ${formulaCount.toLocaleString()} 个公式...`
+      for (let i = 0; i < formulaCount; i++) {
+        const row = Math.floor(i / 100)
+        const col = i % 100
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+        
+        if ((i + 1) % 1000 === 0) {
+          await new Promise(resolve => requestAnimationFrame(resolve))
+          progressBar.style.width = ((i + 1) / formulaCount * 50) + '%'
+          progressBar.textContent = Math.round((i + 1) / formulaCount * 50) + '%'
+        }
+      }
+
+      // 等待计算完成
+      while (sheet.getQueueStats().pending > 0 || sheet.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+
+      resultDiv.innerHTML = `⏳ 插入 ${insertCount} 行...\n<span class="highlight">注意观察 FPS！</span>`
+      
+      const startTime = performance.now()
+      const startFPS = fps
+      let minFPS = fps
+
+      const fpsMonitor = setInterval(() => {
+        if (fps < minFPS) minFPS = fps
+      }, 100)
+
+      // 插入行
+      for (let i = 0; i < insertCount; i++) {
+        await sheet.adjustAllFormulasAsync('insertRow', 0, 1, (current, total) => {
+          const progress = 50 + (current / total * 50)
+          progressBar.style.width = progress + '%'
+          progressBar.textContent = Math.round(progress) + '%'
+        })
+      }
+
+      const insertTime = performance.now() - startTime
+      clearInterval(fpsMonitor)
+
+      progressBar.style.width = '100%'
+      progressBar.textContent = '100%'
+
+      const result = `
+✅ <strong>插入行测试完成</strong>
+
+<strong>测试规模：</strong>
+  - 公式数量: ${formulaCount.toLocaleString()} 个
+  - 插入行数: ${insertCount}
+
+<strong>性能表现：</strong>
+  - 插入时间: <span class="metric ${insertTime < 5000 ? 'fast' : 'medium'}">${insertTime.toFixed(2)} ms</span>
+  - 平均时间: ${(insertTime / insertCount).toFixed(2)} ms/行
+
+<strong>UI 流畅度：</strong>
+  - 最低 FPS: <span class="metric ${minFPS >= 55 ? 'fast' : minFPS >= 30 ? 'medium' : 'slow'}">${minFPS}</span>
+  - ${minFPS >= 55 ? '🎉 UI 完全流畅！' : minFPS >= 30 ? '✅ UI 基本流畅' : '⚠️ UI 有卡顿'}
+
+<strong>结论：</strong>
+${minFPS >= 30 ? '✅ 异步处理成功避免了 UI 阻塞' : '⚠️ 需要优化批处理策略'}
+`
+      resultDiv.innerHTML = result
+    }
+
+    // 测试 3: 嵌套公式测试
+    window.test3Nested = async function(depth) {
+      disableAllButtons(true)
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = `⏳ 创建 ${depth} 层嵌套公式...\n<span class="highlight">验证递归依赖计算</span>`
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, true)
+
+      const startTime = performance.now()
+      const startFPS = fps
+      let minFPS = fps
+
+      const fpsMonitor = setInterval(() => {
+        if (fps < minFPS) minFPS = fps
+      }, 100)
+
+      // 构建嵌套公式链
+      // A1 = 1, B1 = 2
+      // A2 = A1+1, B2 = A2+B1
+      // A3 = A2+1, B3 = A3+B2
+      // ...
+      sheet.setValue(0, 0, '1')
+      sheet.setValue(0, 1, '2')
+
+      for (let i = 1; i <= depth; i++) {
+        sheet.setValue(i, 0, `=A${i}+1`)
+        sheet.setValue(i, 1, `=A${i + 1}+B${i}`)
+        
+        if (i % 10 === 0) {
+          resultDiv.innerHTML = `⏳ 构建嵌套公式: ${i} / ${depth}\n当前 FPS: ${fps}`
+          await new Promise(resolve => requestAnimationFrame(resolve))
+        }
+      }
+
+      const buildTime = performance.now() - startTime
+
+      // 等待所有计算完成
+      resultDiv.innerHTML = `⏳ 等待嵌套计算完成...\n深度: ${depth} 层`
+      const calcStart = performance.now()
+      while (sheet.getQueueStats().pending > 0 || sheet.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      const calcTime = performance.now() - calcStart
+
+      // 验证最深层的结果
+      const deepestValue = sheet.getValueSync(depth, 1)
+
+      clearInterval(fpsMonitor)
+
+      const result = `
+✅ <strong>嵌套公式测试完成</strong>
+
+<strong>测试规模：</strong>
+  - 嵌套深度: ${depth} 层
+  - 公式数量: ${depth * 2 + 2} 个
+  - 最长依赖链: ${depth + 1} 级
+
+<strong>构建性能：</strong>
+  - 构建时间: <span class="metric fast">${buildTime.toFixed(2)} ms</span>
+  - 平均时间: ${(buildTime / depth).toFixed(2)} ms/层
+
+<strong>计算性能：</strong>
+  - 计算时间: <span class="metric ${calcTime < 500 ? 'fast' : calcTime < 2000 ? 'medium' : 'slow'}">${calcTime.toFixed(2)} ms</span>
+  - 递归深度: ${depth}
+  - 最深层结果: ${deepestValue}
+
+<strong>UI 流畅度：</strong>
+  - 最低 FPS: <span class="metric ${minFPS >= 55 ? 'fast' : minFPS >= 30 ? 'medium' : 'slow'}">${minFPS}</span>
+
+<strong>嵌套计算结论：</strong>
+  ${typeof deepestValue === 'number' ? '✅ 递归依赖计算正确' : '❌ 嵌套计算出现错误'}
+  ${minFPS >= 55 ? '\n✅ UI 流畅度优秀' : minFPS >= 30 ? '\n✅ UI 基本流畅' : '\n⚠️ UI 有卡顿'}
+`
+      resultDiv.innerHTML = result
+      disableAllButtons(false)
+    }
+
+    // 测试 4: 混合压力测试
+    let test4Running = false
+
+    window.test4 = async function() {
+      if (test4Running) return
+
+      test4Running = true
+      disableAllButtons(true)
+      document.getElementById('btn4-stop').disabled = false
+      
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 启动混合压力测试...'
+
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, true)
+
+      const startTime = performance.now()
+      let operationCount = 0
+      let minFPS = fps
+
+      const fpsMonitor = setInterval(() => {
+        if (fps < minFPS) minFPS = fps
+      }, 100)
+
+      while (test4Running && operationCount < 10000) {
+        const row = Math.floor(Math.random() * 100)
+        const col = Math.floor(Math.random() * 100)
+        const operation = Math.random()
+
+        if (operation < 0.5) {
+          sheet.setValue(row, col, `=A${row + 1}+B${col + 1}`)
+        } else if (operation < 0.8) {
+          sheet.getValue(row, col)
+        } else {
+          sheet.setValue(row, col, '')
+        }
+
+        operationCount++
+
+        if (operationCount % 100 === 0) {
+          const stats = sheet.getQueueStats()
+          const elapsed = (performance.now() - startTime) / 1000
+          resultDiv.innerHTML = `
+🔄 <strong>混合压力测试进行中...</strong>
+
+<strong>操作统计：</strong>
+  - 已执行: ${operationCount.toLocaleString()} 次操作
+  - 运行时间: ${elapsed.toFixed(1)} 秒
+  - 操作速率: ${Math.round(operationCount / elapsed).toLocaleString()} 次/秒
+
+<strong>队列状态：</strong>
+  - 待处理: ${stats.pending} | 处理中: ${stats.processing}
+  - 已完成: ${stats.completed} | 失败: ${stats.failed}
+
+<strong>当前 FPS：</strong> <span class="fps-meter">${fps}</span> (最低: ${minFPS})
+
+<span class="highlight">尝试拖动上方的滑块，测试UI响应性！</span>
+`
+          await new Promise(resolve => requestAnimationFrame(resolve))
+        }
+      }
+
+      const totalTime = (performance.now() - startTime) / 1000
+      clearInterval(fpsMonitor)
+      test4Running = false
+
+      resultDiv.innerHTML = `
+✅ <strong>混合压力测试完成</strong>
+
+<strong>测试结果：</strong>
+  - 总操作数: ${operationCount.toLocaleString()}
+  - 运行时间: ${totalTime.toFixed(2)} 秒
+  - 平均速率: ${Math.round(operationCount / totalTime).toLocaleString()} 操作/秒
+  - 队列完成: ${sheet.getQueueStats().completed.toLocaleString()} 个任务
+
+<strong>UI 流畅度：</strong>
+  - 最低 FPS: <span class="metric ${minFPS >= 55 ? 'fast' : minFPS >= 30 ? 'medium' : 'slow'}">${minFPS}</span>
+
+<strong>压力测试结论：</strong>
+${minFPS >= 55 ? '🎉 在高负载下 UI 依然流畅！' : minFPS >= 30 ? '✅ UI 基本保持响应' : '⚠️ 高负载对 UI 有明显影响'}
+`
+      disableAllButtons(false)
+      document.getElementById('btn4-stop').disabled = true
+    }
+
+    window.stopTest4 = function() {
+      test4Running = false
+    }
+
+    // 测试 5: 完整测试套件
+    window.test5 = async function() {
+      disableAllButtons(true)
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 运行完整测试套件...\n这可能需要几分钟时间'
+
+      const results = []
+
+      // 测试 1: 小规模异步
+      resultDiv.innerHTML += '\n\n📝 测试 1/6: 小规模异步 (1K)...'
+      const t1Start = performance.now()
+      const model1 = new SheetModel()
+      const sheet1 = new FormulaSheet(model1, true)
+      for (let i = 0; i < 1000; i++) {
+        sheet1.setValue(Math.floor(i / 100), i % 100, `=A${i + 1}+B${i + 1}`)
+      }
+      while (sheet1.getQueueStats().pending > 0 || sheet1.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      const t1Time = performance.now() - t1Start
+      results.push({ name: '1K 异步', time: t1Time, rate: Math.round(1000 / (t1Time / 1000)) })
+
+      // 测试 2: 中规模异步
+      resultDiv.innerHTML += '\n📝 测试 2/6: 中规模异步 (10K)...'
+      const t2Start = performance.now()
+      const model2 = new SheetModel()
+      const sheet2 = new FormulaSheet(model2, true)
+      for (let i = 0; i < 10000; i++) {
+        sheet2.setValue(Math.floor(i / 100), i % 100, `=A${i + 1}+B${i + 1}`)
+        if ((i + 1) % 1000 === 0) await new Promise(resolve => requestAnimationFrame(resolve))
+      }
+      while (sheet2.getQueueStats().pending > 0 || sheet2.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      const t2Time = performance.now() - t2Start
+      results.push({ name: '10K 异步', time: t2Time, rate: Math.round(10000 / (t2Time / 1000)) })
+
+      // 测试 3: 小规模同步（对比）
+      resultDiv.innerHTML += '\n📝 测试 3/6: 小规模同步 (1K)...'
+      const t3Start = performance.now()
+      const model3 = new SheetModel()
+      const sheet3 = new FormulaSheet(model3, false)
+      for (let i = 0; i < 1000; i++) {
+        sheet3.setValue(Math.floor(i / 100), i % 100, `=A${i + 1}+B${i + 1}`)
+        sheet3.getValueSync(Math.floor(i / 100), i % 100)
+      }
+      const t3Time = performance.now() - t3Start
+      results.push({ name: '1K 同步', time: t3Time, rate: Math.round(1000 / (t3Time / 1000)) })
+
+      // 测试 4: 嵌套公式
+      resultDiv.innerHTML += '\n📝 测试 4/6: 嵌套公式 (50层)...'
+      const t4Start = performance.now()
+      const model4 = new SheetModel()
+      const sheet4 = new FormulaSheet(model4, true)
+      sheet4.setValue(0, 0, '1')
+      sheet4.setValue(0, 1, '2')
+      for (let i = 1; i <= 50; i++) {
+        sheet4.setValue(i, 0, `=A${i}+1`)
+        sheet4.setValue(i, 1, `=A${i + 1}+B${i}`)
+      }
+      while (sheet4.getQueueStats().pending > 0 || sheet4.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      const t4Time = performance.now() - t4Start
+      results.push({ name: '50层嵌套', time: t4Time, rate: Math.round(100 / (t4Time / 1000)) })
+
+      // 测试 5: 行列调整
+      resultDiv.innerHTML += '\n📝 测试 5/6: 行列调整 (1K公式/10行)...'
+      const t5Start = performance.now()
+      const model5 = new SheetModel()
+      const sheet5 = new FormulaSheet(model5, true)
+      for (let i = 0; i < 1000; i++) {
+        sheet5.setValue(Math.floor(i / 100), i % 100, `=A${i + 1}+B${i + 1}`)
+      }
+      while (sheet5.getQueueStats().pending > 0 || sheet5.getQueueStats().processing > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      const adjustStart = performance.now()
+      for (let i = 0; i < 10; i++) {
+        await sheet5.adjustAllFormulasAsync('insertRow', 0, 1)
+      }
+      const t5Time = performance.now() - adjustStart
+      results.push({ name: '插入10行', time: t5Time, rate: Math.round(10 / (t5Time / 1000)) })
+
+      // 测试 6: 混合操作
+      resultDiv.innerHTML += '\n📝 测试 6/6: 混合操作 (1000次)...'
+      const t6Start = performance.now()
+      const model6 = new SheetModel()
+      const sheet6 = new FormulaSheet(model6, true)
+      for (let i = 0; i < 1000; i++) {
+        const row = Math.floor(Math.random() * 50)
+        const col = Math.floor(Math.random() * 50)
+        if (Math.random() < 0.7) {
+          sheet6.setValue(row, col, `=A${row + 1}+B${col + 1}`)
+        } else {
+          sheet6.getValue(row, col)
+        }
+        if ((i + 1) % 100 === 0) await new Promise(resolve => requestAnimationFrame(resolve))
+      }
+      const t6Time = performance.now() - t6Start
+      results.push({ name: '混合1000次', time: t6Time, rate: Math.round(1000 / (t6Time / 1000)) })
+
+      // 生成对比报告
+      const totalTime = results.reduce((sum, r) => sum + r.time, 0)
+      const avgRate = Math.round(results.reduce((sum, r) => sum + r.rate, 0) / results.length)
+
+      let tableHTML = '<table class="comparison-table"><thead><tr><th>测试项</th><th>耗时 (ms)</th><th>速率</th><th>评级</th></tr></thead><tbody>'
+      results.forEach(r => {
+        const rating = r.time < 1000 ? '🚀 优秀' : r.time < 3000 ? '✅ 良好' : '⚠️ 一般'
+        tableHTML += `<tr><td>${r.name}</td><td>${r.time.toFixed(2)}</td><td>${r.rate.toLocaleString()}/秒</td><td>${rating}</td></tr>`
+      })
+      tableHTML += '</tbody></table>'
+
+      resultDiv.innerHTML = `
+✅ <strong>完整测试套件完成</strong>
+
+<strong>测试汇总：</strong>
+  - 测试项数: 6 项
+  - 总耗时: <span class="metric">${totalTime.toFixed(2)} ms (${(totalTime / 1000).toFixed(2)}秒)</span>
+  - 平均速率: <span class="metric fast">${avgRate.toLocaleString()} 操作/秒</span>
+
+<strong>详细结果：</strong>
+${tableHTML}
+
+<strong>性能对比分析：</strong>
+  - 异步 vs 同步 (1K): ${((results[2].time - results[0].time) / results[2].time * 100).toFixed(1)}% 时间差异
+  - 10K vs 1K 扩展性: ${(results[1].time / results[0].time / 10).toFixed(2)}x (理想为 1.0x)
+  - 嵌套公式效率: ${results[3].rate} 公式/秒
+  - 行列调整速度: ${(results[4].time / 10).toFixed(2)} ms/行
+
+<strong>总体评价：</strong>
+  ${avgRate > 1000 ? '🎉 性能优秀，完全满足生产环境需求' : avgRate > 500 ? '✅ 性能良好，适合中等规模应用' : '⚠️ 性能一般，建议优化'}
+
+<strong>系统信息：</strong>
+  - 浏览器: ${document.getElementById('browserInfo').textContent}
+  - CPU: ${document.getElementById('cpuInfo').textContent} 核心
+  - 全局 FPS 范围: ${minFPSGlobal} - ${maxFPSGlobal}
+`
+      disableAllButtons(false)
+    }
+
+    // 导出到全局作用域，以便 HTML 可以调用
+    window.SheetModel = SheetModel
+    window.FormulaSheet = FormulaSheet
+  </script>
+</body>
+</html>

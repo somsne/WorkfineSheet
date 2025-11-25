@@ -58,6 +58,18 @@
       @confirm="onInputDialogConfirm"
       @cancel="inputDialog.visible = false"
     />
+    <!-- 计算进度指示器 -->
+    <div v-if="calculationProgress.visible" class="calculation-progress">
+      <div class="progress-content">
+        <span class="progress-icon">···</span>
+        <span class="progress-text">
+          正在计算: {{ calculationProgress.pending + calculationProgress.processing }} 个公式
+        </span>
+        <span v-if="calculationProgress.completed > 0" class="progress-detail">
+          (已完成 {{ calculationProgress.completed }})
+        </span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -77,8 +89,8 @@ const ROW_HEIGHT = 26
 const COL_WIDTH = 100
 const ROW_HEADER_WIDTH = 40
 const COL_HEADER_HEIGHT = 26
-const DEFAULT_ROWS = 1000
-const DEFAULT_COLS = 50
+const DEFAULT_ROWS = 50
+const DEFAULT_COLS = 30
 const RESIZE_HANDLE_SIZE = 4 // 拖动调整的检测区域（分隔线两侧各2px）
 
 const container = ref<HTMLElement | null>(null)
@@ -106,26 +118,54 @@ const hoverState = reactive({
 })
 
 const model = new SheetModel()
-const formulaSheet = new FormulaSheet(model)
+const formulaSheet = new FormulaSheet(model, true) // 启用异步计算
 const undoRedo = new UndoRedoManager(100)
 
-// Initialize with sample data
-model.setValue(0, 0, 'Item')
-model.setValue(0, 1, 'Q1')
-model.setValue(0, 2, 'Q2')
-model.setValue(0, 3, 'Total')
-model.setValue(1, 0, 'Sales')
-model.setValue(1, 1, '100')
-model.setValue(1, 2, '150')
-model.setValue(1, 3, '=B2+C2')  // Formula: 250
-model.setValue(2, 0, 'Profit')
-model.setValue(2, 1, '20')
-model.setValue(2, 2, '30')
-model.setValue(2, 3, '=B3+C3')  // Formula: 50
-model.setValue(3, 0, 'Margin')
-model.setValue(3, 1, '=B3/B2*100')  // Formula: 20
-model.setValue(3, 2, '=C3/C2*100')  // Formula: 20
-model.setValue(3, 3, '=D3/D2*100')  // Formula: depends on D2, D3
+// 计算进度状态
+const calculationProgress = reactive({
+  visible: false,
+  pending: 0,
+  processing: 0,
+  completed: 0,
+  failed: 0
+})
+
+// 监听计算队列状态
+formulaSheet.onQueueStats((stats) => {
+  calculationProgress.pending = stats.pending
+  calculationProgress.processing = stats.processing
+  calculationProgress.completed = stats.completed
+  calculationProgress.failed = stats.failed
+  calculationProgress.visible = stats.pending > 0 || stats.processing > 0
+})
+
+// 监听单元格状态变化，触发重绘
+formulaSheet.onCellStateChange((_row, _col, state) => {
+  if (state.state === 'completed' || state.state === 'error') {
+    // 计算完成，触发重绘
+    requestAnimationFrame(() => {
+      draw()
+    })
+  }
+})
+
+// Initialize with sample data - 使用 formulaSheet.setValue 以支持公式元数据
+formulaSheet.setValue(0, 0, 'Item')
+formulaSheet.setValue(0, 1, 'Q1')
+formulaSheet.setValue(0, 2, 'Q2')
+formulaSheet.setValue(0, 3, 'Total')
+formulaSheet.setValue(1, 0, 'Sales')
+formulaSheet.setValue(1, 1, '100')
+formulaSheet.setValue(1, 2, '150')
+formulaSheet.setValue(1, 3, '=B2+C2')  // Formula: 250
+formulaSheet.setValue(2, 0, 'Profit')
+formulaSheet.setValue(2, 1, '20')
+formulaSheet.setValue(2, 2, '30')
+formulaSheet.setValue(2, 3, '=B3+C3')  // Formula: 50
+formulaSheet.setValue(3, 0, 'Margin')
+formulaSheet.setValue(3, 1, '=B3/B2*100')  // Formula: 20
+formulaSheet.setValue(3, 2, '=C3/C2*100')  // Formula: 20
+formulaSheet.setValue(3, 3, '=D3/D2*100')  // Formula: depends on D2, D3
 
 const overlay = reactive({
   visible: false,
@@ -906,12 +946,6 @@ function drawCells(w: number, h: number) {
 
   // highlight selection range (fill with light blue)
   if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
-    console.log('draw() - 绘制选择范围:', {
-      startRow: selectionRange.startRow,
-      startCol: selectionRange.startCol,
-      endRow: selectionRange.endRow,
-      endCol: selectionRange.endCol
-    })
     ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
     for (let r = selectionRange.startRow; r <= selectionRange.endRow; r++) {
       const sy = COL_HEADER_HEIGHT + getRowTop(r) - viewport.scrollTop
@@ -931,7 +965,6 @@ function drawCells(w: number, h: number) {
     const sy = COL_HEADER_HEIGHT + getRowTop(selectionRange.startRow) - viewport.scrollTop
     const ex = ROW_HEADER_WIDTH + getColLeft(selectionRange.endCol + 1) - viewport.scrollLeft
     const ey = COL_HEADER_HEIGHT + getRowTop(selectionRange.endRow + 1) - viewport.scrollTop
-    console.log('draw() - 绘制选择范围边框:', { sx, sy, ex, ey, width: ex - sx, height: ey - sy })
     ctx.strokeStyle = '#3b82f6'
     ctx.lineWidth = 2
     ctx.strokeRect(sx + 0.5, sy + 0.5, ex - sx - 1, ey - sy - 1)
@@ -1016,7 +1049,6 @@ function onClick(e: MouseEvent) {
   
   // 如果刚完成拖动，忽略 click 事件
   if (dragState.justFinishedDrag) {
-    console.log('onClick - 忽略（刚完成拖动）')
     dragState.justFinishedDrag = false
     return
   }
@@ -1117,14 +1149,6 @@ function onMouseDown(e: MouseEvent) {
     dragState.currentRow = row
     dragState.currentCol = DEFAULT_COLS - 1
     
-    console.log('onMouseDown - 初始化行选择:', {
-      row,
-      startRow: dragState.startRow,
-      startCol: dragState.startCol,
-      currentRow: dragState.currentRow,
-      currentCol: dragState.currentCol
-    })
-    
     selected.row = row
     selected.col = 0
     selectionRange.startRow = row
@@ -1164,14 +1188,6 @@ function onMouseDown(e: MouseEvent) {
     dragState.startCol = col
     dragState.currentRow = DEFAULT_ROWS - 1
     dragState.currentCol = col
-    
-    console.log('onMouseDown - 初始化列选择:', {
-      col,
-      startRow: dragState.startRow,
-      startCol: dragState.startCol,
-      currentRow: dragState.currentRow,
-      currentCol: dragState.currentCol
-    })
     
     selected.row = 0
     selected.col = col
@@ -1600,7 +1616,6 @@ function onMouseMove(e: MouseEvent) {
       selectionRange.startCol = 0
       selectionRange.endRow = Math.max(dragState.startRow, dragState.currentRow)
       selectionRange.endCol = DEFAULT_COLS - 1
-      console.log('onMouseMove - 行拖动:', { row, startRow: dragState.startRow, currentRow: dragState.currentRow })
       scheduleRedraw()
     }
     return
@@ -1617,7 +1632,6 @@ function onMouseMove(e: MouseEvent) {
       selectionRange.startCol = Math.min(dragState.startCol, dragState.currentCol)
       selectionRange.endRow = DEFAULT_ROWS - 1
       selectionRange.endCol = Math.max(dragState.startCol, dragState.currentCol)
-      console.log('onMouseMove - 列拖动:', { col, startCol: dragState.startCol, currentCol: dragState.currentCol })
       scheduleRedraw()
     }
     return
@@ -1659,25 +1673,6 @@ function onMouseUp(): void {
   const isRowDrag = (dragState.startCol === 0 && dragState.currentCol === DEFAULT_COLS - 1)
   const isColDrag = (dragState.startRow === 0 && dragState.currentRow === DEFAULT_ROWS - 1)
 
-  console.log('onMouseUp - dragState:', {
-    startRow: dragState.startRow,
-    startCol: dragState.startCol,
-    currentRow: dragState.currentRow,
-    currentCol: dragState.currentCol,
-    isRowDrag,
-    isColDrag
-  })
-  console.log('onMouseUp - selectionRange:', {
-    startRow: selectionRange.startRow,
-    startCol: selectionRange.startCol,
-    endRow: selectionRange.endRow,
-    endCol: selectionRange.endCol
-  })
-  console.log('onMouseUp - selected:', {
-    row: selected.row,
-    col: selected.col
-  })
-
   // 检测是否真正拖动了（不是单纯的点击）
   const hasDragged = (dragState.startRow !== dragState.currentRow || dragState.startCol !== dragState.currentCol)
   
@@ -1685,7 +1680,6 @@ function onMouseUp(): void {
 
   // 如果是行列拖动，保持选择范围不变（已经在 onMouseMove 中设置好了）
   if (isRowDrag || isColDrag) {
-    console.log('行列拖动完成，保持选择范围')
     // 清空单选状态，避免覆盖范围选择的显示
     selected.row = -1
     selected.col = -1
@@ -1994,34 +1988,38 @@ function onContextMenu(e: MouseEvent) {
 }
 
 // 行操作
-function insertRowAbove(row: number) {
+async function insertRowAbove(row: number) {
   console.log('在行', row, '上方插入行')
   
-  // 获取底层模型
-  const model = formulaSheet.getModel()
+  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
+  // 这一步必须在移动非公式单元格之前，因为需要读取原始的元数据
+  await formulaSheet.adjustAllFormulasAsync('insertRow', row, 1)
   
-  // 收集需要移动的单元格数据
-  const cellsToMove: Array<{ row: number; col: number; value: string }> = []
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
   model.forEach((r, c, cell) => {
-    if (r >= row) {
-      cellsToMove.push({ row: r, col: c, value: cell.value })
+    // 只处理非公式单元格，且位置在插入行之前（还未移动）
+    if (r >= row && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ 
+        row: r, 
+        col: c, 
+        value: cell.value
+      })
     }
   })
   
   // 按行号从大到小排序，避免覆盖
-  cellsToMove.sort((a, b) => b.row - a.row)
+  nonFormulaCellsToMove.sort((a, b) => b.row - a.row)
   
-  // 将数据移到新位置（行号+1），从后往前移动
-  cellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r + 1, c, value)
+  // 步骤3: 移动非公式单元格
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')  // 清空旧位置
+    model.setValue(r + 1, c, value)  // 设置到新位置
   })
   
-  // 清空插入的新行
-  for (let c = 0; c < DEFAULT_COLS; c++) {
-    model.setValue(row, c, '')
-  }
-  
-  // 移动自定义行高
+  // 步骤4: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   rowHeights.value.forEach((height, r) => {
     if (r >= row) {
@@ -2031,9 +2029,6 @@ function insertRowAbove(row: number) {
     }
   })
   rowHeights.value = newRowHeights
-  
-  // 清空公式缓存，确保重新计算
-  formulaSheet.clearFormulaCache()
   
   // 重新绘制
   draw()
@@ -2045,36 +2040,45 @@ function insertRowBelow(row: number) {
   insertRowAbove(row + 1)
 }
 
-function deleteRow(row: number) {
+async function deleteRow(row: number) {
   console.log('删除行', row)
   
-  // 获取底层模型
-  const model = formulaSheet.getModel()
+  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
+  await formulaSheet.adjustAllFormulasAsync('deleteRow', row, 1)
   
-  // 收集需要移动的单元格数据
-  const cellsToMove: Array<{ row: number; col: number; value: string }> = []
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
   model.forEach((r, c, cell) => {
-    if (r > row) {
-      cellsToMove.push({ row: r, col: c, value: cell.value })
+    // 只处理非公式单元格
+    if (r > row && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ 
+        row: r, 
+        col: c, 
+        value: cell.value
+      })
     }
   })
   
   // 按行号从小到大排序，从前往后移动
-  cellsToMove.sort((a, b) => a.row - b.row)
+  nonFormulaCellsToMove.sort((a, b) => a.row - b.row)
   
-  // 先清空被删除的行
+  // 步骤3: 清空被删除的行（非公式单元格）
   for (let c = 0; c < DEFAULT_COLS; c++) {
-    model.setValue(row, c, '')
+    const cell = model.getCell(row, c)
+    if (cell && !cell.formulaMetadata) {
+      model.setValue(row, c, '')
+    }
   }
   
-  // 将数据移到新位置（行号-1），从前往后移动
-  cellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r - 1, c, value)
-    // 清空原位置
-    model.setValue(r, c, '')
+  // 步骤4: 移动非公式单元格
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')  // 清空旧位置
+    model.setValue(r - 1, c, value)  // 设置到新位置
   })
   
-  // 移动自定义行高
+  // 步骤5: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   rowHeights.value.forEach((height, r) => {
     if (r < row) {
@@ -2082,19 +2086,15 @@ function deleteRow(row: number) {
     } else if (r > row) {
       newRowHeights.set(r - 1, height)
     }
-    // r === row 的行高被删除，不添加到新map中
   })
   rowHeights.value = newRowHeights
   
-  // 调整选择范围
+  // 步骤6: 调整选择范围
   if (selected.row === row) {
     selected.row = Math.max(0, row - 1)
   } else if (selected.row > row) {
     selected.row--
   }
-  
-  // 清空公式缓存，确保重新计算
-  formulaSheet.clearFormulaCache()
   
   // 重新绘制
   draw()
@@ -2116,34 +2116,37 @@ function showSetRowHeightDialog(row: number) {
 }
 
 // 列操作
-function insertColLeft(col: number) {
+async function insertColLeft(col: number) {
   console.log('在列', col, '左侧插入列')
   
-  // 获取底层模型
-  const model = formulaSheet.getModel()
+  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
+  await formulaSheet.adjustAllFormulasAsync('insertCol', col, 1)
   
-  // 收集需要移动的单元格数据
-  const cellsToMove: Array<{ row: number; col: number; value: string }> = []
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
   model.forEach((r, c, cell) => {
-    if (c >= col) {
-      cellsToMove.push({ row: r, col: c, value: cell.value })
+    // 只处理非公式单元格
+    if (c >= col && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ 
+        row: r, 
+        col: c, 
+        value: cell.value
+      })
     }
   })
   
   // 按列号从大到小排序，避免覆盖
-  cellsToMove.sort((a, b) => b.col - a.col)
+  nonFormulaCellsToMove.sort((a, b) => b.col - a.col)
   
-  // 将数据移到新位置（列号+1），从右往左移动
-  cellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c + 1, value)
+  // 步骤3: 移动非公式单元格
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')  // 清空旧位置
+    model.setValue(r, c + 1, value)  // 设置到新位置
   })
   
-  // 清空插入的新列
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    model.setValue(r, col, '')
-  }
-  
-  // 移动自定义列宽
+  // 步骤4: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   colWidths.value.forEach((width, c) => {
     if (c >= col) {
@@ -2153,9 +2156,6 @@ function insertColLeft(col: number) {
     }
   })
   colWidths.value = newColWidths
-  
-  // 清空公式缓存，确保重新计算
-  formulaSheet.clearFormulaCache()
   
   // 重新绘制
   draw()
@@ -2167,36 +2167,45 @@ function insertColRight(col: number) {
   insertColLeft(col + 1)
 }
 
-function deleteCol(col: number) {
+async function deleteCol(col: number) {
   console.log('删除列', col)
   
-  // 获取底层模型
-  const model = formulaSheet.getModel()
+  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
+  await formulaSheet.adjustAllFormulasAsync('deleteCol', col, 1)
   
-  // 收集需要移动的单元格数据
-  const cellsToMove: Array<{ row: number; col: number; value: string }> = []
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
   model.forEach((r, c, cell) => {
-    if (c > col) {
-      cellsToMove.push({ row: r, col: c, value: cell.value })
+    // 只处理非公式单元格
+    if (c > col && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ 
+        row: r, 
+        col: c, 
+        value: cell.value
+      })
     }
   })
   
   // 按列号从小到大排序，从左往右移动
-  cellsToMove.sort((a, b) => a.col - b.col)
+  nonFormulaCellsToMove.sort((a, b) => a.col - b.col)
   
-  // 先清空被删除的列
+  // 步骤3: 清空被删除的列（非公式单元格）
   for (let r = 0; r < DEFAULT_ROWS; r++) {
-    model.setValue(r, col, '')
+    const cell = model.getCell(r, col)
+    if (cell && !cell.formulaMetadata) {
+      model.setValue(r, col, '')
+    }
   }
   
-  // 将数据移到新位置（列号-1），从左往右移动
-  cellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c - 1, value)
-    // 清空原位置
-    model.setValue(r, c, '')
+  // 步骤4: 移动非公式单元格
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')  // 清空旧位置
+    model.setValue(r, c - 1, value)  // 设置到新位置
   })
   
-  // 移动自定义列宽
+  // 步骤5: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   colWidths.value.forEach((width, c) => {
     if (c < col) {
@@ -2204,19 +2213,15 @@ function deleteCol(col: number) {
     } else if (c > col) {
       newColWidths.set(c - 1, width)
     }
-    // c === col 的列宽被删除，不添加到新map中
   })
   colWidths.value = newColWidths
   
-  // 调整选择范围
+  // 步骤6: 调整选择范围
   if (selected.col === col) {
     selected.col = Math.max(0, col - 1)
   } else if (selected.col > col) {
     selected.col--
   }
-  
-  // 清空公式缓存，确保重新计算
-  formulaSheet.clearFormulaCache()
   
   // 重新绘制
   draw()
@@ -2375,5 +2380,61 @@ function onGlobalMouseUp() {
 
 .content-canvas {
   z-index: 20;
+}
+
+/* 计算进度指示器 */
+.calculation-progress {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 8px 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.progress-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #333;
+}
+
+.progress-icon {
+  font-size: 16px;
+  animation: rotate 1.5s linear infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-text {
+  font-weight: 500;
+}
+
+.progress-detail {
+  color: #666;
+  font-size: 12px;
 }
 </style>
