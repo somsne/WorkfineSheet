@@ -13,6 +13,8 @@
       :width="overlay.width"
       :height="overlay.height"
       :mode="overlay.mode"
+      :cell-style="model.getCellStyle(overlay.row, overlay.col)"
+      :formula-references="formulaReferences"
       @save="onOverlaySave"
       @cancel="onOverlayCancel"
       @input-change="updateFormulaReferences"
@@ -130,6 +132,7 @@ import { createEventManager, type EventHandlers } from './sheet/events'
 import { SheetModel } from '../lib/SheetModel'
 import { UndoRedoManager } from '../lib/UndoRedoManager'
 import { FormulaSheet } from '../lib/FormulaSheet'
+import { initializeDemoData } from '../lib/demoData'
 
 // Internal clipboard cell interface
 interface InternalClipboardCell {
@@ -227,23 +230,8 @@ formulaSheet.onCellStateChange((_row, _col, state) => {
   }
 })
 
-// Initialize with sample data - 使用 formulaSheet.setValue 以支持公式元数据
-formulaSheet.setValue(0, 0, 'Item')
-formulaSheet.setValue(0, 1, 'Q1')
-formulaSheet.setValue(0, 2, 'Q2')
-formulaSheet.setValue(0, 3, 'Total')
-formulaSheet.setValue(1, 0, 'Sales')
-formulaSheet.setValue(1, 1, '100')
-formulaSheet.setValue(1, 2, '150')
-formulaSheet.setValue(1, 3, '=B2+C2')  // Formula: 250
-formulaSheet.setValue(2, 0, 'Profit')
-formulaSheet.setValue(2, 1, '20')
-formulaSheet.setValue(2, 2, '30')
-formulaSheet.setValue(2, 3, '=B3+C3')  // Formula: 50
-formulaSheet.setValue(3, 0, 'Margin')
-formulaSheet.setValue(3, 1, '=B3/B2*100')  // Formula: 20
-formulaSheet.setValue(3, 2, '=C3/C2*100')  // Formula: 20
-formulaSheet.setValue(3, 3, '=D3/D2*100')  // Formula: depends on D2, D3
+// Initialize with demo data (style examples + sample data)
+initializeDemoData(model)
 
 const overlay = reactive({
   visible: false,
@@ -569,6 +557,7 @@ function drawCells(w: number, h: number) {
     sizes,
     geometryConfig: cfg,
     getCellValue: (r, c) => formulaSheet.getValue(r, c),
+    getCellStyle: (r, c) => model.getCellStyle(r, c),
     getSelectionRangeText,
     startRow,
     endRow,

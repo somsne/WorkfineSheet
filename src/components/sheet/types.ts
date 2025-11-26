@@ -100,3 +100,59 @@ export interface SizeAccess {
   hiddenCols?: Set<number>
   showGridFlag?: boolean
 }
+
+// ==================== 单元格样式 ====================
+
+/**
+ * 单元格样式接口
+ * 定义单元格的外观属性，包括字体、颜色、对齐等
+ */
+export interface CellStyle {
+  // 字体相关
+  fontFamily?: string          // 字体名称，如 'Arial', 'Microsoft YaHei'
+  fontSize?: number            // 字号 (px)，范围 9-72
+  bold?: boolean               // 粗体
+  italic?: boolean             // 斜体
+  underline?: boolean | 'single' | 'double'  // 下划线：false | true(单) | 'single' | 'double'
+  strikethrough?: boolean      // 删除线
+  
+  // 颜色相关
+  color?: string               // 字体颜色，支持 hex (#000000) 或 rgb (rgb(0,0,0))
+  backgroundColor?: string     // 背景色，支持 hex (#FFFFFF) 或 rgb (rgb(255,255,255))
+  
+  // 对齐相关
+  textAlign?: 'left' | 'center' | 'right'           // 水平对齐
+  verticalAlign?: 'top' | 'middle' | 'bottom'       // 垂直对齐
+  
+  // 文本处理
+  wrapText?: boolean           // 自动换行
+  textRotation?: number        // 文字旋转角度 (0-360 度)
+}
+
+/**
+ * 默认单元格样式
+ */
+export const DEFAULT_CELL_STYLE: CellStyle = {
+  fontFamily: 'Arial, sans-serif',
+  fontSize: 12,
+  bold: false,
+  italic: false,
+  underline: false,
+  strikethrough: false,
+  color: '#000000',
+  backgroundColor: '#FFFFFF',
+  textAlign: 'left',
+  verticalAlign: 'middle',
+  wrapText: false,
+  textRotation: 0
+}
+
+/**
+ * 样式键类型（用于类型安全）
+ */
+export type StyleKey = keyof CellStyle
+
+/**
+ * 样式值类型
+ */
+export type StyleValue = CellStyle[StyleKey]
