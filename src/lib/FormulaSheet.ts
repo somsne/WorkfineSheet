@@ -405,62 +405,70 @@ export class FormulaSheet {
     index: number,
     count: number = 1
   ): void {
+    const cellsWithFormulas: Array<{ 
+      row: number
+      col: number
+      cell: any
+    }> = []
+
+    // 第一步：收集所有包含公式的单元格（在数据移动之前）
+    this.model.forEach((r, c, cell) => {
+      if (cell.formulaMetadata) {
+        cellsWithFormulas.push({ row: r, col: c, cell: { ...cell } })
+      }
+    })
+
+    // 第二步：调整每个单元格的公式元数据（基于旧位置）
     const adjustedCells: Array<{ 
       oldRow: number
       oldCol: number
       newRow: number
       newCol: number
-      newValue: string 
+      newMetadata: any
     }> = []
 
-    // 遍历所有单元格，找到包含公式的单元格
-    this.model.forEach((r, c, cell) => {
-      if (cell.formulaMetadata) {
-        // 使用元数据调整（会自动计算新位置并调整引用）
-        const adjustedMetadata = FormulaMetadataParser.adjust(
-          cell.formulaMetadata,
-          operation,
-          index,
-          count
-        )
-        
-        // adjustedMetadata.originalFormula 已经是调整后的公式文本
-        // adjustedMetadata.formulaRow/formulaCol 已经是新位置
-        const adjustedFormula = adjustedMetadata.originalFormula
-        const newRow = adjustedMetadata.formulaRow
-        const newCol = adjustedMetadata.formulaCol
-        
-        // 记录需要更新的单元格
-        adjustedCells.push({ 
-          oldRow: r, 
-          oldCol: c, 
-          newRow, 
-          newCol, 
-          newValue: adjustedFormula 
-        })
-      }
-    })
-
-    // 先清除所有旧位置的单元格（对于位置改变的情况）
-    for (const { oldRow, oldCol, newRow, newCol } of adjustedCells) {
-      if (oldRow !== newRow || oldCol !== newCol) {
-        this.model.setValue(oldRow, oldCol, '')
-      }
+    for (const { row, col, cell } of cellsWithFormulas) {
+      // 使用元数据调整（会自动计算新位置并调整引用）
+      const adjustedMetadata = FormulaMetadataParser.adjust(
+        cell.formulaMetadata,
+        operation,
+        index,
+        count
+      )
+      
+      const newRow = adjustedMetadata.formulaRow
+      const newCol = adjustedMetadata.formulaCol
+      
+      adjustedCells.push({ 
+        oldRow: row, 
+        oldCol: col, 
+        newRow, 
+        newCol, 
+        newMetadata: adjustedMetadata
+      })
     }
 
-    // 临时禁用异步模式，直接设置值
-    const wasAsync = this.enableAsync
-    this.enableAsync = false
-    
-    // 更新所有调整后的公式到新位置
-    for (const { newRow, newCol, newValue } of adjustedCells) {
-      this.setValue(newRow, newCol, newValue)
+    // 第三步：清除所有旧位置的单元格
+    for (const { oldRow, oldCol } of adjustedCells) {
+      this.model.setValue(oldRow, oldCol, '')
+      this.formulaCache.delete(`${oldRow}_${oldCol}`)
     }
-    
-    // 恢复异步模式
-    this.enableAsync = wasAsync
 
-    // 清空缓存，强制重新计算
+    // 第四步：将调整后的公式设置到新位置（直接设置单元格对象，保留元数据）
+    for (const { newRow, newCol, newMetadata } of adjustedCells) {
+      const cellKey = `${newRow}_${newCol}`
+      
+      // 直接设置包含完整元数据的单元格
+      this.model.setCell(newRow, newCol, {
+        value: newMetadata.originalFormula,
+        formulaMetadata: newMetadata
+      })
+      
+      // 清除缓存
+      this.formulaCache.delete(cellKey)
+    }
+
+    // 清空所有缓存，强制重新计算
     this.clearCache()
   }
 
@@ -477,52 +485,73 @@ export class FormulaSheet {
     count: number = 1,
     onProgress?: (current: number, total: number) => void
   ): Promise<void> {
+    const cellsWithFormulas: Array<{ 
+      row: number
+      col: number
+      cell: any
+    }> = []
+
+    // 第一步：收集所有包含公式的单元格（在数据移动之前）
+    this.model.forEach((r, c, cell) => {
+      if (cell.formulaMetadata) {
+        cellsWithFormulas.push({ row: r, col: c, cell: { ...cell } })
+      }
+    })
+
+    // 第二步：调整每个单元格的公式元数据
     const adjustedCells: Array<{ 
       oldRow: number
       oldCol: number
       newRow: number
       newCol: number
-      newValue: string 
+      newMetadata: any
     }> = []
 
-    // 遍历所有单元格，找到包含公式的单元格
-    this.model.forEach((r, c, cell) => {
-      if (cell.formulaMetadata) {
-        const adjustedMetadata = FormulaMetadataParser.adjust(
-          cell.formulaMetadata,
-          operation,
-          index,
-          count
-        )
-        
-        const adjustedFormula = adjustedMetadata.originalFormula
-        const newRow = adjustedMetadata.formulaRow
-        const newCol = adjustedMetadata.formulaCol
-        
-        adjustedCells.push({ 
-          oldRow: r, 
-          oldCol: c, 
-          newRow, 
-          newCol, 
-          newValue: adjustedFormula 
-        })
-      }
-    })
+    for (const { row, col, cell } of cellsWithFormulas) {
+      const adjustedMetadata = FormulaMetadataParser.adjust(
+        cell.formulaMetadata,
+        operation,
+        index,
+        count
+      )
+      
+      const newRow = adjustedMetadata.formulaRow
+      const newCol = adjustedMetadata.formulaCol
+      
+      adjustedCells.push({ 
+        oldRow: row, 
+        oldCol: col, 
+        newRow, 
+        newCol, 
+        newMetadata: adjustedMetadata
+      })
+    }
 
     const total = adjustedCells.length
     
-    // 先清除所有旧位置的单元格
-    for (const { oldRow, oldCol, newRow, newCol } of adjustedCells) {
-      if (oldRow !== newRow || oldCol !== newCol) {
-        this.model.setValue(oldRow, oldCol, '')
-      }
+    // 第三步：清除所有旧位置的单元格
+    for (const { oldRow, oldCol } of adjustedCells) {
+      this.model.setValue(oldRow, oldCol, '')
+      this.formulaCache.delete(`${oldRow}_${oldCol}`)
     }
 
-    // 批量更新，每 50 个公式暂停一帧
+    // 第四步：批量更新，每 50 个公式暂停一帧
     const batchSize = 50
     for (let i = 0; i < adjustedCells.length; i++) {
-      const { newRow, newCol, newValue } = adjustedCells[i]
-      this.setValue(newRow, newCol, newValue)
+      const cell = adjustedCells[i]
+      if (!cell) continue
+      
+      const { newRow, newCol, newMetadata } = cell
+      const cellKey = `${newRow}_${newCol}`
+      
+      // 直接设置包含完整元数据的单元格
+      this.model.setCell(newRow, newCol, {
+        value: newMetadata.originalFormula,
+        formulaMetadata: newMetadata
+      })
+      
+      // 清除缓存
+      this.formulaCache.delete(cellKey)
       
       // 报告进度
       if (onProgress && (i % batchSize === 0 || i === adjustedCells.length - 1)) {

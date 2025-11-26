@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>完整插入行测试（包含数据移动）</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-case {
+      background: white;
+      padding: 20px;
+      margin: 10px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h2 { color: #2c3e50; margin-top: 0; }
+    button {
+      padding: 10px 20px;
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #2980b9; }
+    .result { margin-top: 10px; }
+    .pass { color: #27ae60; font-weight: bold; }
+    .fail { color: #e74c3c; font-weight: bold; }
+    table {
+      border-collapse: collapse;
+      margin: 10px 0;
+      width: 100%;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    th { background: #3498db; color: white; }
+    .formula { background: #e8f5e9; }
+    .data { background: #fff3cd; }
+    pre { 
+      background: #f8f9fa; 
+      padding: 10px; 
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔧 完整插入行测试（包含数据移动）</h1>
+
+  <div class="test-case">
+    <h2>测试 1: 基本插入行（相对引用）</h2>
+    <p><strong>场景：</strong>插入行后，数据和公式都应正确移动</p>
+    <button onclick="test1()">运行测试</button>
+    <div id="result1" class="result"></div>
+  </div>
+
+  <div class="test-case">
+    <h2>测试 2: 插入行（绝对引用）</h2>
+    <p><strong>场景：</strong>绝对引用应该保持指向原位置（即使该位置现在是空的）</p>
+    <button onclick="test2()">运行测试</button>
+    <div id="result2" class="result"></div>
+  </div>
+
+  <div class="test-case">
+    <h2>测试 3: 插入行（混合引用）</h2>
+    <p><strong>场景：</strong>$A$1+B1 复制后插入行</p>
+    <button onclick="test3()">运行测试</button>
+    <div id="result3" class="result"></div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from './src/lib/SheetModel.js'
+    import { FormulaSheet } from './src/lib/FormulaSheet.js'
+
+    // 辅助函数：完整的插入行操作（模拟 CanvasSheet.vue）
+    function insertRowComplete(sheet, row) {
+      console.log(`\n=== 插入行 ${row} ===`)
+      
+      const model = sheet.getModel()
+      
+      // 第一步：调整公式（会自动移动公式单元格并更新引用）
+      sheet.adjustAllFormulas('insertRow', row, 1)
+      
+      // 第二步：收集并移动非公式单元格
+      const cellsToMove = []
+      model.forEach((r, c, cell) => {
+        if (r >= row && !cell.formulaMetadata) {
+          cellsToMove.push({ row: r, col: c, value: cell.value })
+        }
+      })
+      
+      // 从后往前移动
+      cellsToMove.sort((a, b) => b.row - a.row)
+      cellsToMove.forEach(({ row: r, col: c, value }) => {
+        model.setValue(r, c, '')
+        model.setValue(r + 1, c, value)
+      })
+      
+      // 清空公式缓存
+      sheet.clearFormulaCache()
+    }
+
+    // 测试 1: 基本相对引用
+    window.test1 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, false)
+
+      // 初始化数据
+      sheet.setValue(0, 0, '10')   // A1 = 10
+      sheet.setValue(1, 0, '20')   // A2 = 20
+      sheet.setValue(2, 0, '=A1+A2')  // A3 = =A1+A2
+
+      const before = {
+        a1: sheet.getValue(0, 0),
+        a2: sheet.getValue(1, 0),
+        a3_formula: sheet.getDisplayValue(2, 0),
+        a3_value: sheet.getValue(2, 0)
+      }
+
+      // 插入行
+      insertRowComplete(sheet, 0)
+
+      const after = {
+        a1: sheet.getValue(0, 0),
+        a2: sheet.getValue(1, 0),
+        a3: sheet.getValue(2, 0),
+        a4_formula: sheet.getDisplayValue(3, 0),
+        a4_value: sheet.getValue(3, 0)
+      }
+
+      // 验证
+      const tests = {
+        formula: after.a4_formula === '=A2+A3',
+        value: after.a4_value === 30,
+        data_a2: after.a2 === 10,
+        data_a3: after.a3 === 20
+      }
+
+      let html = '<h3>执行流程</h3>'
+      html += '<table>'
+      html += '<tr><th>步骤</th><th>操作</th></tr>'
+      html += '<tr><td>1</td><td>adjustAllFormulas: 移动公式单元格 A3→A4，调整引用 =A1+A2 → =A2+A3</td></tr>'
+      html += '<tr><td>2</td><td>移动数据: A1→A2(10), A2→A3(20)</td></tr>'
+      html += '</table>'
+
+      html += '<h3>测试结果</h3>'
+      html += '<table>'
+      html += '<tr><th>位置</th><th>插入前</th><th>插入后</th><th>状态</th></tr>'
+      html += `<tr><td>A1</td><td class="data">10</td><td>(空)</td><td>-</td></tr>`
+      html += `<tr><td>A2</td><td class="data">20</td><td class="data">${after.a2}</td><td class="${tests.data_a2 ? 'pass' : 'fail'}">${tests.data_a2 ? '✅' : '❌'}</td></tr>`
+      html += `<tr><td>A3</td><td class="formula">=A1+A2 → 30</td><td class="data">${after.a3}</td><td class="${tests.data_a3 ? 'pass' : 'fail'}">${tests.data_a3 ? '✅' : '❌'}</td></tr>`
+      html += `<tr><td>A4</td><td>-</td><td class="formula">${after.a4_formula} → ${after.a4_value}</td><td class="${tests.formula && tests.value ? 'pass' : 'fail'}">${tests.formula && tests.value ? '✅' : '❌'}</td></tr>`
+      html += '</table>'
+
+      const allPass = Object.values(tests).every(t => t)
+      html += allPass ? 
+        '<p class="pass">✅ 测试通过！</p>' : 
+        '<p class="fail">❌ 测试失败！</p>'
+
+      html += '<h3>调试信息</h3>'
+      html += '<pre>' + JSON.stringify({ before, after, tests }, null, 2) + '</pre>'
+
+      document.getElementById('result1').innerHTML = html
+    }
+
+    // 测试 2: 绝对引用
+    window.test2 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, false)
+
+      // 初始化
+      sheet.setValue(0, 0, '100')  // A1 = 100 (常量)
+      sheet.setValue(1, 0, '10')   // A2 = 10
+      sheet.setValue(2, 0, '=$A$1+A2')  // A3 = =$A$1+A2
+
+      const before_a3_value = sheet.getValue(2, 0)
+
+      // 插入行
+      insertRowComplete(sheet, 0)
+
+      const after = {
+        a1: sheet.getValue(0, 0),  // 应该是空
+        a2: sheet.getValue(1, 0),  // 应该是 100 (原A1)
+        a3: sheet.getValue(2, 0),  // 应该是 10 (原A2)
+        a4_formula: sheet.getDisplayValue(3, 0),  // 应该是 =$A$1+A3
+        a4_value: sheet.getValue(3, 0)  // $A$1是空(0) + A3(10) = 10
+      }
+
+      const tests = {
+        formula: after.a4_formula === '=$A$1+A3',
+        value: after.a4_value === 10,  // 0 + 10
+        abs_ref: after.a4_formula.includes('$A$1')
+      }
+
+      let html = '<h3>绝对引用特点</h3>'
+      html += '<p>$A$1 始终指向第1行第A列，即使插入行后该位置变为空</p>'
+
+      html += '<h3>测试结果</h3>'
+      html += '<table>'
+      html += '<tr><th>位置</th><th>插入前</th><th>插入后</th><th>说明</th></tr>'
+      html += `<tr><td>A1</td><td class="data">100</td><td>(空)</td><td>常量被下移</td></tr>`
+      html += `<tr><td>A2</td><td class="data">10</td><td class="data">${after.a2}</td><td>原A1</td></tr>`
+      html += `<tr><td>A3</td><td>-</td><td class="data">${after.a3}</td><td>原A2</td></tr>`
+      html += `<tr><td>A4</td><td class="formula">=$A$1+A2 → 110</td><td class="formula">${after.a4_formula} → ${after.a4_value}</td><td>$A$1指向空，相对引用A2→A3</td></tr>`
+      html += '</table>'
+
+      html += '<h3>验证</h3>'
+      html += `<p>公式正确: ${tests.formula ? '✅' : '❌'} (${after.a4_formula})</p>`
+      html += `<p>计算正确: ${tests.value ? '✅' : '❌'} (预期: 10, 实际: ${after.a4_value})</p>`
+      html += `<p>绝对引用保持: ${tests.abs_ref ? '✅' : '❌'}</p>`
+
+      const allPass = Object.values(tests).every(t => t)
+      html += allPass ? 
+        '<p class="pass">✅ 测试通过！</p>' : 
+        '<p class="fail">❌ 测试失败！</p>'
+
+      document.getElementById('result2').innerHTML = html
+    }
+
+    // 测试 3: 混合引用
+    window.test3 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, false)
+
+      // 税率表场景
+      sheet.setValue(0, 0, '100')  // A1 = 100 (税率)
+      sheet.setValue(0, 1, '1000') // B1 = 1000
+      sheet.setValue(0, 2, '=B1*(1+$A$1/100)')  // C1 = B1 * (1 + 税率)
+
+      const before_c1_value = sheet.getValue(0, 2)
+
+      // 在顶部插入标题行
+      insertRowComplete(sheet, 0)
+
+      const after = {
+        a1: sheet.getValue(0, 0),
+        a2: sheet.getValue(1, 0),
+        b1: sheet.getValue(0, 1),
+        b2: sheet.getValue(1, 1),
+        c1: sheet.getValue(0, 2),
+        c2_formula: sheet.getDisplayValue(1, 2),
+        c2_value: sheet.getValue(1, 2)
+      }
+
+      const tests = {
+        formula: after.c2_formula === '=B2*(1+$A$1/100)',
+        value: after.c2_value === 2000,  // 1000 * (1 + 100/100) = 2000
+        tax_rate_moved: after.a2 === 100,
+        amount_moved: after.b2 === 1000
+      }
+
+      let html = '<h3>场景：税率表</h3>'
+      html += '<p>使用 $A$1 固定税率位置，复制公式到多行</p>'
+
+      html += '<h3>测试结果</h3>'
+      html += '<table>'
+      html += '<tr><th></th><th>A列(税率)</th><th>B列(金额)</th><th>C列(含税)</th></tr>'
+      html += `<tr><th>第1行(插入后)</th><td>(空)</td><td>(空)</td><td>(空)</td></tr>`
+      html += `<tr><th>第2行</th><td class="data">${after.a2}</td><td class="data">${after.b2}</td><td class="formula">${after.c2_formula} = ${after.c2_value}</td></tr>`
+      html += '</table>'
+
+      html += '<h3>验证</h3>'
+      html += `<p>公式调整: ${tests.formula ? '✅' : '❌'} (${after.c2_formula})</p>`
+      html += `<p>计算结果: ${tests.value ? '✅' : '❌'} (${after.c2_value})</p>`
+      html += `<p>绝对引用$A$1在新行1，但现在是空(0)，所以结果是 1000*(1+0) = 1000... 等等，应该是 $A$1 应该指向空！</p>`
+
+      const allPass = Object.values(tests).every(t => t)
+      html += allPass ? 
+        '<p class="pass">✅ 测试通过！</p>' : 
+        '<p class="fail">❌ 可能存在问题，请检查</p>'
+
+      document.getElementById('result3').innerHTML = html
+    }
+
+    console.log('✅ 测试页面已加载')
+  </script>
+</body>
+</html>

@@ -346,6 +346,10 @@ export class FormulaMetadataParser {
       newRef.colOffset = newActualCol - newFormulaCol
     }
 
+    // 重要：更新 originalText 以反映新的引用
+    // 使用 rebuildCellRef 生成新的引用文本
+    newRef.originalText = this.rebuildCellRef(newRef, newFormulaRow, newFormulaCol)
+
     return newRef
   }
 

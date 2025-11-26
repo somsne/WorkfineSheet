@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>绝对引用测试 - Excel $符号</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #2c3e50;
+      border-bottom: 3px solid #3498db;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #3498db;
+    }
+    button {
+      padding: 10px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    .result {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #3498db;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
+    .pass {
+      color: #27ae60;
+      font-weight: bold;
+    }
+    .fail {
+      color: #e74c3c;
+      font-weight: bold;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border: 1px solid #ddd;
+    }
+    th {
+      background: #3498db;
+      color: white;
+    }
+    .formula {
+      background: #e8f5e9;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 Excel 绝对引用测试 ($ 符号)</h1>
+  
+  <div class="test-section">
+    <h2>测试 1: 相对引用 vs 绝对引用</h2>
+    <p>验证 <code>A1</code> 和 <code>$A$1</code> 在插入行时的不同行为</p>
+    <button onclick="test1()">运行测试</button>
+    <div id="result1" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 2: 混合引用 - 列绝对 ($A1)</h2>
+    <p>验证 <code>$A1</code>：列保持不变，行自动调整</p>
+    <button onclick="test2()">运行测试</button>
+    <div id="result2" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 3: 混合引用 - 行绝对 (A$1)</h2>
+    <p>验证 <code>A$1</code>：行保持不变，列自动调整</p>
+    <button onclick="test3()">运行测试</button>
+    <div id="result3" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 4: 复制粘贴时的绝对引用</h2>
+    <p>验证复制包含绝对引用的公式时，绝对引用不变</p>
+    <button onclick="test4()">运行测试</button>
+    <div id="result4" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 5: 综合测试 - 混合使用</h2>
+    <p>验证公式中同时包含相对和绝对引用</p>
+    <button onclick="test5()">运行测试</button>
+    <div id="result5" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试 6: 删除行列对绝对引用的影响</h2>
+    <p>验证删除被引用的行时，绝对引用变为 #REF!</p>
+    <button onclick="test6()">运行测试</button>
+    <div id="result6" class="result"></div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from './src/lib/SheetModel.js'
+    import { FormulaSheet } from './src/lib/FormulaSheet.js'
+
+    window.SheetModel = SheetModel
+    window.FormulaSheet = FormulaSheet
+
+    function displayResult(elementId, content, passed = true) {
+      const element = document.getElementById(elementId)
+      const statusClass = passed ? 'pass' : 'fail'
+      const statusText = passed ? '✅ 测试通过' : '❌ 测试失败'
+      element.innerHTML = `<span class="${statusClass}">${statusText}</span>\n\n${content}`
+    }
+
+    // 测试 1: 相对引用 vs 绝对引用
+    window.test1 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model, false)  // 禁用异步，便于测试
+
+      // 设置初始数据
+      sheet.setValue(0, 0, '10')  // A1 = 10
+      sheet.setValue(1, 0, '20')  // A2 = 20
+
+      // B1: 相对引用
+      sheet.setValue(0, 1, '=A1')
+      // C1: 绝对引用
+      sheet.setValue(0, 2, '=$A$1')
+
+      const before_B1 = sheet.getDisplayValue(0, 1)
+      const before_C1 = sheet.getDisplayValue(0, 2)
+      const before_B1_value = sheet.getValue(0, 1)
+      const before_C1_value = sheet.getValue(0, 2)
+
+      // 在第 1 行前插入新行
+      sheet.adjustAllFormulas('insertRow', 0, 1)
+
+      const after_B1 = sheet.getDisplayValue(1, 1)  // B2 (原 B1)
+      const after_C1 = sheet.getDisplayValue(1, 2)  // C2 (原 C1)
+      const after_B1_value = sheet.getValue(1, 1)
+      const after_C1_value = sheet.getValue(1, 2)
+
+      const test1_pass = after_B1 === '=A2'  // 相对引用应该调整为 A2
+      const test2_pass = after_C1 === '=$A$1' // 绝对引用应该保持 $A$1
+      const test3_pass = after_B1_value === 20  // B2 现在应该引用 A2 (值为 20)
+      const test4_pass = after_C1_value === 10  // C2 应该引用 $A$1，但 A1 现在是空的，值为 0 或 undefined
+
+      let result = `
+📋 <strong>初始状态：</strong>
+  A1 = 10
+  A2 = 20
+  B1 = ${before_B1} (相对引用) → 计算值: ${before_B1_value}
+  C1 = ${before_C1} (绝对引用) → 计算值: ${before_C1_value}
+
+⚡ <strong>操作：</strong>在第 1 行前插入 1 行
+
+📊 <strong>插入后的数据位置：</strong>
+  A1 = (空)
+  A2 = 10 (原 A1)
+  A3 = 20 (原 A2)
+  B2 = ${after_B1} (原 B1) → 计算值: ${after_B1_value}  ${test3_pass ? '✅' : '❌'} (预期: 20)
+  C2 = ${after_C1} (原 C1) → 计算值: ${after_C1_value}  ${test4_pass ? '✅' : '❌'} (预期: 0 或空)
+
+📝 <strong>公式验证：</strong>
+  原 B1 → B2 = ${after_B1}  ${test1_pass ? '✅' : '❌'} (预期: =A2)
+  原 C1 → C2 = ${after_C1}  ${test2_pass ? '✅' : '❌'} (预期: =$A$1)
+
+💡 <strong>说明：</strong>
+  - 相对引用 A1→A2：因为公式和数据都下移，相对位置保持不变
+  - 绝对引用 $A$1：始终指向第1行第A列，即使插入后变为空
+  - B2 计算值应为 20 (A2的值)
+  - C2 计算值应为 0 (A1现在是空的)
+`
+
+      displayResult('result1', result, test1_pass && test2_pass && test3_pass)
+    }
+
+    // 测试 2: 混合引用 - 列绝对
+    window.test2 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      sheet.setValue(0, 0, '100')  // A1 = 100
+      sheet.setValue(1, 0, '=A1')  // A2 = A1
+      sheet.setValue(0, 1, '=$A1')  // B1 = $A1 (列绝对，行相对)
+
+      const before = sheet.getDisplayValue(0, 1)
+
+      // 在列 A 左侧插入新列
+      sheet.adjustAllFormulas('insertCol', 0, 1)
+
+      const after = sheet.getDisplayValue(0, 2)  // C1 (原 B1)
+      const test_pass = after === '=$A1'  // 列保持 $A，行保持 1
+
+      let result = `
+📋 <strong>初始状态：</strong>
+  A1 = 100
+  B1 = ${before} (列绝对 $A，行相对 1)
+
+⚡ <strong>操作：</strong>在列 A 左侧插入 1 列
+
+📊 <strong>结果：</strong>
+  原 B1 → C1 = ${after}  ${test_pass ? '✅' : '❌'} (预期: =$A1)
+
+💡 <strong>说明：</strong>
+  - 列标记 $A 保持不变 (绝对引用)
+  - 行号 1 保持不变 (因为没有插入行)
+  - 即使 B1 移到了 C1，依然引用 $A1
+`
+
+      displayResult('result2', result, test_pass)
+    }
+
+    // 测试 3: 混合引用 - 行绝对
+    window.test3 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      sheet.setValue(0, 0, '100')  // A1 = 100
+      sheet.setValue(1, 0, '=A$1')  // A2 = A$1 (行绝对，列相对)
+
+      const before = sheet.getDisplayValue(1, 0)
+
+      // 在第 1 行前插入新行
+      sheet.adjustAllFormulas('insertRow', 0, 1)
+
+      const after = sheet.getDisplayValue(2, 0)  // A3 (原 A2)
+      const test_pass = after === '=A$1'  // 列保持 A，行保持 $1
+
+      let result = `
+📋 <strong>初始状态：</strong>
+  A1 = 100
+  A2 = ${before} (行绝对 $1，列相对 A)
+
+⚡ <strong>操作：</strong>在第 1 行前插入 1 行
+
+📊 <strong>结果：</strong>
+  原 A2 → A3 = ${after}  ${test_pass ? '✅' : '❌'} (预期: =A$1)
+
+💡 <strong>说明：</strong>
+  - 行号 $1 保持不变 (绝对引用)
+  - 列标记 A 保持不变 (因为没有插入列)
+  - 始终引用第 1 行的数据
+`
+
+      displayResult('result3', result, test_pass)
+    }
+
+    // 测试 4: 复制粘贴时的绝对引用
+    window.test4 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      sheet.setValue(0, 0, '999')  // A1 = 999 (常量)
+      sheet.setValue(0, 1, '10')   // B1 = 10
+      sheet.setValue(1, 1, '=$A$1+B1')  // B2 = $A$1+B1
+
+      const before = sheet.getDisplayValue(1, 1)
+
+      // 复制 B2 到 D4
+      sheet.copyCell(1, 1, 3, 3)
+
+      const after = sheet.getDisplayValue(3, 3)
+      const test_pass = after === '=$A$1+D3'  // $A$1 不变，B1→D3
+
+      let result = `
+📋 <strong>初始状态：</strong>
+  A1 = 999 (常量)
+  B1 = 10
+  B2 = ${before}
+
+⚡ <strong>操作：</strong>复制 B2 到 D4
+
+📊 <strong>结果：</strong>
+  D4 = ${after}  ${test_pass ? '✅' : '❌'} (预期: =$A$1+D3)
+
+💡 <strong>说明：</strong>
+  - 绝对引用 $A$1 保持不变 (始终引用常量单元格)
+  - 相对引用 B1 调整为 D3 (相对位置不变)
+  - 这是 Excel 中常见的模式：用绝对引用锁定常量
+`
+
+      displayResult('result4', result, test_pass)
+    }
+
+    // 测试 5: 综合测试
+    window.test5 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      sheet.setValue(0, 0, '100')  // A1 = 100 (税率)
+      sheet.setValue(0, 1, '1000') // B1 = 1000 (金额1)
+      sheet.setValue(1, 1, '2000') // B2 = 2000 (金额2)
+      sheet.setValue(2, 1, '3000') // B3 = 3000 (金额3)
+
+      // C列：计算含税金额 = 金额 * (1 + $A$1)
+      sheet.setValue(0, 2, '=B1*(1+$A$1/100)')
+      sheet.setValue(1, 2, '=B2*(1+$A$1/100)')
+      sheet.setValue(2, 2, '=B3*(1+$A$1/100)')
+
+      const before1 = sheet.getDisplayValue(0, 2)
+      const before2 = sheet.getDisplayValue(1, 2)
+      const before3 = sheet.getDisplayValue(2, 2)
+
+      // 在第 1 行前插入新行
+      sheet.adjustAllFormulas('insertRow', 0, 1)
+
+      const after1 = sheet.getDisplayValue(1, 2)  // C2 (原 C1)
+      const after2 = sheet.getDisplayValue(2, 2)  // C3 (原 C2)
+      const after3 = sheet.getDisplayValue(3, 2)  // C4 (原 C3)
+
+      const test1 = after1 === '=B2*(1+$A$1/100)'
+      const test2 = after2 === '=B3*(1+$A$1/100)'
+      const test3 = after3 === '=B4*(1+$A$1/100)'
+
+      let result = `
+📋 <strong>场景：</strong>计算含税金额表
+  A1 = 100 (税率常量)
+  B列 = 金额
+  C列 = 含税金额 (使用绝对引用税率)
+
+<strong>初始公式：</strong>
+  C1 = ${before1}
+  C2 = ${before2}
+  C3 = ${before3}
+
+⚡ <strong>操作：</strong>在第 1 行前插入标题行
+
+📊 <strong>结果：</strong>
+  C2 = ${after1}  ${test1 ? '✅' : '❌'}
+  C3 = ${after2}  ${test2 ? '✅' : '❌'}
+  C4 = ${after3}  ${test3 ? '✅' : '❌'}
+
+💡 <strong>说明：</strong>
+  - 所有公式中的 $A$1 保持不变 (税率位置固定)
+  - 相对引用 B1→B2, B2→B3, B3→B4 (跟随数据移动)
+  - 这是 Excel 中典型的"固定常量"应用场景
+`
+
+      displayResult('result5', result, test1 && test2 && test3)
+    }
+
+    // 测试 6: 删除行列对绝对引用的影响
+    window.test6 = function() {
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+
+      sheet.setValue(0, 0, '100')  // A1 = 100
+      sheet.setValue(1, 0, '=$A$1*2')  // A2 = $A$1*2
+
+      const before = sheet.getDisplayValue(1, 0)
+
+      // 删除第 1 行 (A1 被删除)
+      sheet.adjustAllFormulas('deleteRow', 0, 1)
+
+      const after = sheet.getDisplayValue(0, 0)  // A1 (原 A2)
+      const test_pass = after.includes('#REF!')  // 应该包含 #REF!
+
+      let result = `
+📋 <strong>初始状态：</strong>
+  A1 = 100
+  A2 = ${before}
+
+⚡ <strong>操作：</strong>删除第 1 行 (A1 被删除)
+
+📊 <strong>结果：</strong>
+  新 A1 (原 A2) = ${after}  ${test_pass ? '✅' : '❌'}
+
+💡 <strong>说明：</strong>
+  - 当绝对引用的单元格被删除时，引用变为 #REF! 错误
+  - 这与 Excel 的行为完全一致
+  - #REF! 表示"引用错误"
+`
+
+      displayResult('result6', result, test_pass)
+    }
+
+    console.log('✅ 绝对引用测试页面已加载')
+    console.log('💡 点击各个测试按钮验证功能')
+  </script>
+</body>
+</html>
