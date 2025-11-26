@@ -75,6 +75,58 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
+import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft, getRowAtY as geomGetRowAtY, getColAtX as geomGetColAtX, getVisibleRange as geomGetVisibleRange, ensureVisible as geomEnsureVisible } from './sheet/geometry'
+import type { GeometryConfig, SizeAccess } from './sheet/types'
+import { setCanvasSize, createRedrawScheduler } from './sheet/renderCore'
+import { drawGrid as renderGrid } from './sheet/renderGrid'
+import type { GridRenderConfig } from './sheet/renderGrid'
+import { drawCells as renderCells } from './sheet/renderCells'
+import type { CellsRenderConfig } from './sheet/renderCells'
+import { updateScrollbars, handleWheel, handleScrollbarDrag, startVerticalDrag, startHorizontalDrag, endDrag } from './sheet/scrollbar'
+import { parseFormulaReferences } from './sheet/references'
+import { 
+  handleClick, 
+  startDragSelection, 
+  updateDragSelection, 
+  endDragSelection, 
+  getSelectionRangeText as getSelectionText,
+  type SelectionState 
+} from './sheet/selection'
+import {
+  openOverlay as openOverlayHelper,
+  closeOverlay,
+  handleDoubleClick as handleDoubleClickHelper,
+  getNextCellAfterSave,
+  isClickInsideOverlay
+} from './sheet/overlay'
+import {
+  copySingleCell,
+  copyRange,
+  pasteInternal,
+  pasteExternal,
+  parseClipboardText,
+  writeToClipboard,
+  readFromClipboard,
+  isInternalClipboardValid
+} from './sheet/clipboard'
+import {
+  insertRowAbove as insertRowAboveHelper,
+  insertRowBelow as insertRowBelowHelper,
+  deleteRow as deleteRowHelper,
+  insertColLeft as insertColLeftHelper,
+  insertColRight as insertColRightHelper,
+  deleteCol as deleteColHelper,
+  showSetRowHeightDialog as showSetRowHeightDialogHelper,
+  showSetColWidthDialog as showSetColWidthDialogHelper,
+  type RowColConfig
+} from './sheet/rowcol'
+import {
+  handleContextMenu,
+  handleInputDialogConfirm as handleInputDialogConfirmHelper,
+  type ContextMenuConfig
+} from './sheet/uiMenus'
+import { createSheetAPI } from './sheet/api'
+import { createEventManager, type EventHandlers } from './sheet/events'
 import { SheetModel } from '../lib/SheetModel'
 import { UndoRedoManager } from '../lib/UndoRedoManager'
 import { FormulaSheet } from '../lib/FormulaSheet'
@@ -120,6 +172,13 @@ const lastCopyTs = ref(0)
 // 自定义行高和列宽
 const rowHeights = ref<Map<number, number>>(new Map()) // 存储自定义的行高
 const colWidths = ref<Map<number, number>>(new Map())  // 存储自定义的列宽
+
+// 隐藏行列状态
+const hiddenRows = ref<Set<number>>(new Set())
+const hiddenCols = ref<Set<number>>(new Set())
+
+// 网格线显示开关
+const showGridLines = ref<boolean>(true)
 
 // 调整大小状态
 const resizeState = reactive({
@@ -231,19 +290,7 @@ const internalClipboard = reactive<{
 })
 const formulaReferences = ref<FormulaReference[]>([])
 
-// Excel 风格的引用颜色
-const REFERENCE_COLORS = [
-  '#4472C4',  // 蓝色
-  '#ED7D31',  // 橙色
-  '#A5A5A5',  // 灰色
-  '#FFC000',  // 黄色
-  '#5B9BD5',  // 浅蓝
-  '#70AD47',  // 绿色
-  '#264478',  // 深蓝
-  '#9E480E',  // 深橙
-  '#636363',  // 深灰
-  '#997300',  // 深黄
-]
+
 
 // Viewport state for scrolling
 const viewport = reactive({
@@ -289,137 +336,9 @@ const inputDialog = reactive({
   callback: null as ((value: string) => void) | null
 })
 
-// Performance optimization: debounce redraw with requestAnimationFrame
-let redrawScheduled = false
-let redrawHandle: number | null = null
+// Redraw scheduler from render core
+const { scheduleRedraw, cancelScheduled } = createRedrawScheduler(() => draw())
 
-function devicePixelRatioSafe() {
-  return window.devicePixelRatio || 1
-}
-
-function setCanvasSize(canvas: HTMLCanvasElement, width: number, height: number) {
-  const dpr = devicePixelRatioSafe()
-  canvas.width = Math.floor(width * dpr)
-  canvas.height = Math.floor(height * dpr)
-  canvas.style.width = width + 'px'
-  canvas.style.height = height + 'px'
-  const ctx = canvas.getContext('2d')
-  if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-}
-
-/**
- * 简单的单元格地址解析 (A1 -> {row: 0, col: 0})
- */
-function parseCellAddr(addr: string): { row: number, col: number } | null {
-  // 移除绝对引用符号 $
-  addr = addr.replace(/\$/g, '')
-  const match = addr.match(/^([A-Za-z]+)(\d+)$/)
-  if (!match || !match[1] || !match[2]) return null
-  
-  const colStr = match[1].toUpperCase()
-  const rowStr = match[2]
-  
-  let col = 0
-  for (let i = 0; i < colStr.length; i++) {
-    col = col * 26 + (colStr.charCodeAt(i) - 64)
-  }
-  col -= 1  // 0-indexed
-  
-  const row = parseInt(rowStr, 10) - 1  // 0-indexed
-  
-  return { row, col }
-}
-
-/**
- * 解析公式中的单元格引用
- */
-function parseFormulaReferences(formula: string): FormulaReference[] {
-  if (!formula.startsWith('=')) return []
-  
-  const references: FormulaReference[] = []
-  const seen = new Set<string>()
-  
-  // 匹配范围引用 (A1:B3) 和单个单元格引用 (A1)
-  // 支持绝对引用 $A$1 / $A1 / A$1
-  const rangeRegex = /(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/g
-  // 使用前后非字母数字边界来避免误匹配
-  const cellRegex = /(^|[^A-Za-z0-9$])(\$?[A-Za-z]+\$?\d+)(?=[^A-Za-z0-9]|$)/g
-  
-  let colorIndex = 0
-  
-  // 先匹配范围引用
-  let match
-  while ((match = rangeRegex.exec(formula)) !== null) {
-    const rangeStr = match[0].toUpperCase()
-    if (seen.has(rangeStr)) continue
-    seen.add(rangeStr)
-    
-    const startAddr = match[1]?.toUpperCase()
-    const endAddr = match[2]?.toUpperCase()
-    
-    if (!startAddr || !endAddr) continue
-    
-    const startRef = parseCellAddr(startAddr)
-    const endRef = parseCellAddr(endAddr)
-    
-    if (startRef && endRef) {
-      const seenKey = `${startAddr.replace(/\$/g,'')}:${endAddr.replace(/\$/g,'')}`
-      if (seen.has(seenKey)) continue
-      seen.add(seenKey)
-      references.push({
-        range: rangeStr,
-        startRow: Math.min(startRef.row, endRef.row),
-        startCol: Math.min(startRef.col, endRef.col),
-        endRow: Math.max(startRef.row, endRef.row),
-        endCol: Math.max(startRef.col, endRef.col),
-        color: REFERENCE_COLORS[colorIndex % REFERENCE_COLORS.length] || '#4472C4'
-      })
-      colorIndex++
-    }
-  }
-  
-  // 移除范围引用，然后匹配单个单元格引用
-  const formulaWithoutRanges = formula.replace(rangeRegex, '')
-  
-  rangeRegex.lastIndex = 0
-  while ((match = cellRegex.exec(formulaWithoutRanges)) !== null) {
-    const cellAddr = match[2]?.toUpperCase()
-    if (!cellAddr || seen.has(cellAddr)) continue
-    const norm = cellAddr.replace(/\$/g, '')
-    if (seen.has(norm)) continue
-    seen.add(norm)
-    
-    const ref = parseCellAddr(cellAddr)
-    if (ref) {
-      references.push({
-        range: cellAddr,
-        startRow: ref.row,
-        startCol: ref.col,
-        endRow: ref.row,
-        endCol: ref.col,
-        color: REFERENCE_COLORS[colorIndex % REFERENCE_COLORS.length] || '#4472C4'
-      })
-      colorIndex++
-    }
-  }
-  
-  return references
-}
-
-/**
- * Schedule redraw with requestAnimationFrame for better performance
- * This ensures the canvas is redrawn at most once per frame (60fps)
- */
-function scheduleRedraw() {
-  if (redrawScheduled) return
-  
-  redrawScheduled = true
-  redrawHandle = requestAnimationFrame(() => {
-    redrawScheduled = false
-    redrawHandle = null
-    draw()
-  })
-}
 
 /**
  * Direct redraw - use for critical updates that need immediate rendering
@@ -439,7 +358,7 @@ function draw() {
   setCanvasSize(contentCanvas.value, w, h)
 
   // 更新滚动条
-  updateScrollbars(w, h)
+  updateScrollbarsLocal(w, h)
   // 如果编辑框可见，随滚动动态更新其位置与尺寸
   if (overlay.visible) {
     overlay.top = COL_HEADER_HEIGHT + getRowTop(overlay.row) - viewport.scrollTop
@@ -453,129 +372,115 @@ function draw() {
   drawGrid(w, h)
 }
 
-function getColLabel(c: number): string {
-  let label = ''
-  let n = c
-  while (n >= 0) {
-    label = String.fromCharCode(65 + (n % 26)) + label
-    if (n < 26) break
-    n = Math.floor(n / 26) - 1
+
+// 创建 SizeAccess 对象的辅助函数
+function createSizeAccess(): SizeAccess {
+  return {
+    rowHeights: rowHeights.value,
+    colWidths: colWidths.value,
+    hiddenRows: hiddenRows.value,
+    hiddenCols: hiddenCols.value,
+    showGridFlag: showGridLines.value
   }
-  return label
 }
 
-// 获取指定行的高度
+// 获取指定行的高度（通过几何模块）
 function getRowHeight(row: number): number {
-  return rowHeights.value.get(row) ?? ROW_HEIGHT
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  return geomGetRowHeight(row, sizes, cfg)
 }
 
-// 获取指定列的宽度
+// 获取指定列的宽度（通过几何模块）
 function getColWidth(col: number): number {
-  return colWidths.value.get(col) ?? COL_WIDTH
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  return geomGetColWidth(col, sizes, cfg)
 }
 
 // 获取从0到指定行的累计高度
 function getRowTop(row: number): number {
-  let top = 0
-  for (let r = 0; r < row; r++) {
-    top += getRowHeight(r)
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-  return top
+  const sizes = createSizeAccess()
+  return geomGetRowTop(row, sizes, cfg)
 }
 
 // 获取从0到指定列的累计宽度
 function getColLeft(col: number): number {
-  let left = 0
-  for (let c = 0; c < col; c++) {
-    left += getColWidth(c)
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-  return left
+  const sizes = createSizeAccess()
+  return geomGetColLeft(col, sizes, cfg)
 }
 
 // 根据 Y 坐标（含滚动偏移）获取行号
 function getRowAtY(y: number): number {
-  const offsetY = y + viewport.scrollTop - COL_HEADER_HEIGHT
-  let accumulatedHeight = 0
-  
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    const rowHeight = getRowHeight(r)
-    if (accumulatedHeight + rowHeight > offsetY) {
-      return r
-    }
-    accumulatedHeight += rowHeight
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-  
-  return DEFAULT_ROWS - 1
+  const sizes = createSizeAccess()
+  return geomGetRowAtY(y, viewport, sizes, cfg, DEFAULT_ROWS)
 }
 
 // 根据 X 坐标（含滚动偏移）获取列号
 function getColAtX(x: number): number {
-  const offsetX = x + viewport.scrollLeft - ROW_HEADER_WIDTH
-  let accumulatedWidth = 0
-  
-  for (let c = 0; c < DEFAULT_COLS; c++) {
-    const colWidth = getColWidth(c)
-    if (accumulatedWidth + colWidth > offsetX) {
-      return c
-    }
-    accumulatedWidth += colWidth
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-  
-  return DEFAULT_COLS - 1
+  const sizes = createSizeAccess()
+  return geomGetColAtX(x, viewport, sizes, cfg, DEFAULT_COLS)
 }
 
 function getVisibleRange(w: number, h: number) {
-  // Calculate which rows and columns are visible based on scroll offset
-  const startRow = Math.max(0, Math.floor(viewport.scrollTop / ROW_HEIGHT))
-  const endRow = Math.min(DEFAULT_ROWS, startRow + Math.ceil(h / ROW_HEIGHT) + 1)
-
-  const startCol = Math.max(0, Math.floor(viewport.scrollLeft / COL_WIDTH))
-  const endCol = Math.min(DEFAULT_COLS, startCol + Math.ceil((w - ROW_HEADER_WIDTH) / COL_WIDTH) + 1)
-
-  return { startRow, endRow, startCol, endCol }
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  return geomGetVisibleRange(w, h, viewport, sizes, cfg, DEFAULT_ROWS, DEFAULT_COLS)
 }
 
 function ensureVisible(row: number, col: number) {
   if (!container.value) return
   const w = container.value.clientWidth
   const h = container.value.clientHeight
-
-  // Calculate the screen position of the cell
-  const cellLeft = ROW_HEADER_WIDTH + col * COL_WIDTH - viewport.scrollLeft
-  const cellTop = COL_HEADER_HEIGHT + row * ROW_HEIGHT - viewport.scrollTop
-  const cellRight = cellLeft + COL_WIDTH
-  const cellBottom = cellTop + ROW_HEIGHT
-
-  // Check if cell is completely visible (with some padding consideration)
-  const isRowVisible = cellTop >= COL_HEADER_HEIGHT && cellBottom <= h
-  const isColVisible = cellLeft >= ROW_HEADER_WIDTH && cellRight <= w
-
-  if (isRowVisible && isColVisible) {
-    return // Cell is already completely visible
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-
-  // Adjust scrollTop to ensure row is completely visible
-  if (!isRowVisible) {
-    if (cellTop < COL_HEADER_HEIGHT) {
-      // Row is above visible area
-      viewport.scrollTop = Math.max(0, row * ROW_HEIGHT)
-    } else if (cellBottom > h) {
-      // Row is below visible area
-      viewport.scrollTop = Math.max(0, (row + 1) * ROW_HEIGHT - h + COL_HEADER_HEIGHT)
-    }
-  }
-
-  // Adjust scrollLeft to ensure column is completely visible
-  if (!isColVisible) {
-    if (cellLeft < ROW_HEADER_WIDTH) {
-      // Column is to the left of visible area
-      viewport.scrollLeft = Math.max(0, col * COL_WIDTH)
-    } else if (cellRight > w) {
-      // Column is to the right of visible area (including partially visible)
-      viewport.scrollLeft = Math.max(0, (col + 1) * COL_WIDTH - w + ROW_HEADER_WIDTH)
-    }
-  }
-
+  const sizes = createSizeAccess()
+  const next = geomEnsureVisible(row, col, viewport, w, h, sizes, cfg)
+  viewport.scrollTop = next.scrollTop
+  viewport.scrollLeft = next.scrollLeft
   draw()
 }
 
@@ -589,556 +494,128 @@ function getTotalContentWidth(): number {
   return getColLeft(DEFAULT_COLS)
 }
 
-function updateScrollbars(w: number, h: number) {
-  // 轨道尺寸为可视区域（剔除行/列表头）
-  const trackH = Math.max(0, h - COL_HEADER_HEIGHT)
-  const trackW = Math.max(0, w - ROW_HEADER_WIDTH)
-  const contentH = getTotalContentHeight()
-  const contentW = getTotalContentWidth()
-  const minThumb = 20
-
-  // 垂直滚动条
-  scrollbar.v.trackSize = trackH
-  if (contentH <= trackH || trackH === 0) {
-    scrollbar.v.visible = false
-    viewport.scrollTop = 0
-    scrollbar.v.thumbSize = 0
-    scrollbar.v.thumbPos = 0
-  } else {
-    scrollbar.v.visible = true
-    const thumbLen = Math.max(minThumb, Math.floor(trackH * trackH / contentH))
-    const maxThumbPos = trackH - thumbLen
-    const maxScroll = contentH - trackH
-    const pos = Math.floor((viewport.scrollTop / maxScroll) * maxThumbPos)
-    scrollbar.v.thumbSize = thumbLen
-    scrollbar.v.thumbPos = Math.max(0, Math.min(maxThumbPos, pos))
-  }
-
-  // 水平滚动条
-  scrollbar.h.trackSize = trackW
-  if (contentW <= trackW || trackW === 0) {
-    scrollbar.h.visible = false
-    viewport.scrollLeft = 0
-    scrollbar.h.thumbSize = 0
-    scrollbar.h.thumbPos = 0
-  } else {
-    scrollbar.h.visible = true
-    const thumbLen = Math.max(minThumb, Math.floor(trackW * trackW / contentW))
-    const maxThumbPos = trackW - thumbLen
-    const maxScroll = contentW - trackW
-    const pos = Math.floor((viewport.scrollLeft / maxScroll) * maxThumbPos)
-    scrollbar.h.thumbSize = thumbLen
-    scrollbar.h.thumbPos = Math.max(0, Math.min(maxThumbPos, pos))
-  }
+function updateScrollbarsLocal(w: number, h: number) {
+  updateScrollbars(viewport, scrollbar, {
+    containerWidth: w,
+    containerHeight: h,
+    contentWidth: getTotalContentWidth(),
+    contentHeight: getTotalContentHeight(),
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  })
 }
 
 /**
  * 获取选择范围的文本表示 (如 "A1:B3", "3行 x 2列")
  */
 function getSelectionRangeText(startRow: number, startCol: number, endRow: number, endCol: number): string {
-  const startAddr = formulaSheet.getCellAddress(startRow, startCol)
-  const endAddr = formulaSheet.getCellAddress(endRow, endCol)
-  const rows = endRow - startRow + 1
-  const cols = endCol - startCol + 1
-  
-  if (rows === 1 && cols === 1) {
-    return startAddr
-  }
-  
-  return `${startAddr}:${endAddr}  (${rows}行 × ${cols}列)`
+  return getSelectionText(startRow, startCol, endRow, endCol, (r, c) => formulaSheet.getCellAddress(r, c))
 }
 
 function drawGrid(w: number, h: number) {
   const canvas = gridCanvas.value!
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-  // background colors
-  ctx.fillStyle = '#f0f0f0'
-  ctx.fillRect(0, 0, w, COL_HEADER_HEIGHT)
-  ctx.fillRect(0, 0, ROW_HEADER_WIDTH, h)
-
-  const { startRow, endRow, startCol, endCol } = getVisibleRange(w, h)
-
-  ctx.strokeStyle = '#999'
-  ctx.lineWidth = 1
-  ctx.fillStyle = '#333'
-  ctx.font = '12px sans-serif'
-  ctx.textBaseline = 'middle'
-
-  // draw visible columns
-  let accumulatedColX = ROW_HEADER_WIDTH
-  for (let c = 0; c < DEFAULT_COLS; c++) {
-    const colWidth = getColWidth(c)
-    const x = accumulatedColX - viewport.scrollLeft
-    
-    // 只绘制可见的列
-    if (x + colWidth > ROW_HEADER_WIDTH && x < w && c >= startCol && c <= endCol) {
-      // vertical line at left of column (只绘制内容区域部分)
-      ctx.strokeStyle = '#999'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(x, COL_HEADER_HEIGHT)
-      ctx.lineTo(x, h)
-      ctx.stroke()
-      
-      // column label (在表头区域绘制，会被后续遮罩层覆盖和重绘)
-      if (x + colWidth > ROW_HEADER_WIDTH && x < w) {
-        const label = getColLabel(c)
-        const metrics = ctx.measureText(label)
-        ctx.fillText(label, x + (colWidth - metrics.width) / 2, COL_HEADER_HEIGHT / 2)
-      }
-    }
-    
-    accumulatedColX += colWidth
-    
-    // 绘制列的右边界（分隔线），检查是否需要高亮
-    // 注意：这里的高亮线会被后续的遮罩层覆盖，实际显示由遮罩层后的重绘控制
-    const rightX = accumulatedColX - viewport.scrollLeft
-    if (rightX > ROW_HEADER_WIDTH && rightX < w && c >= startCol && c <= endCol) {
-      ctx.strokeStyle = '#999'  // 第一次绘制使用默认颜色
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(rightX, COL_HEADER_HEIGHT)
-      ctx.lineTo(rightX, h)
-      ctx.stroke()
-    }
-    
-    if (accumulatedColX - viewport.scrollLeft > w) break
+  
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
   }
-
-  // draw visible rows
-  let accumulatedRowY = COL_HEADER_HEIGHT
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    const rowHeight = getRowHeight(r)
-    const y = accumulatedRowY - viewport.scrollTop
-    
-    // 只绘制可见的行
-    if (y + rowHeight > COL_HEADER_HEIGHT && y < h && r >= startRow && r <= endRow) {
-      // horizontal line at top of row (只绘制内容区域部分)
-      ctx.strokeStyle = '#999'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(ROW_HEADER_WIDTH, y)
-      ctx.lineTo(w, y)
-      ctx.stroke()
-      
-      // row label (在表头区域绘制，会被后续遮罩层覆盖和重绘)
-      if (y + rowHeight > COL_HEADER_HEIGHT && y < h) {
-        const label = (r + 1).toString()
-        const metrics = ctx.measureText(label)
-        ctx.fillText(label, (ROW_HEADER_WIDTH - metrics.width) / 2, y + rowHeight / 2)
-      }
-    }
-    
-    accumulatedRowY += rowHeight
-    
-    // 绘制行的下边界（分隔线），检查是否需要高亮
-    // 注意：这里的高亮线会被后续的遮罩层覆盖，实际显示由遮罩层后的重绘控制
-    const bottomY = accumulatedRowY - viewport.scrollTop
-    if (bottomY > COL_HEADER_HEIGHT && bottomY < h && r >= startRow && r <= endRow) {
-      ctx.strokeStyle = '#999'  // 第一次绘制使用默认颜色
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(ROW_HEADER_WIDTH, bottomY)
-      ctx.lineTo(w, bottomY)
-      ctx.stroke()
-    }
-    
-    if (accumulatedRowY - viewport.scrollTop > h) break
+  const sizes: SizeAccess = {
+    rowHeights: rowHeights.value,
+    colWidths: colWidths.value,
+    hiddenRows: hiddenRows.value,
+    hiddenCols: hiddenCols.value,
+    showGridFlag: showGridLines.value
   }
   
-  // 在网格绘制的最后，重新绘制行头和列标的遮罩层，覆盖任何可能溢出的内容
-  // 这确保表头始终在最上层
-  ctx.fillStyle = '#f0f0f0'
-  // 列标头遮罩
-  ctx.fillRect(0, 0, w, COL_HEADER_HEIGHT)
-  // 行标头遮罩  
-  ctx.fillRect(0, 0, ROW_HEADER_WIDTH, h)
-  
-  // 重新绘制列标签和分隔线
-  ctx.fillStyle = '#333'
-  ctx.font = '12px sans-serif'
-  ctx.textBaseline = 'middle'
-  ctx.strokeStyle = '#999'
-  ctx.lineWidth = 1
-  
-  accumulatedColX = ROW_HEADER_WIDTH
-  for (let c = 0; c < DEFAULT_COLS; c++) {
-    const colWidth = getColWidth(c)
-    const x = accumulatedColX - viewport.scrollLeft
-    
-    if (x + colWidth > ROW_HEADER_WIDTH && x < w && c >= startCol && c <= endCol) {
-      // 绘制列的左边界线
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, COL_HEADER_HEIGHT)
-      ctx.stroke()
-      
-      // 绘制列标签
-      const label = getColLabel(c)
-      const metrics = ctx.measureText(label)
-      ctx.fillText(label, x + (colWidth - metrics.width) / 2, COL_HEADER_HEIGHT / 2)
-    }
-    
-    accumulatedColX += colWidth
-    
-    // 绘制列的右边界线（分隔线）- 普通样式
-    const rightX = accumulatedColX - viewport.scrollLeft
-    if (rightX > ROW_HEADER_WIDTH && rightX < w && c >= startCol && c <= endCol) {
-      ctx.strokeStyle = '#999'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(rightX, 0)
-      ctx.lineTo(rightX, COL_HEADER_HEIGHT)
-      ctx.stroke()
-    }
-    
-    if (accumulatedColX - viewport.scrollLeft > w) break
+  const gridConfig: GridRenderConfig = {
+    containerWidth: w,
+    containerHeight: h,
+    viewport,
+    hoverState,
+    totalRows: DEFAULT_ROWS,
+    totalCols: DEFAULT_COLS,
+    sizes,
+    geometryConfig: cfg
   }
   
-  // 重新绘制行标签和分隔线
-  accumulatedRowY = COL_HEADER_HEIGHT
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    const rowHeight = getRowHeight(r)
-    const y = accumulatedRowY - viewport.scrollTop
-    
-    if (y + rowHeight > COL_HEADER_HEIGHT && y < h && r >= startRow && r <= endRow) {
-      // 绘制行的上边界线
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(ROW_HEADER_WIDTH, y)
-      ctx.stroke()
-      
-      // 绘制行标签
-      const label = (r + 1).toString()
-      const metrics = ctx.measureText(label)
-      ctx.fillText(label, (ROW_HEADER_WIDTH - metrics.width) / 2, y + rowHeight / 2)
-    }
-    
-    accumulatedRowY += rowHeight
-    
-    // 绘制行的下边界线（分隔线）- 普通样式
-    const bottomY = accumulatedRowY - viewport.scrollTop
-    if (bottomY > COL_HEADER_HEIGHT && bottomY < h && r >= startRow && r <= endRow) {
-      ctx.strokeStyle = '#999'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(0, bottomY)
-      ctx.lineTo(ROW_HEADER_WIDTH, bottomY)
-      ctx.stroke()
-    }
-    
-    if (accumulatedRowY - viewport.scrollTop > h) break
-  }
-  
-  // 最后绘制列标头和行标头的边界线
-  ctx.strokeStyle = '#999'
-  ctx.lineWidth = 1
-  // 列标头底部边界
-  ctx.beginPath()
-  ctx.moveTo(0, COL_HEADER_HEIGHT)
-  ctx.lineTo(w, COL_HEADER_HEIGHT)
-  ctx.stroke()
-  // 行标头右侧边界
-  ctx.beginPath()
-  ctx.moveTo(ROW_HEADER_WIDTH, 0)
-  ctx.lineTo(ROW_HEADER_WIDTH, h)
-  ctx.stroke()
-  
-  // 左上角交叉区域的遮罩层，覆盖任何滚动后可能显示的内容
-  // 扩大1像素以完全覆盖边界线
-  ctx.fillStyle = '#f0f0f0'
-  ctx.fillRect(0, 0, ROW_HEADER_WIDTH + 1, COL_HEADER_HEIGHT + 1)
-  
-  // 重新绘制左上角区域的右边界和下边界线，确保边框完整
-  ctx.strokeStyle = '#999'
-  ctx.lineWidth = 1
-  // 右边界（垂直线）
-  ctx.beginPath()
-  ctx.moveTo(ROW_HEADER_WIDTH, 0)
-  ctx.lineTo(ROW_HEADER_WIDTH, COL_HEADER_HEIGHT)
-  ctx.stroke()
-  // 下边界（水平线）
-  ctx.beginPath()
-  ctx.moveTo(0, COL_HEADER_HEIGHT)
-  ctx.lineTo(ROW_HEADER_WIDTH, COL_HEADER_HEIGHT)
-  ctx.stroke()
-  
-  // 最后绘制悬停高亮线（蓝色），确保不被其他线覆盖
-  if (hoverState.type === 'col' && hoverState.index >= 0) {
-    // 绘制列的高亮线
-    const c = hoverState.index
-    const rightX = ROW_HEADER_WIDTH + getColLeft(c + 1) - viewport.scrollLeft
-    if (rightX > ROW_HEADER_WIDTH && rightX < w) {
-      ctx.strokeStyle = '#3b82f6'
-      ctx.lineWidth = 2
-      // 表头区域的高亮
-      ctx.beginPath()
-      ctx.moveTo(rightX, 0)
-      ctx.lineTo(rightX, COL_HEADER_HEIGHT)
-      ctx.stroke()
-      // 内容区域的高亮
-      ctx.beginPath()
-      ctx.moveTo(rightX, COL_HEADER_HEIGHT)
-      ctx.lineTo(rightX, h)
-      ctx.stroke()
-    }
-  } else if (hoverState.type === 'row' && hoverState.index >= 0) {
-    // 绘制行的高亮线
-    const r = hoverState.index
-    const bottomY = COL_HEADER_HEIGHT + getRowTop(r + 1) - viewport.scrollTop
-    if (bottomY > COL_HEADER_HEIGHT && bottomY < h) {
-      ctx.strokeStyle = '#3b82f6'
-      ctx.lineWidth = 2
-      // 表头区域的高亮
-      ctx.beginPath()
-      ctx.moveTo(0, bottomY)
-      ctx.lineTo(ROW_HEADER_WIDTH, bottomY)
-      ctx.stroke()
-      // 内容区域的高亮
-      ctx.beginPath()
-      ctx.moveTo(ROW_HEADER_WIDTH, bottomY)
-      ctx.lineTo(w, bottomY)
-      ctx.stroke()
-    }
-  }
+  renderGrid(ctx, gridConfig)
 }
 
 function drawCells(w: number, h: number) {
   const canvas = contentCanvas.value!
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-
+  
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  
   const { startRow, endRow, startCol, endCol } = getVisibleRange(w, h)
   
-  // 设置裁剪区域，确保内容不会绘制到行头和列标区域
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(ROW_HEADER_WIDTH, COL_HEADER_HEIGHT, w - ROW_HEADER_WIDTH, h - COL_HEADER_HEIGHT)
-  ctx.clip()
-
-  ctx.fillStyle = '#000'
-  ctx.font = '13px sans-serif'
-  ctx.textBaseline = 'middle'
-
-  // draw visible cells from model
-  for (let r = startRow; r < endRow; r++) {
-    const cellY = COL_HEADER_HEIGHT + getRowTop(r) - viewport.scrollTop
-    const rowHeight = getRowHeight(r)
-    
-    for (let c = startCol; c < endCol; c++) {
-      const displayValue = formulaSheet.getValue(r, c)
-      if (displayValue !== null && displayValue !== undefined) {
-        const cellX = ROW_HEADER_WIDTH + getColLeft(c) - viewport.scrollLeft
-        const colWidth = getColWidth(c)
-        
-        // 保存当前绘图状态
-        ctx.save()
-        
-        // 创建裁剪区域限制在当前单元格内
-        ctx.beginPath()
-        ctx.rect(cellX, cellY, colWidth, rowHeight)
-        ctx.clip()
-        
-        // 处理换行符
-        const text = String(displayValue)
-        const lines = text.split('\n')
-        
-        if (lines.length === 1) {
-          // 单行：使用原来的中心对齐方式
-          const textX = cellX + 6
-          const textY = cellY + rowHeight / 2
-          ctx.fillText(text, textX, textY)
-        } else {
-          // 多行：从顶部开始绘制
-          ctx.textBaseline = 'top'
-          const textX = cellX + 6
-          const lineHeight = 18
-          
-          lines.forEach((line, index) => {
-            const textY = cellY + 4 + index * lineHeight
-            // 只绘制在单元格范围内的行
-            if (textY >= cellY && textY < cellY + rowHeight) {
-              ctx.fillText(line, textX, textY)
-            }
-          })
-          ctx.textBaseline = 'middle' // 恢复默认
-        }
-        
-        // 恢复绘图状态（包括裁剪区域）
-        ctx.restore()
-      }
-    }
-  }
-
-  // highlight selection range (fill with light blue)
-  if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
-    for (let r = selectionRange.startRow; r <= selectionRange.endRow; r++) {
-      const sy = COL_HEADER_HEIGHT + getRowTop(r) - viewport.scrollTop
-      const rowHeight = getRowHeight(r)
-      
-      for (let c = selectionRange.startCol; c <= selectionRange.endCol; c++) {
-        const sx = ROW_HEADER_WIDTH + getColLeft(c) - viewport.scrollLeft
-        const colWidth = getColWidth(c)
-        
-        if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
-          ctx.fillRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
-        }
-      }
-    }
-    // Draw border around selection range
-    const sx = ROW_HEADER_WIDTH + getColLeft(selectionRange.startCol) - viewport.scrollLeft
-    const sy = COL_HEADER_HEIGHT + getRowTop(selectionRange.startRow) - viewport.scrollTop
-    const ex = ROW_HEADER_WIDTH + getColLeft(selectionRange.endCol + 1) - viewport.scrollLeft
-    const ey = COL_HEADER_HEIGHT + getRowTop(selectionRange.endRow + 1) - viewport.scrollTop
-    ctx.strokeStyle = '#3b82f6'
-    ctx.lineWidth = 2
-    ctx.strokeRect(sx + 0.5, sy + 0.5, ex - sx - 1, ey - sy - 1)
-  }
-
-  // highlight single selection
-  if (selected.row >= 0 && selected.col >= 0) {
-    const sx = ROW_HEADER_WIDTH + getColLeft(selected.col) - viewport.scrollLeft
-    const sy = COL_HEADER_HEIGHT + getRowTop(selected.row) - viewport.scrollTop
-    const colWidth = getColWidth(selected.col)
-    const rowHeight = getRowHeight(selected.row)
-    ctx.strokeStyle = '#3b82f6'
-    ctx.lineWidth = 2
-    ctx.strokeRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
-  }
-
-  // 绘制公式引用的彩色外框 (Excel 风格)
-  if (formulaReferences.value.length > 0) {
-    for (const ref of formulaReferences.value) {
-  const sx = ROW_HEADER_WIDTH + getColLeft(ref.startCol) - viewport.scrollLeft
-  const sy = COL_HEADER_HEIGHT + getRowTop(ref.startRow) - viewport.scrollTop
-  const ex = ROW_HEADER_WIDTH + getColLeft(ref.endCol + 1) - viewport.scrollLeft
-  const ey = COL_HEADER_HEIGHT + getRowTop(ref.endRow + 1) - viewport.scrollTop
-  const width = ex - sx
-  const height = ey - sy
-      
-      // 只绘制可见的引用
-      if (sx + width > 0 && sx < w && sy + height > 0 && sy < h) {
-        ctx.strokeStyle = ref.color
-        ctx.lineWidth = 2
-        ctx.strokeRect(sx + 0.5, sy + 0.5, width - 1, height - 1)
-      }
-    }
-  }
-
-  // Draw dashed box during dragging (Phase 3 feature)
-  if (dragState.isDragging && dragState.startRow >= 0 && dragState.startCol >= 0) {
-    const startRow = Math.min(dragState.startRow, dragState.currentRow)
-    const startCol = Math.min(dragState.startCol, dragState.currentCol)
-    const endRow = Math.max(dragState.startRow, dragState.currentRow)
-    const endCol = Math.max(dragState.startCol, dragState.currentCol)
-
-  // Calculate dashed box coordinates - 使用动态行高列宽
-  const sx = ROW_HEADER_WIDTH + getColLeft(startCol) - viewport.scrollLeft
-  const sy = COL_HEADER_HEIGHT + getRowTop(startRow) - viewport.scrollTop
-  const ex = ROW_HEADER_WIDTH + getColLeft(endCol + 1) - viewport.scrollLeft
-  const ey = COL_HEADER_HEIGHT + getRowTop(endRow + 1) - viewport.scrollTop
-  const width = ex - sx
-  const height = ey - sy
-
-    // Draw dashed border
-    ctx.strokeStyle = '#10b981'
-    ctx.lineWidth = 2
-    ctx.setLineDash([5, 5])
-    ctx.strokeRect(sx + 0.5, sy + 0.5, width - 1, height - 1)
-    ctx.setLineDash([]) // Reset line dash
-
-    // Display selection range text
-    const rangeText = getSelectionRangeText(startRow, startCol, endRow, endCol)
-    ctx.fillStyle = '#059669'
-    ctx.font = 'bold 12px sans-serif'
-    ctx.textBaseline = 'bottom'
-    const textMetrics = ctx.measureText(rangeText)
-    const textX = sx + 5
-    const textY = sy - 2
-    
-    // Draw semi-transparent background for text
-    ctx.fillStyle = 'rgba(16, 185, 129, 0.1)'
-    ctx.fillRect(textX - 2, textY - 14, textMetrics.width + 4, 14)
-    
-    // Draw text
-    ctx.fillStyle = '#059669'
-    ctx.fillText(rangeText, textX, textY)
+  const cellsConfig: CellsRenderConfig = {
+    containerWidth: w,
+    containerHeight: h,
+    viewport,
+    selected,
+    selectionRange,
+    dragState,
+    formulaReferences: formulaReferences.value,
+    sizes,
+    geometryConfig: cfg,
+    getCellValue: (r, c) => formulaSheet.getValue(r, c),
+    getSelectionRangeText,
+    startRow,
+    endRow,
+    startCol,
+    endCol
   }
   
-  // 恢复裁剪区域
-  ctx.restore()
+  renderCells(ctx, cellsConfig)
 }
 
 function onClick(e: MouseEvent) {
   if (!container.value) return
   
-  // 如果刚完成拖动，忽略 click 事件
-  if (dragState.justFinishedDrag) {
-    dragState.justFinishedDrag = false
-    return
-  }
-  
   const rect = container.value.getBoundingClientRect()
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
 
-  // 点击行头：选择整行
-  if (x < ROW_HEADER_WIDTH && y > COL_HEADER_HEIGHT) {
-    const row = getRowAtY(y)
-    selected.row = row
-    selected.col = 0
-    selectionRange.startRow = row
-    selectionRange.startCol = 0
-    selectionRange.endRow = row
-    selectionRange.endCol = DEFAULT_COLS - 1
-    draw()
-    return
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+
+  const selectionState: SelectionState = {
+    selected,
+    selectionRange,
+    dragState
   }
 
-  // 点击列头：选择整列
-  if (y < COL_HEADER_HEIGHT && x > ROW_HEADER_WIDTH) {
-    const col = getColAtX(x)
-    selected.row = 0
-    selected.col = col
-    selectionRange.startRow = 0
-    selectionRange.startCol = col
-    selectionRange.endRow = DEFAULT_ROWS - 1
-    selectionRange.endCol = col
-    draw()
-    return
-  }
+  const needsRedraw = handleClick({
+    x,
+    y,
+    shiftKey: e.shiftKey,
+    containerRect: rect,
+    viewport,
+    geometryConfig: cfg,
+    sizes,
+    defaultRows: DEFAULT_ROWS,
+    defaultCols: DEFAULT_COLS,
+    state: selectionState
+  })
 
-  // 点击左上角：选择全部
-  if (x < ROW_HEADER_WIDTH && y < COL_HEADER_HEIGHT) {
-    selected.row = 0
-    selected.col = 0
-    selectionRange.startRow = 0
-    selectionRange.startCol = 0
-    selectionRange.endRow = DEFAULT_ROWS - 1
-    selectionRange.endCol = DEFAULT_COLS - 1
-    draw()
-    return
-  }
-
-  // 点击内容区域
-  if (x < ROW_HEADER_WIDTH || y < COL_HEADER_HEIGHT) return
-
-  // Account for scroll offset - 使用动态计算
-  const col = getColAtX(x)
-  const row = getRowAtY(y)
-
-  if (e.shiftKey && selected.row >= 0 && selected.col >= 0) {
-    // Shift+Click: expand selection range
-    selectionRange.startRow = Math.min(selected.row, row)
-    selectionRange.startCol = Math.min(selected.col, col)
-    selectionRange.endRow = Math.max(selected.row, row)
-    selectionRange.endCol = Math.max(selected.col, col)
+  if (needsRedraw) {
     draw()
   }
-  // Normal click handling is done in onMouseUp to distinguish from drag
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -1169,20 +646,31 @@ function onMouseDown(e: MouseEvent) {
       if (accumulatedY > y + RESIZE_HANDLE_SIZE) break
     }
     
-    // 如果不是调整大小，则是拖动选择行
-    const row = getRowAtY(y)
-    dragState.isDragging = true
-    dragState.startRow = row
-    dragState.startCol = 0
-    dragState.currentRow = row
-    dragState.currentCol = DEFAULT_COLS - 1
+    // 如果不是调整大小，使用选择模块处理行拖拽
+    const cfg: GeometryConfig = {
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      rowHeaderWidth: ROW_HEADER_WIDTH,
+      colHeaderHeight: COL_HEADER_HEIGHT
+    }
+    const sizes = createSizeAccess()
+    const selectionState: SelectionState = {
+      selected,
+      selectionRange,
+      dragState
+    }
     
-    selected.row = row
-    selected.col = 0
-    selectionRange.startRow = row
-    selectionRange.startCol = 0
-    selectionRange.endRow = row
-    selectionRange.endCol = DEFAULT_COLS - 1
+    startDragSelection({
+      x,
+      y,
+      containerRect: rect,
+      viewport,
+      geometryConfig: cfg,
+      sizes,
+      defaultRows: DEFAULT_ROWS,
+      defaultCols: DEFAULT_COLS,
+      state: selectionState
+    })
     draw()
     return
   }
@@ -1209,30 +697,37 @@ function onMouseDown(e: MouseEvent) {
       if (accumulatedX > x + RESIZE_HANDLE_SIZE) break
     }
     
-    // 如果不是调整大小，则是拖动选择列
-    const col = getColAtX(x)
-    dragState.isDragging = true
-    dragState.startRow = 0
-    dragState.startCol = col
-    dragState.currentRow = DEFAULT_ROWS - 1
-    dragState.currentCol = col
+    // 如果不是调整大小，使用选择模块处理列拖拽
+    const cfg: GeometryConfig = {
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      rowHeaderWidth: ROW_HEADER_WIDTH,
+      colHeaderHeight: COL_HEADER_HEIGHT
+    }
+    const sizes = createSizeAccess()
+    const selectionState: SelectionState = {
+      selected,
+      selectionRange,
+      dragState
+    }
     
-    selected.row = 0
-    selected.col = col
-    selectionRange.startRow = 0
-    selectionRange.startCol = col
-    selectionRange.endRow = DEFAULT_ROWS - 1
-    selectionRange.endCol = col
+    startDragSelection({
+      x,
+      y,
+      containerRect: rect,
+      viewport,
+      geometryConfig: cfg,
+      sizes,
+      defaultRows: DEFAULT_ROWS,
+      defaultCols: DEFAULT_COLS,
+      state: selectionState
+    })
     draw()
     return
   }
 
   // 点击左上角
   if (x < ROW_HEADER_WIDTH && y < COL_HEADER_HEIGHT) return
-
-  // Account for scroll offset - 使用动态计算
-  const col = getColAtX(x)
-  const row = getRowAtY(y)
 
   // 如果输入框可见，检查点击位置
   if (overlay.visible && overlayInput.value) {
@@ -1246,11 +741,14 @@ function onMouseDown(e: MouseEvent) {
       // 将输入框坐标转换为相对于容器的坐标
       const inputLeft = inputRect.left - containerRect.left
       const inputTop = inputRect.top - containerRect.top
-      const inputRight = inputLeft + inputRect.width
-      const inputBottom = inputTop + inputRect.height
       
       // 如果点击的是输入框内部
-      if (x >= inputLeft && x <= inputRight && y >= inputTop && y <= inputBottom) {
+      if (isClickInsideOverlay(x, y, {
+        left: inputLeft,
+        top: inputTop,
+        width: inputRect.width,
+        height: inputRect.height
+      })) {
         // 不初始化拖拽状态，直接返回
         return
       }
@@ -1262,25 +760,44 @@ function onMouseDown(e: MouseEvent) {
     }
   }
 
-  // Prepare for drag selection
-  dragState.isDragging = true
-  dragState.startRow = row
-  dragState.startCol = col
-  dragState.currentRow = row
-  dragState.currentCol = col
+  // 使用选择模块处理普通单元格拖拽
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  const selectionState: SelectionState = {
+    selected,
+    selectionRange,
+    dragState
+  }
+  
+  startDragSelection({
+    x,
+    y,
+    containerRect: rect,
+    viewport,
+    geometryConfig: cfg,
+    sizes,
+    defaultRows: DEFAULT_ROWS,
+    defaultCols: DEFAULT_COLS,
+    state: selectionState
+  })
 }
 
 function openOverlay(row: number, col: number, initialValue: string, mode: 'edit' | 'typing' = 'edit') {
-  overlay.row = row
-  overlay.col = col
-  overlay.top = COL_HEADER_HEIGHT + getRowTop(row) - viewport.scrollTop
-  overlay.left = ROW_HEADER_WIDTH + getColLeft(col) - viewport.scrollLeft
-  overlay.width = getColWidth(col)
-  overlay.height = getRowHeight(row)
-  overlay.value = initialValue
-  overlay.originalValue = initialValue  // 保存原始值用于 ESC 取消
-  overlay.mode = mode
-  overlay.visible = true
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  
+  const overlayState = openOverlayHelper(row, col, initialValue, mode, viewport, sizes, cfg)
+  Object.assign(overlay, overlayState)
   draw()
 }
 
@@ -1290,8 +807,15 @@ function onDoubleClick(e: MouseEvent) {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
 
-  // ignore clicks in headers
-  if (x < ROW_HEADER_WIDTH || y < COL_HEADER_HEIGHT) return
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+
+  const { shouldOpen } = handleDoubleClickHelper(x, y, cfg)
+  if (!shouldOpen) return
 
   // Account for scroll offset - 使用动态计算
   const col = getColAtX(x)
@@ -1494,28 +1018,21 @@ function onKeyDown(e: KeyboardEvent) {
 function onWheel(e: WheelEvent) {
   e.preventDefault()
   
-  // Scroll vertically or horizontally
-  if (e.shiftKey || e.deltaX !== 0) {
-    // Horizontal scroll
-    const w = container.value?.clientWidth ?? 0
-    const trackW = Math.max(0, w - ROW_HEADER_WIDTH)
-    const maxScrollLeft = Math.max(0, getTotalContentWidth() - trackW)
-    viewport.scrollLeft = Math.max(0, Math.min(
-      viewport.scrollLeft + (e.deltaY || e.deltaX),
-      maxScrollLeft
-    ))
-  } else {
-    // Vertical scroll
-    const h = container.value?.clientHeight ?? 0
-    const trackH = Math.max(0, h - COL_HEADER_HEIGHT)
-    const maxScrollTop = Math.max(0, getTotalContentHeight() - trackH)
-    viewport.scrollTop = Math.max(0, Math.min(
-      viewport.scrollTop + e.deltaY,
-      maxScrollTop
-    ))
-  }
+  const w = container.value?.clientWidth ?? 0
+  const h = container.value?.clientHeight ?? 0
   
-  draw()
+  const changed = handleWheel(e, viewport, {
+    containerWidth: w,
+    containerHeight: h,
+    contentWidth: getTotalContentWidth(),
+    contentHeight: getTotalContentHeight(),
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  })
+  
+  if (changed) {
+    draw()
+  }
 }
 
 function onMouseMove(e: MouseEvent) {
@@ -1524,26 +1041,17 @@ function onMouseMove(e: MouseEvent) {
   // 滚动条拖拽优先处理
   if (scrollbar.dragging) {
     const rect = container.value.getBoundingClientRect()
-    if (scrollbar.dragging === 'v') {
-      const h = rect.height
-      const trackH = Math.max(0, h - COL_HEADER_HEIGHT)
-      const contentH = getTotalContentHeight()
-      const thumbMovable = Math.max(1, trackH - scrollbar.v.thumbSize)
-      const maxScroll = Math.max(1, contentH - trackH)
-      const delta = e.clientY - scrollbar.startMousePos
-      const scrollDelta = delta * (maxScroll / thumbMovable)
-      viewport.scrollTop = Math.max(0, Math.min(scrollbar.startScroll + scrollDelta, maxScroll))
-    } else if (scrollbar.dragging === 'h') {
-      const w = rect.width
-      const trackW = Math.max(0, w - ROW_HEADER_WIDTH)
-      const contentW = getTotalContentWidth()
-      const thumbMovable = Math.max(1, trackW - scrollbar.h.thumbSize)
-      const maxScroll = Math.max(1, contentW - trackW)
-      const delta = e.clientX - scrollbar.startMousePos
-      const scrollDelta = delta * (maxScroll / thumbMovable)
-      viewport.scrollLeft = Math.max(0, Math.min(scrollbar.startScroll + scrollDelta, maxScroll))
+    const changed = handleScrollbarDrag(scrollbar, viewport, { x: e.clientX, y: e.clientY }, {
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      contentWidth: getTotalContentWidth(),
+      contentHeight: getTotalContentHeight(),
+      rowHeaderWidth: ROW_HEADER_WIDTH,
+      colHeaderHeight: COL_HEADER_HEIGHT
+    })
+    if (changed) {
+      scheduleRedraw()
     }
-    scheduleRedraw()
     return
   }
 
@@ -1620,70 +1128,35 @@ function onMouseMove(e: MouseEvent) {
   
   container.value.style.cursor = cursor
 
-  // 处理单元格拖拽选择
-  if (!dragState.isDragging) return
-
-  // 检查鼠标是否在容器外
-  // 如果鼠标移出容器，停止更新拖拽状态
-  if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
-    return
+  // 使用选择模块处理单元格拖拽选择
+  const cfg: GeometryConfig = {
+    defaultRowHeight: ROW_HEIGHT,
+    defaultColWidth: COL_WIDTH,
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT
+  }
+  const sizes = createSizeAccess()
+  const selectionState: SelectionState = {
+    selected,
+    selectionRange,
+    dragState
   }
 
-  // 判断是否是行/列拖动选择
-  const isRowDrag = (dragState.startCol === 0 && dragState.currentCol === DEFAULT_COLS - 1)
-  const isColDrag = (dragState.startRow === 0 && dragState.currentRow === DEFAULT_ROWS - 1)
+  const changed = updateDragSelection({
+    x,
+    y,
+    containerRect: rect,
+    viewport,
+    geometryConfig: cfg,
+    sizes,
+    defaultRows: DEFAULT_ROWS,
+    defaultCols: DEFAULT_COLS,
+    state: selectionState
+  })
 
-  if (isRowDrag) {
-    // 拖动选择行
-    const row = getRowAtY(y)
-    if (row >= 0 && row < DEFAULT_ROWS) {
-      dragState.currentRow = row
-      // 保持列范围为整行
-      dragState.currentCol = DEFAULT_COLS - 1
-      selectionRange.startRow = Math.min(dragState.startRow, dragState.currentRow)
-      selectionRange.startCol = 0
-      selectionRange.endRow = Math.max(dragState.startRow, dragState.currentRow)
-      selectionRange.endCol = DEFAULT_COLS - 1
-      scheduleRedraw()
-    }
-    return
+  if (changed) {
+    scheduleRedraw()
   }
-
-  if (isColDrag) {
-    // 拖动选择列
-    const col = getColAtX(x)
-    if (col >= 0 && col < DEFAULT_COLS) {
-      dragState.currentCol = col
-      // 保持行范围为整列
-      dragState.currentRow = DEFAULT_ROWS - 1
-      selectionRange.startRow = 0
-      selectionRange.startCol = Math.min(dragState.startCol, dragState.currentCol)
-      selectionRange.endRow = DEFAULT_ROWS - 1
-      selectionRange.endCol = Math.max(dragState.startCol, dragState.currentCol)
-      scheduleRedraw()
-    }
-    return
-  }
-
-  // 普通单元格拖动选择
-  // ignore moves in headers
-  if (x < ROW_HEADER_WIDTH || y < COL_HEADER_HEIGHT) return
-
-  // Account for scroll offset - 使用动态计算
-  const col = getColAtX(x)
-  const row = getRowAtY(y)
-
-  dragState.currentRow = Math.max(0, Math.min(row, DEFAULT_ROWS - 1))
-  dragState.currentCol = Math.max(0, Math.min(col, DEFAULT_COLS - 1))
-
-  // Update selection range as dragging
-  selectionRange.startRow = Math.min(dragState.startRow, dragState.currentRow)
-  selectionRange.startCol = Math.min(dragState.startCol, dragState.currentCol)
-  selectionRange.endRow = Math.max(dragState.startRow, dragState.currentRow)
-  selectionRange.endCol = Math.max(dragState.startCol, dragState.currentCol)
-
-  // Use scheduleRedraw for smooth dragging at 60fps
-  scheduleRedraw()
 }
 
 function onMouseUp(): void {
@@ -1697,27 +1170,8 @@ function onMouseUp(): void {
 
   if (!dragState.isDragging) return
 
-  // 判断是否是行/列拖动选择
-  const isRowDrag = (dragState.startCol === 0 && dragState.currentCol === DEFAULT_COLS - 1)
-  const isColDrag = (dragState.startRow === 0 && dragState.currentRow === DEFAULT_ROWS - 1)
-
-  // 检测是否真正拖动了（不是单纯的点击）
-  const hasDragged = (dragState.startRow !== dragState.currentRow || dragState.startCol !== dragState.currentCol)
-  
-  dragState.isDragging = false
-
-  // 如果是行列拖动，保持选择范围不变（已经在 onMouseMove 中设置好了）
-  if (isRowDrag || isColDrag) {
-    // 清空单选状态，避免覆盖范围选择的显示
-    selected.row = -1
-    selected.col = -1
-    // 标记刚完成拖动（如果真的拖动了）
-    if (hasDragged) {
-      dragState.justFinishedDrag = true
-    }
-    draw()
-    return
-  }
+  // 使用选择模块结束拖拽（仅处理非 overlay 情况）
+  // overlay 相关逻辑保留在下方
   
   // Check if input is in formula mode
   if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
@@ -1794,23 +1248,17 @@ function onMouseUp(): void {
     return
   }
   
-  // If dragged to a different cell, clear single selection and keep range
-  if (dragState.startRow !== dragState.currentRow || dragState.startCol !== dragState.currentCol) {
-    selected.row = -1
-    selected.col = -1
-    // 标记刚完成拖动
-    dragState.justFinishedDrag = true
-  } else {
-    // If no actual drag (same cell), set it as selected
-    selected.row = dragState.startRow
-    selected.col = dragState.startCol
-    selectionRange.startRow = -1
-    selectionRange.startCol = -1
-    selectionRange.endRow = -1
-    selectionRange.endCol = -1
+  // 使用选择模块完成拖拽
+  const selectionState: SelectionState = {
+    selected,
+    selectionRange,
+    dragState
   }
   
-  draw()
+  const needsRedraw = endDragSelection(selectionState, DEFAULT_COLS)
+  if (needsRedraw) {
+    draw()
+  }
 }
 
 /**
@@ -1819,60 +1267,34 @@ function onMouseUp(): void {
  * 复制公式时保留原始文本（显示值，如 =A1+B1）
  */
 async function onCopy() {
-  if (selectionRange.startRow === -1) {
-  // 如果没有选区，复制当前单元格的值（不复制公式）
-  const value = formulaSheet.getValue(selected.row, selected.col)
-    try {
-      await navigator.clipboard.writeText(value)
-      console.log('Copied single cell:', value)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-    // 保存到内部剪贴板（用于表格内复制，保留公式）
-    const rawValue = formulaSheet.getModel().getValue(selected.row, selected.col)
-    internalClipboard.data = [[{ value: rawValue, isFormula: rawValue.startsWith('=') }]]
-    internalClipboard.startRow = selected.row
-    internalClipboard.startCol = selected.col
-    lastCopyTs.value = Date.now()
-    return
+  const source = {
+    getValue: (r: number, c: number) => formulaSheet.getValue(r, c),
+    getRawValue: (r: number, c: number) => formulaSheet.getModel().getValue(r, c)
   }
 
-  const { startRow, startCol, endRow, endCol } = selectionRange
-  let tsv = ''
-  const internalData: InternalClipboardCell[][] = []
+  let result
   
-  for (let r = startRow; r <= endRow; r++) {
-    const row: string[] = []
-  const internalRow: InternalClipboardCell[] = []
-    for (let c = startCol; c <= endCol; c++) {
-  // 复制到Excel时只复制计算结果值，不复制公式
-  const value = formulaSheet.getValue(r, c)
-      // TSV 格式：使用制表符分隔，换行符使用 \n
-      // Excel 会自动处理包含制表符和换行符的值
-      row.push(value)
-      
-  // 保存原始值到内部剪贴板（包括公式）
-  const rawValue = formulaSheet.getModel().getValue(r, c)
-  internalRow.push({ value: rawValue, isFormula: rawValue.startsWith('=') })
-    }
-    tsv += row.join('\t') + '\n'
-  internalData.push(internalRow)
+  if (selectionRange.startRow === -1) {
+    // 如果没有选区，复制当前单元格
+    result = await copySingleCell(selected.row, selected.col, source)
+    internalClipboard.startRow = selected.row
+    internalClipboard.startCol = selected.col
+  } else {
+    // 复制选区范围
+    const { startRow, startCol, endRow, endCol } = selectionRange
+    result = await copyRange(startRow, startCol, endRow, endCol, source)
+    internalClipboard.startRow = startRow
+    internalClipboard.startCol = startCol
   }
   
-  // 去掉最后的换行符
-  tsv = tsv.slice(0, -1)
-  
   // 保存到内部剪贴板
-  internalClipboard.data = internalData
-  internalClipboard.startRow = startRow
-  internalClipboard.startCol = startCol
+  internalClipboard.data = result.internalData
   lastCopyTs.value = Date.now()
   
-  try {
-    await navigator.clipboard.writeText(tsv)
-    console.log('Copied to clipboard (TSV format):', tsv.substring(0, 100) + '...')
-  } catch (err) {
-    console.error('Failed to copy:', err)
+  // 写入系统剪贴板
+  const success = await writeToClipboard(result.tsv)
+  if (success) {
+    console.log('Copied to clipboard (TSV format):', result.tsv.substring(0, 100) + (result.tsv.length > 100 ? '...' : ''))
   }
 }
 
@@ -1884,218 +1306,52 @@ async function onCopy() {
  * 3. 自动处理相对/绝对引用（$符号）
  */
 async function onPaste() {
-    // 获取粘贴起点
-    const destStartRow = selected.row
-    const destStartCol = selected.col
+  const destStartRow = selected.row
+  const destStartCol = selected.col
+  
+  const target = {
+    setValue: (r: number, c: number, v: string) => formulaSheet.setValue(r, c, v),
+    copyCell: (sr: number, sc: number, dr: number, dc: number) => formulaSheet.copyCell(sr, sc, dr, dc)
+  }
+  
+  // 优先使用内部剪贴板（表格内复制，保留公式和引用信息）
+  if (internalClipboard.data && isInternalClipboardValid(lastCopyTs.value)) {
+    console.log('Pasting from internal clipboard with formula metadata')
     
-    // 优先使用内部剪贴板（表格内复制，保留公式和引用信息）
-  if (internalClipboard.data && (Date.now() - lastCopyTs.value) < 5000) {
-      console.log('Pasting from internal clipboard with formula metadata')
-      const srcStartRow = internalClipboard.startRow
-      const srcStartCol = internalClipboard.startCol
-      const data = internalClipboard.data
-      
-      // 检查是否有选区
-      const hasSelection = selectionRange.startRow !== -1
-      
-      if (hasSelection) {
-        // 有选区：填充整个选区（Excel 行为）
-        const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
-        const selHeight = selEndRow - selStartRow + 1
-        const selWidth = selEndCol - selStartCol + 1
-        const dataHeight = data.length
-  const dataWidth = Math.max(...data.map((row: InternalClipboardCell[]) => row.length))
-        
-        // 如果选区大于数据，重复填充
-        for (let r = 0; r < selHeight; r++) {
-          for (let c = 0; c < selWidth; c++) {
-            const dataRow = data[r % dataHeight]
-            const cell = dataRow ? (dataRow[c % dataWidth] || { value: '', isFormula: false }) : { value: '', isFormula: false }
-            
-            const srcRow = srcStartRow + (r % dataHeight)
-            const srcCol = srcStartCol + (c % dataWidth)
-            const destRow = selStartRow + r
-            const destCol = selStartCol + c
-            
-            if (cell.isFormula) {
-              // 公式：使用 copyCell 保持相对/绝对引用
-              formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
-            } else {
-              // 普通值：直接设置
-              formulaSheet.setValue(destRow, destCol, cell.value)
-            }
-          }
-        }
-      } else {
-        // 无选区：从当前位置粘贴数据
-        for (let r = 0; r < data.length; r++) {
-          const row = data[r]
-          for (let c = 0; c < row.length; c++) {
-            const cell = row[c] || { value: '', isFormula: false }
-            const srcRow = srcStartRow + r
-            const srcCol = srcStartCol + c
-            const destRow = destStartRow + r
-            const destCol = destStartCol + c
-            
-            if (cell.isFormula) {
-              // 公式：使用 copyCell 保持相对/绝对引用
-              formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
-            } else {
-              // 普通值：直接设置
-              formulaSheet.setValue(destRow, destCol, cell.value)
-            }
-          }
-        }
-      }
-      
-      draw()
-      console.log('Pasted from internal clipboard')
-      return
-    }
+    const selRange = selectionRange.startRow !== -1 ? selectionRange : undefined
     
-    // 从系统剪贴板粘贴（从Excel或外部复制）
-  try {
-    const text = await navigator.clipboard.readText()
-    if (!text) return
-    
-    console.log('Pasting text:', text.substring(0, 100) + '...')
-    
-    // 尝试检测格式：TSV (制表符) 或 CSV (逗号)
-    const hasTab = text.includes('\t')
-    const delimiter = hasTab ? '\t' : ','
-    
-    // 解析为二维数组
-    const lines = text.split('\n')
-    const data: string[][] = []
-    
-    for (const line of lines) {
-      if (!line) {
-        // 空行也要保留，保持行对齐
-        data.push([])
-        continue
-      }
-      
-      if (delimiter === ',') {
-        // CSV 格式：处理引号
-        const cells = parseCSVLine(line)
-        data.push(cells)
-      } else {
-        // TSV 格式：直接分割，并去除每个单元格的首尾空白（包括\r）
-        const cells = line.split('\t').map(cell => cell.trim())
-        data.push(cells)
-      }
-    }
-    
-    // 获取粘贴起点
-    const startRow = selected.row
-    const startCol = selected.col
-    
-    console.log(`Pasting ${data.length} rows to (${startRow}, ${startCol})`)
-    
-    // 检查是否有选区
-    const hasSelection = selectionRange.startRow !== -1
-    
-    if (hasSelection) {
-      // 有选区：填充整个选区（Excel 行为）
-      const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
-      const selHeight = selEndRow - selStartRow + 1
-      const selWidth = selEndCol - selStartCol + 1
-      const dataHeight = data.length
-      const dataWidth = Math.max(...data.map(row => row.length))
-      
-      // 如果选区大于数据，重复填充
-      for (let r = 0; r < selHeight; r++) {
-        for (let c = 0; c < selWidth; c++) {
-          const dataRow = data[r % dataHeight]
-          const cellValue = dataRow ? (dataRow[c % dataWidth] || '') : ''
-          
-          if (cellValue.startsWith('=')) {
-            // 公式：使用 copyCell 保持相对引用正确
-            // 计算源位置和目标位置
-            const srcRow = startRow + (r % dataHeight)
-            const srcCol = startCol + (c % dataWidth)
-            const destRow = selStartRow + r
-            const destCol = selStartCol + c
-            
-            // 先设置源位置（临时）
-            formulaSheet.setValue(srcRow, srcCol, cellValue)
-            // 再复制到目标位置（会自动调整引用）
-            formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
-          } else {
-            // 普通值：直接设置
-            formulaSheet.setValue(selStartRow + r, selStartCol + c, cellValue)
-          }
-        }
-      }
-    } else {
-      // 无选区：从当前位置粘贴数据
-      for (let r = 0; r < data.length; r++) {
-        const row = data[r]
-        for (let c = 0; c < row.length; c++) {
-          const cellValue = row[c] || ''
-          const destRow = startRow + r
-          const destCol = startCol + c
-          
-          if (cellValue.startsWith('=')) {
-            // 公式：使用 copyCell 实现相对引用调整
-            if (r === 0 && c === 0) {
-              // 第一个单元格：直接设置
-              formulaSheet.setValue(destRow, destCol, cellValue)
-            } else {
-              // 其他单元格：先临时设置到源位置，再复制
-              // 这样可以保持相对引用
-              const tempRow = startRow
-              const tempCol = startCol
-              formulaSheet.setValue(tempRow, tempCol, cellValue)
-              formulaSheet.copyCell(tempRow, tempCol, destRow, destCol)
-            }
-          } else {
-            // 普通值：直接设置
-            formulaSheet.setValue(destRow, destCol, cellValue)
-          }
-        }
-      }
-    }
+    pasteInternal(
+      internalClipboard.data,
+      internalClipboard.startRow,
+      internalClipboard.startCol,
+      destStartRow,
+      destStartCol,
+      target,
+      selRange
+    )
     
     draw()
-    console.log('Pasted from clipboard')
-  } catch (err) {
-    console.error('Failed to paste:', err)
-  }
-}
-
-/**
- * 解析 CSV 行（处理引号和逗号）
- */
-function parseCSVLine(line: string): string[] {
-  const cells: string[] = []
-  let current = ''
-  let inQuotes = false
-  
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    const nextChar = line[i + 1]
-    
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        // 双引号转义
-        current += '"'
-        i++ // 跳过下一个引号
-      } else {
-        // 切换引号状态
-        inQuotes = !inQuotes
-      }
-    } else if (char === ',' && !inQuotes) {
-      // 分隔符
-      cells.push(current)
-      current = ''
-    } else {
-      current += char
-    }
+    console.log('Pasted from internal clipboard')
+    return
   }
   
-  cells.push(current)
-  return cells
+  // 从系统剪贴板粘贴（从Excel或外部复制）
+  const text = await readFromClipboard()
+  if (!text) return
+  
+  console.log('Pasting text:', text.substring(0, 100) + (text.length > 100 ? '...' : ''))
+  
+  // 解析剪贴板文本
+  const data = parseClipboardText(text)
+  
+  console.log(`Pasting ${data.length} rows to (${destStartRow}, ${destStartCol})`)
+  
+  const selRange = selectionRange.startRow !== -1 ? selectionRange : undefined
+  
+  pasteExternal(data, destStartRow, destStartCol, target, selRange)
+  
+  draw()
+  console.log('Pasted from clipboard')
 }
 
 function onOverlaySave(val: string) {
@@ -2108,36 +1364,24 @@ function onOverlaySave(val: string) {
     undoRedo.execute({
       name: `Edit cell (${row}, ${col})`,
       undo: () => {
-        formulaSheet.setValue(row, col, oldValue)  // 使用 FormulaSheet.setValue 而不是 getModel().setValue
+        formulaSheet.setValue(row, col, oldValue)
         draw()
       },
       redo: () => {
-        formulaSheet.setValue(row, col, val)  // 使用 FormulaSheet.setValue 而不是 getModel().setValue
+        formulaSheet.setValue(row, col, val)
         draw()
       }
     })
   }
   
-  overlay.visible = false
+  // 关闭覆盖层
+  Object.assign(overlay, closeOverlay())
   formulaReferences.value = []  // 清空引用高亮
   
-  // 回车确认后，光标移动到下一行
-  // 如果是最后一行，则移动到下一列的第一行
-  if (row < DEFAULT_ROWS - 1) {
-    // 不是最后一行，向下移动
-    selected.row = row + 1
-    selected.col = col
-  } else {
-    // 是最后一行，移动到下一列的第一行
-    if (col < DEFAULT_COLS - 1) {
-      selected.row = 0
-      selected.col = col + 1
-    } else {
-      // 已经是最后一列的最后一行，回到第一行第一列
-      selected.row = 0
-      selected.col = 0
-    }
-  }
+  // 使用覆盖层模块计算下一个单元格位置
+  const nextCell = getNextCellAfterSave(row, col, DEFAULT_ROWS, DEFAULT_COLS)
+  selected.row = nextCell.row
+  selected.col = nextCell.col
   
   // 清除区域选择
   selectionRange.startRow = -1
@@ -2150,7 +1394,7 @@ function onOverlaySave(val: string) {
 
 function onOverlayCancel() {
   // ESC 取消输入，不保存更改，恢复原值
-  overlay.visible = false
+  Object.assign(overlay, closeOverlay())
   formulaReferences.value = []  // 清空引用高亮
   draw()
 }
@@ -2192,364 +1436,196 @@ function onContextMenu(e: MouseEvent) {
   
   if (!container.value) return
   const rect = container.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
   
-  contextMenu.x = e.clientX
-  contextMenu.y = e.clientY
-  
-  // 判断点击位置
-  if (x < ROW_HEADER_WIDTH && y > COL_HEADER_HEIGHT) {
-    // 点击行头
-    const row = getRowAtY(y)
-    contextMenu.targetRow = row
-    contextMenu.targetCol = -1
-    contextMenu.items = [
-      { label: '在上方插入行', action: () => insertRowAbove(row) },
-      { label: '在下方插入行', action: () => insertRowBelow(row) },
-      { label: '删除行', action: () => deleteRow(row) },
-      { label: '', action: () => {}, divider: true },
-      { label: '设置行高...', action: () => showSetRowHeightDialog(row) }
-    ]
-    contextMenu.visible = true
-  } else if (y < COL_HEADER_HEIGHT && x > ROW_HEADER_WIDTH) {
-    // 点击列头
-    const col = getColAtX(x)
-    contextMenu.targetRow = -1
-    contextMenu.targetCol = col
-    contextMenu.items = [
-      { label: '在左侧插入列', action: () => insertColLeft(col) },
-      { label: '在右侧插入列', action: () => insertColRight(col) },
-      { label: '删除列', action: () => deleteCol(col) },
-      { label: '', action: () => {}, divider: true },
-      { label: '设置列宽...', action: () => showSetColWidthDialog(col) }
-    ]
-    contextMenu.visible = true
+  const menuConfig: ContextMenuConfig = {
+    rowHeaderWidth: ROW_HEADER_WIDTH,
+    colHeaderHeight: COL_HEADER_HEIGHT,
+    getRowAtY,
+    getColAtX,
+    rowOperations: {
+      insertRowAbove,
+      insertRowBelow,
+      deleteRow,
+      showSetRowHeightDialog
+    },
+    colOperations: {
+      insertColLeft,
+      insertColRight,
+      deleteCol,
+      showSetColWidthDialog
+    }
   }
-  // 其他区域不显示菜单（已屏蔽默认菜单）
+  
+  handleContextMenu(e, rect, menuConfig, contextMenu)
 }
 
 // 行操作
 async function insertRowAbove(row: number) {
-  console.log('在行', row, '上方插入行')
-  
-  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
-  // 这一步必须在移动非公式单元格之前，因为需要读取原始的元数据
-  await formulaSheet.adjustAllFormulasAsync('insertRow', row, 1)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
-  const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
-  
-  model.forEach((r, c, cell) => {
-    // 只处理非公式单元格，且位置在插入行之前（还未移动）
-    if (r >= row && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ 
-        row: r, 
-        col: c, 
-        value: cell.value
-      })
-    }
-  })
-  
-  // 按行号从大到小排序，避免覆盖
-  nonFormulaCellsToMove.sort((a, b) => b.row - a.row)
-  
-  // 步骤3: 移动非公式单元格
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')  // 清空旧位置
-    model.setValue(r + 1, c, value)  // 设置到新位置
-  })
-  
-  // 步骤4: 移动自定义行高
-  const newRowHeights = new Map<number, number>()
-  rowHeights.value.forEach((height: number, r: number) => {
-    if (r >= row) {
-      newRowHeights.set(r + 1, height)
-    } else {
-      newRowHeights.set(r, height)
-    }
-  })
-  rowHeights.value = newRowHeights
-  
-  // 重新绘制
-  draw()
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
+  }
+  await insertRowAboveHelper(row, rowColConfig)
 }
 
-function insertRowBelow(row: number) {
-  console.log('在行', row, '下方插入行')
-  // 在下方插入等同于在 row+1 的上方插入
-  insertRowAbove(row + 1)
+async function insertRowBelow(row: number) {
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
+  }
+  await insertRowBelowHelper(row, rowColConfig)
 }
 
 async function deleteRow(row: number) {
-  console.log('删除行', row)
-  
-  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
-  await formulaSheet.adjustAllFormulasAsync('deleteRow', row, 1)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
-  const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
-  
-  model.forEach((r, c, cell) => {
-    // 只处理非公式单元格
-    if (r > row && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ 
-        row: r, 
-        col: c, 
-        value: cell.value
-      })
-    }
-  })
-  
-  // 按行号从小到大排序，从前往后移动
-  nonFormulaCellsToMove.sort((a, b) => a.row - b.row)
-  
-  // 步骤3: 清空被删除的行（非公式单元格）
-  for (let c = 0; c < DEFAULT_COLS; c++) {
-    const cell = model.getCell(row, c)
-    if (cell && !cell.formulaMetadata) {
-      model.setValue(row, c, '')
-    }
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
   }
-  
-  // 步骤4: 移动非公式单元格
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')  // 清空旧位置
-    model.setValue(r - 1, c, value)  // 设置到新位置
-  })
-  
-  // 步骤5: 移动自定义行高
-  const newRowHeights = new Map<number, number>()
-  rowHeights.value.forEach((height: number, r: number) => {
-    if (r < row) {
-      newRowHeights.set(r, height)
-    } else if (r > row) {
-      newRowHeights.set(r - 1, height)
-    }
-  })
-  rowHeights.value = newRowHeights
-  
-  // 步骤6: 调整选择范围
-  if (selected.row === row) {
-    selected.row = Math.max(0, row - 1)
-  } else if (selected.row > row) {
-    selected.row--
-  }
-  
-  // 重新绘制
-  draw()
+  await deleteRowHelper(row, rowColConfig)
 }
 
 function showSetRowHeightDialog(row: number) {
   const currentHeight = getRowHeight(row)
-  inputDialog.title = '设置行高'
-  inputDialog.defaultValue = currentHeight.toString()
-  inputDialog.placeholder = '请输入行高（像素）'
-  inputDialog.callback = (value: string) => {
-    const height = parseInt(value, 10)
-    if (!isNaN(height) && height > 0) {
-      rowHeights.value.set(row, height)
-      draw()
-    }
-  }
-  inputDialog.visible = true
+  showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, inputDialog as any, draw)
 }
 
 // 列操作
 async function insertColLeft(col: number) {
-  console.log('在列', col, '左侧插入列')
-  
-  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
-  await formulaSheet.adjustAllFormulasAsync('insertCol', col, 1)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
-  const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
-  
-  model.forEach((r, c, cell) => {
-    // 只处理非公式单元格
-    if (c >= col && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ 
-        row: r, 
-        col: c, 
-        value: cell.value
-      })
-    }
-  })
-  
-  // 按列号从大到小排序，避免覆盖
-  nonFormulaCellsToMove.sort((a, b) => b.col - a.col)
-  
-  // 步骤3: 移动非公式单元格
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')  // 清空旧位置
-    model.setValue(r, c + 1, value)  // 设置到新位置
-  })
-  
-  // 步骤4: 移动自定义列宽
-  const newColWidths = new Map<number, number>()
-  colWidths.value.forEach((width: number, c: number) => {
-    if (c >= col) {
-      newColWidths.set(c + 1, width)
-    } else {
-      newColWidths.set(c, width)
-    }
-  })
-  colWidths.value = newColWidths
-  
-  // 重新绘制
-  draw()
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
+  }
+  await insertColLeftHelper(col, rowColConfig)
 }
 
-function insertColRight(col: number) {
-  console.log('在列', col, '右侧插入列')
-  // 在右侧插入等同于在 col+1 的左侧插入
-  insertColLeft(col + 1)
+async function insertColRight(col: number) {
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
+  }
+  await insertColRightHelper(col, rowColConfig)
 }
 
 async function deleteCol(col: number) {
-  console.log('删除列', col)
-  
-  // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
-  await formulaSheet.adjustAllFormulasAsync('deleteCol', col, 1)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
-  const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
-  
-  model.forEach((r, c, cell) => {
-    // 只处理非公式单元格
-    if (c > col && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ 
-        row: r, 
-        col: c, 
-        value: cell.value
-      })
-    }
-  })
-  
-  // 按列号从小到大排序，从左往右移动
-  nonFormulaCellsToMove.sort((a, b) => a.col - b.col)
-  
-  // 步骤3: 清空被删除的列（非公式单元格）
-  for (let r = 0; r < DEFAULT_ROWS; r++) {
-    const cell = model.getCell(r, col)
-    if (cell && !cell.formulaMetadata) {
-      model.setValue(r, col, '')
-    }
+  const rowColConfig: RowColConfig = {
+    formulaSheet,
+    sizeConfig: {
+      rowHeights: rowHeights.value,
+      colWidths: colWidths.value,
+      defaultRowHeight: ROW_HEIGHT,
+      defaultColWidth: COL_WIDTH,
+      totalRows: DEFAULT_ROWS,
+      totalCols: DEFAULT_COLS
+    },
+    selected,
+    onRedraw: draw
   }
-  
-  // 步骤4: 移动非公式单元格
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')  // 清空旧位置
-    model.setValue(r, c - 1, value)  // 设置到新位置
-  })
-  
-  // 步骤5: 移动自定义列宽
-  const newColWidths = new Map<number, number>()
-  colWidths.value.forEach((width: number, c: number) => {
-    if (c < col) {
-      newColWidths.set(c, width)
-    } else if (c > col) {
-      newColWidths.set(c - 1, width)
-    }
-  })
-  colWidths.value = newColWidths
-  
-  // 步骤6: 调整选择范围
-  if (selected.col === col) {
-    selected.col = Math.max(0, col - 1)
-  } else if (selected.col > col) {
-    selected.col--
-  }
-  
-  // 重新绘制
-  draw()
+  await deleteColHelper(col, rowColConfig)
 }
 
 function showSetColWidthDialog(col: number) {
   const currentWidth = getColWidth(col)
-  inputDialog.title = '设置列宽'
-  inputDialog.defaultValue = currentWidth.toString()
-  inputDialog.placeholder = '请输入列宽（像素）'
-  inputDialog.callback = (value: string) => {
-    const width = parseInt(value, 10)
-    if (!isNaN(width) && width > 0) {
-      colWidths.value.set(col, width)
-      draw()
-    }
-  }
-  inputDialog.visible = true
+  showSetColWidthDialogHelper(col, currentWidth, colWidths.value, inputDialog as any, draw)
 }
 
 // 输入对话框确认
 function onInputDialogConfirm(value: string) {
-  if (inputDialog.callback) {
-    inputDialog.callback(value)
-  }
-  inputDialog.visible = false
+  handleInputDialogConfirmHelper(value, inputDialog)
 }
+
+// 创建事件管理器
+const eventManager = createEventManager()
 
 onMounted(() => {
   // Ensure DOM is fully laid out
   window.requestAnimationFrame(() => {
     if (!container.value) return
     console.log('Container size:', container.value.clientWidth, container.value.clientHeight)
+    
     // initial draw
     draw()
-    // attach events
-    container.value.addEventListener('mousedown', onMouseDown)
-    container.value.addEventListener('click', onClick)
-    container.value.addEventListener('dblclick', onDoubleClick)
-    container.value.addEventListener('mousemove', onMouseMove)
-    container.value.addEventListener('wheel', onWheel, { passive: false })
-    window.addEventListener('mouseup', onMouseUp)
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('resize', draw)
-    window.addEventListener('compositionstart', onCompositionStart)
-    // 滚动条全局拖拽事件
-    window.addEventListener('mousemove', onGlobalMouseMove)
-    window.addEventListener('mouseup', onGlobalMouseUp)
+    
+    // 注册所有事件
+    const handlers: EventHandlers = {
+      onMouseDown,
+      onClick,
+      onDoubleClick,
+      onMouseMove,
+      onWheel,
+      onMouseUp,
+      onKeyDown,
+      onResize: draw,
+      onCompositionStart,
+      onGlobalMouseMove,
+      onGlobalMouseUp
+    }
+    eventManager.register(container.value, handlers)
   })
 })
 
 onBeforeUnmount(() => {
   // Cancel pending redraw animation frame
-  if (redrawHandle !== null) {
-    cancelAnimationFrame(redrawHandle)
-  }
+  cancelScheduled()
   
-  if (container.value) {
-    container.value.removeEventListener('mousedown', onMouseDown)
-    container.value.removeEventListener('click', onClick)
-    container.value.removeEventListener('dblclick', onDoubleClick)
-    container.value.removeEventListener('mousemove', onMouseMove)
-    container.value.removeEventListener('wheel', onWheel)
-  }
-  window.removeEventListener('mouseup', onMouseUp)
-  window.removeEventListener('keydown', onKeyDown)
-  window.removeEventListener('resize', draw)
-  window.removeEventListener('compositionstart', onCompositionStart)
-  window.removeEventListener('mousemove', onGlobalMouseMove)
-  window.removeEventListener('mouseup', onGlobalMouseUp)
+  // 移除所有事件
+  eventManager.unregister()
 })
 
 function onVThumbMouseDown(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  scrollbar.dragging = 'v'
-  scrollbar.startMousePos = e.clientY
-  scrollbar.startScroll = viewport.scrollTop
+  startVerticalDrag(scrollbar, viewport, e.clientY)
 }
 
 function onHThumbMouseDown(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  scrollbar.dragging = 'h'
-  scrollbar.startMousePos = e.clientX
-  scrollbar.startScroll = viewport.scrollLeft
+  startHorizontalDrag(scrollbar, viewport, e.clientX)
 }
 
 function onGlobalMouseMove(e: MouseEvent) {
@@ -2560,9 +1636,47 @@ function onGlobalMouseMove(e: MouseEvent) {
 
 function onGlobalMouseUp() {
   if (scrollbar.dragging) {
-    scrollbar.dragging = ''
+    endDrag(scrollbar)
   }
 }
+
+// 创建并暴露公开 API
+const api = createSheetAPI({
+  // 尺寸相关
+  getRowHeight,
+  getColWidth,
+  rowHeights: rowHeights.value,
+  colWidths: colWidths.value,
+  
+  // 行列操作
+  insertRowAbove,
+  insertRowBelow,
+  deleteRow,
+  insertColLeft,
+  insertColRight,
+  deleteCol,
+  
+  // 选择相关
+  selected,
+  selectionRange,
+  
+  // 单元格值
+  getCellValue: (row: number, col: number) => formulaSheet.getValue(row, col),
+  setCellValue: (row: number, col: number, value: string) => {
+    formulaSheet.setValue(row, col, value)
+    draw()
+  },
+  
+  // 绘制
+  draw,
+  
+  // 隐藏/显示（阶段 14 新增）
+  hiddenRows: hiddenRows.value,
+  hiddenCols: hiddenCols.value,
+  showGridLines: showGridLines.value
+})
+
+defineExpose(api)
 </script>
 
 <style scoped>
