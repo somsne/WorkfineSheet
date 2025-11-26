@@ -78,6 +78,23 @@ import { ref, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
 import { SheetModel } from '../lib/SheetModel'
 import { UndoRedoManager } from '../lib/UndoRedoManager'
 import { FormulaSheet } from '../lib/FormulaSheet'
+
+// Internal clipboard cell interface
+interface InternalClipboardCell {
+  value: string  // 原始值或公式
+  isFormula: boolean
+}
+
+// 公式引用高亮显示 interface
+interface FormulaReference {
+  range: string  // 如 "A1" 或 "A1:B3"
+  startRow: number
+  startCol: number
+  endRow: number
+  endCol: number
+  color: string
+}
+
 // @ts-ignore - Vue SFC typing handled via vue-tsc at build time
 import SheetOverlayInput from './SheetOverlayInput.vue'
 // @ts-ignore
@@ -97,6 +114,8 @@ const container = ref<HTMLElement | null>(null)
 const gridCanvas = ref<HTMLCanvasElement | null>(null)
 const contentCanvas = ref<HTMLCanvasElement | null>(null)
 const overlayInput = ref(null)
+// 最近一次应用内复制的时间戳（用于避免误用陈旧的内部剪贴板）
+const lastCopyTs = ref(0)
 
 // 自定义行高和列宽
 const rowHeights = ref<Map<number, number>>(new Map()) // 存储自定义的行高
@@ -200,16 +219,16 @@ const dragState = reactive({
   justFinishedDrag: false  // 标记刚完成拖动，用于阻止 onClick
 })
 
-// 公式引用高亮显示
-interface FormulaReference {
-  range: string  // 如 "A1" 或 "A1:B3"
+// Internal clipboard for formula copying (preserve relative/absolute references)
+const internalClipboard = reactive<{
+  data: InternalClipboardCell[][] | null
   startRow: number
   startCol: number
-  endRow: number
-  endCol: number
-  color: string
-}
-
+}>({
+  data: null,
+  startRow: -1,
+  startCol: -1
+})
 const formulaReferences = ref<FormulaReference[]>([])
 
 // Excel 风格的引用颜色
@@ -292,6 +311,8 @@ function setCanvasSize(canvas: HTMLCanvasElement, width: number, height: number)
  * 简单的单元格地址解析 (A1 -> {row: 0, col: 0})
  */
 function parseCellAddr(addr: string): { row: number, col: number } | null {
+  // 移除绝对引用符号 $
+  addr = addr.replace(/\$/g, '')
   const match = addr.match(/^([A-Za-z]+)(\d+)$/)
   if (!match || !match[1] || !match[2]) return null
   
@@ -319,8 +340,10 @@ function parseFormulaReferences(formula: string): FormulaReference[] {
   const seen = new Set<string>()
   
   // 匹配范围引用 (A1:B3) 和单个单元格引用 (A1)
-  const rangeRegex = /([A-Za-z]+\d+):([A-Za-z]+\d+)/g
-  const cellRegex = /\b([A-Za-z]+\d+)\b/g
+  // 支持绝对引用 $A$1 / $A1 / A$1
+  const rangeRegex = /(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/g
+  // 使用前后非字母数字边界来避免误匹配
+  const cellRegex = /(^|[^A-Za-z0-9$])(\$?[A-Za-z]+\$?\d+)(?=[^A-Za-z0-9]|$)/g
   
   let colorIndex = 0
   
@@ -340,6 +363,9 @@ function parseFormulaReferences(formula: string): FormulaReference[] {
     const endRef = parseCellAddr(endAddr)
     
     if (startRef && endRef) {
+      const seenKey = `${startAddr.replace(/\$/g,'')}:${endAddr.replace(/\$/g,'')}`
+      if (seen.has(seenKey)) continue
+      seen.add(seenKey)
       references.push({
         range: rangeStr,
         startRow: Math.min(startRef.row, endRef.row),
@@ -357,9 +383,11 @@ function parseFormulaReferences(formula: string): FormulaReference[] {
   
   rangeRegex.lastIndex = 0
   while ((match = cellRegex.exec(formulaWithoutRanges)) !== null) {
-    const cellAddr = match[1]?.toUpperCase()
+    const cellAddr = match[2]?.toUpperCase()
     if (!cellAddr || seen.has(cellAddr)) continue
-    seen.add(cellAddr)
+    const norm = cellAddr.replace(/\$/g, '')
+    if (seen.has(norm)) continue
+    seen.add(norm)
     
     const ref = parseCellAddr(cellAddr)
     if (ref) {
@@ -1785,75 +1813,289 @@ function onMouseUp(): void {
   draw()
 }
 
-function getSelectionAsCSV(): string {
-  let csv = ''
-  let startRow = selected.row
-  let endRow = selected.row
-  let startCol = selected.col
-  let endCol = selected.col
-
-  // Use selection range if available
-  if (selectionRange.startRow >= 0) {
-    startRow = selectionRange.startRow
-    endRow = selectionRange.endRow
-    startCol = selectionRange.startCol
-    endCol = selectionRange.endCol
+/**
+ * 复制选区到剪贴板
+ * 支持 Excel 互操作：使用 TSV (Tab-separated values) 格式
+ * 复制公式时保留原始文本（显示值，如 =A1+B1）
+ */
+async function onCopy() {
+  if (selectionRange.startRow === -1) {
+  // 如果没有选区，复制当前单元格的值（不复制公式）
+  const value = formulaSheet.getValue(selected.row, selected.col)
+    try {
+      await navigator.clipboard.writeText(value)
+      console.log('Copied single cell:', value)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+    // 保存到内部剪贴板（用于表格内复制，保留公式）
+    const rawValue = formulaSheet.getModel().getValue(selected.row, selected.col)
+    internalClipboard.data = [[{ value: rawValue, isFormula: rawValue.startsWith('=') }]]
+    internalClipboard.startRow = selected.row
+    internalClipboard.startCol = selected.col
+    lastCopyTs.value = Date.now()
+    return
   }
 
+  const { startRow, startCol, endRow, endCol } = selectionRange
+  let tsv = ''
+  const internalData: InternalClipboardCell[][] = []
+  
   for (let r = startRow; r <= endRow; r++) {
     const row: string[] = []
+  const internalRow: InternalClipboardCell[] = []
     for (let c = startCol; c <= endCol; c++) {
-      // Use getModel() to get raw value for CSV export
-      const val = formulaSheet.getModel().getValue(r, c)
-      // Escape quotes and wrap in quotes if contains comma
-      const escaped = val.includes(',') || val.includes('"') ? `"${val.replace(/"/g, '""')}"` : val
-      row.push(escaped)
+  // 复制到Excel时只复制计算结果值，不复制公式
+  const value = formulaSheet.getValue(r, c)
+      // TSV 格式：使用制表符分隔，换行符使用 \n
+      // Excel 会自动处理包含制表符和换行符的值
+      row.push(value)
+      
+  // 保存原始值到内部剪贴板（包括公式）
+  const rawValue = formulaSheet.getModel().getValue(r, c)
+  internalRow.push({ value: rawValue, isFormula: rawValue.startsWith('=') })
     }
-    csv += row.join(',') + '\n'
+    tsv += row.join('\t') + '\n'
+  internalData.push(internalRow)
   }
-  return csv
-}
-
-async function onCopy() {
-  const csv = getSelectionAsCSV()
+  
+  // 去掉最后的换行符
+  tsv = tsv.slice(0, -1)
+  
+  // 保存到内部剪贴板
+  internalClipboard.data = internalData
+  internalClipboard.startRow = startRow
+  internalClipboard.startCol = startCol
+  lastCopyTs.value = Date.now()
+  
   try {
-    await navigator.clipboard.writeText(csv)
-    console.log('Copied to clipboard:', csv)
+    await navigator.clipboard.writeText(tsv)
+    console.log('Copied to clipboard (TSV format):', tsv.substring(0, 100) + '...')
   } catch (err) {
     console.error('Failed to copy:', err)
   }
 }
 
+/**
+ * 从剪贴板粘贴
+ * 支持：
+ * 1. 从 Excel 复制的数据（TSV 格式）
+ * 2. 从本表复制的数据（包含公式）
+ * 3. 自动处理相对/绝对引用（$符号）
+ */
 async function onPaste() {
+    // 获取粘贴起点
+    const destStartRow = selected.row
+    const destStartCol = selected.col
+    
+    // 优先使用内部剪贴板（表格内复制，保留公式和引用信息）
+  if (internalClipboard.data && (Date.now() - lastCopyTs.value) < 5000) {
+      console.log('Pasting from internal clipboard with formula metadata')
+      const srcStartRow = internalClipboard.startRow
+      const srcStartCol = internalClipboard.startCol
+      const data = internalClipboard.data
+      
+      // 检查是否有选区
+      const hasSelection = selectionRange.startRow !== -1
+      
+      if (hasSelection) {
+        // 有选区：填充整个选区（Excel 行为）
+        const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
+        const selHeight = selEndRow - selStartRow + 1
+        const selWidth = selEndCol - selStartCol + 1
+        const dataHeight = data.length
+  const dataWidth = Math.max(...data.map((row: InternalClipboardCell[]) => row.length))
+        
+        // 如果选区大于数据，重复填充
+        for (let r = 0; r < selHeight; r++) {
+          for (let c = 0; c < selWidth; c++) {
+            const dataRow = data[r % dataHeight]
+            const cell = dataRow ? (dataRow[c % dataWidth] || { value: '', isFormula: false }) : { value: '', isFormula: false }
+            
+            const srcRow = srcStartRow + (r % dataHeight)
+            const srcCol = srcStartCol + (c % dataWidth)
+            const destRow = selStartRow + r
+            const destCol = selStartCol + c
+            
+            if (cell.isFormula) {
+              // 公式：使用 copyCell 保持相对/绝对引用
+              formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
+            } else {
+              // 普通值：直接设置
+              formulaSheet.setValue(destRow, destCol, cell.value)
+            }
+          }
+        }
+      } else {
+        // 无选区：从当前位置粘贴数据
+        for (let r = 0; r < data.length; r++) {
+          const row = data[r]
+          for (let c = 0; c < row.length; c++) {
+            const cell = row[c] || { value: '', isFormula: false }
+            const srcRow = srcStartRow + r
+            const srcCol = srcStartCol + c
+            const destRow = destStartRow + r
+            const destCol = destStartCol + c
+            
+            if (cell.isFormula) {
+              // 公式：使用 copyCell 保持相对/绝对引用
+              formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
+            } else {
+              // 普通值：直接设置
+              formulaSheet.setValue(destRow, destCol, cell.value)
+            }
+          }
+        }
+      }
+      
+      draw()
+      console.log('Pasted from internal clipboard')
+      return
+    }
+    
+    // 从系统剪贴板粘贴（从Excel或外部复制）
   try {
     const text = await navigator.clipboard.readText()
-    // Parse CSV (simple version, handles basic cases)
-    const lines = text.trim().split('\n')
-    const startRow = selected.row
-    const startCol = selected.col
-
-    for (let r = 0; r < lines.length; r++) {
-      const line = lines[r]
-      if (!line) continue
+    if (!text) return
+    
+    console.log('Pasting text:', text.substring(0, 100) + '...')
+    
+    // 尝试检测格式：TSV (制表符) 或 CSV (逗号)
+    const hasTab = text.includes('\t')
+    const delimiter = hasTab ? '\t' : ','
+    
+    // 解析为二维数组
+    const lines = text.split('\n')
+    const data: string[][] = []
+    
+    for (const line of lines) {
+      if (!line) {
+        // 空行也要保留，保持行对齐
+        data.push([])
+        continue
+      }
       
-      const cells = line.split(',').map(cell => {
-        // Remove surrounding quotes if present
-        if (cell.startsWith('"') && cell.endsWith('"')) {
-          return cell.slice(1, -1).replace(/""/g, '"')
-        }
-        return cell
-      })
-
-      for (let c = 0; c < cells.length; c++) {
-        const cellVal = cells[c] ?? ''
-        formulaSheet.setValue(startRow + r, startCol + c, cellVal)  // 使用 FormulaSheet.setValue 以清理缓存
+      if (delimiter === ',') {
+        // CSV 格式：处理引号
+        const cells = parseCSVLine(line)
+        data.push(cells)
+      } else {
+        // TSV 格式：直接分割，并去除每个单元格的首尾空白（包括\r）
+        const cells = line.split('\t').map(cell => cell.trim())
+        data.push(cells)
       }
     }
+    
+    // 获取粘贴起点
+    const startRow = selected.row
+    const startCol = selected.col
+    
+    console.log(`Pasting ${data.length} rows to (${startRow}, ${startCol})`)
+    
+    // 检查是否有选区
+    const hasSelection = selectionRange.startRow !== -1
+    
+    if (hasSelection) {
+      // 有选区：填充整个选区（Excel 行为）
+      const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
+      const selHeight = selEndRow - selStartRow + 1
+      const selWidth = selEndCol - selStartCol + 1
+      const dataHeight = data.length
+      const dataWidth = Math.max(...data.map(row => row.length))
+      
+      // 如果选区大于数据，重复填充
+      for (let r = 0; r < selHeight; r++) {
+        for (let c = 0; c < selWidth; c++) {
+          const dataRow = data[r % dataHeight]
+          const cellValue = dataRow ? (dataRow[c % dataWidth] || '') : ''
+          
+          if (cellValue.startsWith('=')) {
+            // 公式：使用 copyCell 保持相对引用正确
+            // 计算源位置和目标位置
+            const srcRow = startRow + (r % dataHeight)
+            const srcCol = startCol + (c % dataWidth)
+            const destRow = selStartRow + r
+            const destCol = selStartCol + c
+            
+            // 先设置源位置（临时）
+            formulaSheet.setValue(srcRow, srcCol, cellValue)
+            // 再复制到目标位置（会自动调整引用）
+            formulaSheet.copyCell(srcRow, srcCol, destRow, destCol)
+          } else {
+            // 普通值：直接设置
+            formulaSheet.setValue(selStartRow + r, selStartCol + c, cellValue)
+          }
+        }
+      }
+    } else {
+      // 无选区：从当前位置粘贴数据
+      for (let r = 0; r < data.length; r++) {
+        const row = data[r]
+        for (let c = 0; c < row.length; c++) {
+          const cellValue = row[c] || ''
+          const destRow = startRow + r
+          const destCol = startCol + c
+          
+          if (cellValue.startsWith('=')) {
+            // 公式：使用 copyCell 实现相对引用调整
+            if (r === 0 && c === 0) {
+              // 第一个单元格：直接设置
+              formulaSheet.setValue(destRow, destCol, cellValue)
+            } else {
+              // 其他单元格：先临时设置到源位置，再复制
+              // 这样可以保持相对引用
+              const tempRow = startRow
+              const tempCol = startCol
+              formulaSheet.setValue(tempRow, tempCol, cellValue)
+              formulaSheet.copyCell(tempRow, tempCol, destRow, destCol)
+            }
+          } else {
+            // 普通值：直接设置
+            formulaSheet.setValue(destRow, destCol, cellValue)
+          }
+        }
+      }
+    }
+    
     draw()
     console.log('Pasted from clipboard')
   } catch (err) {
     console.error('Failed to paste:', err)
   }
+}
+
+/**
+ * 解析 CSV 行（处理引号和逗号）
+ */
+function parseCSVLine(line: string): string[] {
+  const cells: string[] = []
+  let current = ''
+  let inQuotes = false
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    const nextChar = line[i + 1]
+    
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // 双引号转义
+        current += '"'
+        i++ // 跳过下一个引号
+      } else {
+        // 切换引号状态
+        inQuotes = !inQuotes
+      }
+    } else if (char === ',' && !inQuotes) {
+      // 分隔符
+      cells.push(current)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  
+  cells.push(current)
+  return cells
 }
 
 function onOverlaySave(val: string) {
@@ -2021,7 +2263,7 @@ async function insertRowAbove(row: number) {
   
   // 步骤4: 移动自定义行高
   const newRowHeights = new Map<number, number>()
-  rowHeights.value.forEach((height, r) => {
+  rowHeights.value.forEach((height: number, r: number) => {
     if (r >= row) {
       newRowHeights.set(r + 1, height)
     } else {
@@ -2080,7 +2322,7 @@ async function deleteRow(row: number) {
   
   // 步骤5: 移动自定义行高
   const newRowHeights = new Map<number, number>()
-  rowHeights.value.forEach((height, r) => {
+  rowHeights.value.forEach((height: number, r: number) => {
     if (r < row) {
       newRowHeights.set(r, height)
     } else if (r > row) {
@@ -2148,7 +2390,7 @@ async function insertColLeft(col: number) {
   
   // 步骤4: 移动自定义列宽
   const newColWidths = new Map<number, number>()
-  colWidths.value.forEach((width, c) => {
+  colWidths.value.forEach((width: number, c: number) => {
     if (c >= col) {
       newColWidths.set(c + 1, width)
     } else {
@@ -2207,7 +2449,7 @@ async function deleteCol(col: number) {
   
   // 步骤5: 移动自定义列宽
   const newColWidths = new Map<number, number>()
-  colWidths.value.forEach((width, c) => {
+  colWidths.value.forEach((width: number, c: number) => {
     if (c < col) {
       newColWidths.set(c, width)
     } else if (c > col) {
@@ -2401,12 +2643,7 @@ function onGlobalMouseUp() {
     transform: translateX(20px);
     opacity: 0;
   }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
 }
-
 .progress-content {
   display: flex;
   align-items: center;
@@ -2421,16 +2658,8 @@ function onGlobalMouseUp() {
 }
 
 @keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.progress-text {
-  font-weight: 500;
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .progress-detail {

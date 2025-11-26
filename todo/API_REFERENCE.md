@@ -1,0 +1,15 @@
+#Methods
+columnWidth：设置列宽
+deleteColumn：删除列
+deleteRow：删除行
+frozenColumns：冻结列
+frozenRows：冻结行
+hideColumn：隐藏列
+hideRow：隐藏行
+insertColumn：插入列
+insertRow：插入行
+rowHeight：设置行高
+selection：选择指定区域
+showGridLines：显示/隐藏网格线
+unhideColumn：取消隐藏列
+unhideRow：取消隐藏行

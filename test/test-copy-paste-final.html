@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>复制粘贴功能测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #333;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      background: #f9f9f9;
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #0066cc;
+    }
+    .test-data {
+      background: white;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      white-space: pre;
+      margin: 10px 0;
+    }
+    .instruction {
+      background: #fff3cd;
+      padding: 10px;
+      border-left: 4px solid #ffc107;
+      margin: 10px 0;
+    }
+    .result {
+      background: #d1ecf1;
+      padding: 10px;
+      border-left: 4px solid #0c5460;
+      margin: 10px 0;
+    }
+    table {
+      border-collapse: collapse;
+      margin: 10px 0;
+    }
+    td {
+      border: 1px solid #ccc;
+      padding: 8px 12px;
+      min-width: 80px;
+    }
+    .formula {
+      color: #0066cc;
+      font-weight: bold;
+    }
+    .value {
+      color: #333;
+    }
+    code {
+      background: #f4f4f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>📋 复制粘贴功能测试说明</h1>
+  
+  <div class="test-section">
+    <h2>✅ 已实现的功能</h2>
+    <ul>
+      <li><strong>TSV 格式支持</strong>：使用 Tab 分隔符（Excel 标准格式）</li>
+      <li><strong>CSV 格式支持</strong>：自动检测并解析逗号分隔的数据</li>
+      <li><strong>公式相对引用</strong>：复制公式时自动调整引用位置</li>
+      <li><strong>绝对引用保持</strong>：<code>$</code> 符号锁定的位置保持不变</li>
+      <li><strong>选区填充</strong>：支持 Excel 风格的重复填充</li>
+      <li><strong>与 Excel 互操作</strong>：支持从 Excel 复制到本表，本表复制到 Excel</li>
+    </ul>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 1: 从 Excel 复制数据到本表</h2>
+    <div class="instruction">
+      <strong>操作步骤：</strong>
+      <ol>
+        <li>复制下面的测试数据（选中后 Ctrl+C / Cmd+C）</li>
+        <li>在表格中选择一个单元格</li>
+        <li>按 Ctrl+V / Cmd+V 粘贴</li>
+      </ol>
+    </div>
+    <div class="test-data">姓名	年龄	部门	工资
+张三	28	技术部	8000
+李四	32	销售部	7500
+王五	25	市场部	7000</div>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>数据正确粘贴到表格中</li>
+        <li>保持原有的行列结构</li>
+        <li>制表符正确识别为列分隔符</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 2: 复制公式（相对引用）</h2>
+    <div class="instruction">
+      <strong>准备数据：</strong>
+      <ol>
+        <li>在 A1 输入: <code>10</code></li>
+        <li>在 B1 输入: <code>20</code></li>
+        <li>在 C1 输入: <code>=A1+B1</code>（应显示 30）</li>
+        <li>选中 C1，复制（Ctrl+C）</li>
+        <li>选中 C2，粘贴（Ctrl+V）</li>
+      </ol>
+    </div>
+    <table>
+      <tr>
+        <td style="background:#f0f0f0;">A1: 10</td>
+        <td style="background:#f0f0f0;">B1: 20</td>
+        <td style="background:#e3f2fd;"><span class="formula">C1: =A1+B1</span> → <span class="value">30</span></td>
+      </tr>
+      <tr>
+        <td style="background:#f0f0f0;">A2: (空)</td>
+        <td style="background:#f0f0f0;">B2: (空)</td>
+        <td style="background:#fff3cd;"><span class="formula">C2: =A2+B2</span> → <span class="value">0</span></td>
+      </tr>
+    </table>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>C2 显示公式 <code>=A2+B2</code></li>
+        <li>引用自动从 A1+B1 调整为 A2+B2（相对引用）</li>
+        <li>如果 A2、B2 有值，C2 应自动计算</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 3: 复制公式（绝对引用 $）</h2>
+    <div class="instruction">
+      <strong>准备数据：</strong>
+      <ol>
+        <li>在 A1 输入: <code>100</code>（税率基数）</li>
+        <li>在 A2 输入: <code>50</code></li>
+        <li>在 B2 输入: <code>=A2*$A$1</code>（应显示 5000）</li>
+        <li>选中 B2，复制</li>
+        <li>选中 B3:B4，粘贴</li>
+      </ol>
+    </div>
+    <table>
+      <tr>
+        <td style="background:#ffebee;"><strong>A1: 100</strong> (税率基数)</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td style="background:#f0f0f0;">A2: 50</td>
+        <td style="background:#e3f2fd;"><span class="formula">B2: =A2*$A$1</span> → <span class="value">5000</span></td>
+      </tr>
+      <tr>
+        <td style="background:#f0f0f0;">A3: (空)</td>
+        <td style="background:#fff3cd;"><span class="formula">B3: =A3*$A$1</span> → <span class="value">0</span></td>
+      </tr>
+      <tr>
+        <td style="background:#f0f0f0;">A4: (空)</td>
+        <td style="background:#fff3cd;"><span class="formula">B4: =A4*$A$1</span> → <span class="value">0</span></td>
+      </tr>
+    </table>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>B3 显示公式 <code>=A3*$A$1</code>（A3 变化，$A$1 不变）</li>
+        <li>B4 显示公式 <code>=A4*$A$1</code>（A4 变化，$A$1 不变）</li>
+        <li><code>$A$1</code> 始终指向 A1（绝对引用）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 4: 从本表复制到 Excel</h2>
+    <div class="instruction">
+      <strong>操作步骤：</strong>
+      <ol>
+        <li>在表格中输入一些数据（包括公式）</li>
+        <li>选择一个范围（例如 A1:C3）</li>
+        <li>复制（Ctrl+C）</li>
+        <li>打开 Excel 或 Google Sheets</li>
+        <li>粘贴（Ctrl+V）</li>
+      </ol>
+    </div>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>数据正确粘贴到 Excel/Sheets</li>
+        <li>公式以公式形式粘贴（如 <code>=A1+B1</code>）</li>
+        <li>普通值以值形式粘贴</li>
+        <li>保持原有的行列结构</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 5: 选区填充（Excel 行为）</h2>
+    <div class="instruction">
+      <strong>操作步骤：</strong>
+      <ol>
+        <li>在 A1 输入: <code>10</code></li>
+        <li>在 B1 输入: <code>20</code></li>
+        <li>选中 A1:B1，复制</li>
+        <li>选择目标区域 A3:B5（3行2列）</li>
+        <li>粘贴</li>
+      </ol>
+    </div>
+    <table>
+      <tr>
+        <td colspan="2" style="background:#e3f2fd;">A1:B1 (源数据)</td>
+      </tr>
+      <tr>
+        <td style="background:#e3f2fd;">10</td>
+        <td style="background:#e3f2fd;">20</td>
+      </tr>
+      <tr><td colspan="2" style="border:none; background:white;">(空行)</td></tr>
+      <tr>
+        <td colspan="2" style="background:#fff3cd;">A3:B5 (目标区域)</td>
+      </tr>
+      <tr>
+        <td style="background:#fff3cd;">10</td>
+        <td style="background:#fff3cd;">20</td>
+      </tr>
+      <tr>
+        <td style="background:#fff3cd;">10</td>
+        <td style="background:#fff3cd;">20</td>
+      </tr>
+      <tr>
+        <td style="background:#fff3cd;">10</td>
+        <td style="background:#fff3cd;">20</td>
+      </tr>
+    </table>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>数据重复填充到整个目标区域</li>
+        <li>A3:B5 都被填充为 10, 20 的重复</li>
+        <li>这是 Excel 的标准填充行为</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>测试用例 6: CSV 格式支持</h2>
+    <div class="instruction">
+      <strong>操作步骤：</strong>
+      <ol>
+        <li>复制下面的 CSV 数据</li>
+        <li>在表格中粘贴</li>
+      </ol>
+    </div>
+    <div class="test-data">产品,价格,库存
+"苹果 Pro",8999,50
+"iPhone 15",5999,100
+"iPad Air",4999,80</div>
+    <div class="result">
+      <strong>预期结果：</strong>
+      <ul>
+        <li>自动检测为 CSV 格式（逗号分隔）</li>
+        <li>正确处理引号内的内容（如 "苹果 Pro"）</li>
+        <li>数据正确分列显示</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>🔍 验证要点</h2>
+    <ul>
+      <li><strong>TSV 识别</strong>：制表符分隔的数据能正确解析</li>
+      <li><strong>CSV 识别</strong>：逗号分隔的数据能正确解析</li>
+      <li><strong>引号转义</strong>：CSV 中的引号和逗号能正确处理</li>
+      <li><strong>相对引用</strong>：公式复制时引用自动调整（A1→A2）</li>
+      <li><strong>绝对引用</strong>：$符号锁定的位置保持不变（$A$1）</li>
+      <li><strong>混合引用</strong>：$A1（列绝对行相对）、A$1（行绝对列相对）</li>
+      <li><strong>选区填充</strong>：选择大区域粘贴时数据重复填充</li>
+      <li><strong>Excel 互操作</strong>：与 Excel/Sheets 双向复制粘贴正常</li>
+    </ul>
+  </div>
+
+  <div class="test-section">
+    <h2>🐛 已知问题和改进方向</h2>
+    <ul>
+      <li><strong>公式粘贴逻辑</strong>：当前实现通过临时设置源位置实现相对引用，可能需要更优雅的方案</li>
+      <li><strong>大数据粘贴</strong>：粘贴大量数据时可能需要性能优化</li>
+      <li><strong>格式保持</strong>：当前只复制值和公式，不复制样式（如颜色、字体等）</li>
+      <li><strong>特殊字符</strong>：需要测试包含特殊字符（如换行符）的单元格</li>
+    </ul>
+  </div>
+
+  <div class="test-section" style="background:#d4edda; border-color:#c3e6cb;">
+    <h2>✨ 核心代码说明</h2>
+    <h3>onCopy() 函数</h3>
+    <ul>
+      <li>检查是否有选区（selectionRange.startRow !== -1）</li>
+      <li>使用 TSV 格式（Tab 分隔符）</li>
+      <li>调用 formulaSheet.getDisplayValue() 获取显示值（公式显示为公式文本）</li>
+      <li>使用 navigator.clipboard.writeText() 写入剪贴板</li>
+    </ul>
+    <h3>onPaste() 函数</h3>
+    <ul>
+      <li>读取剪贴板文本：navigator.clipboard.readText()</li>
+      <li>自动检测格式：text.includes('\t') 判断 TSV/CSV</li>
+      <li>解析为二维数组：lines.split('\n')，每行再按分隔符分割</li>
+      <li>公式处理：使用 formulaSheet.copyCell() 保持相对引用</li>
+      <li>选区填充：使用模运算 (r % dataHeight) 实现重复填充</li>
+    </ul>
+    <h3>parseCSVLine() 函数</h3>
+    <ul>
+      <li>处理 CSV 引号：inQuotes 状态机</li>
+      <li>双引号转义："" → "</li>
+      <li>正确识别分隔符（引号内的逗号不分割）</li>
+    </ul>
+  </div>
+
+  <div style="margin-top: 30px; padding: 20px; background:#f8f9fa; border-radius:5px;">
+    <h3>📝 测试记录</h3>
+    <p>请在测试时记录：</p>
+    <ul>
+      <li>✅ 通过的测试用例</li>
+      <li>❌ 失败的测试用例及错误详情</li>
+      <li>🔧 需要改进的功能点</li>
+      <li>💡 新的功能建议</li>
+    </ul>
+  </div>
+</body>
+</html>
