@@ -1,9 +1,12 @@
 # 📊 WorkfineSheet - 企业级电子表格组件
 
 ![CI Status](https://github.com/somsne/WorkfineSheet/actions/workflows/ci.yml/badge.svg)
+![Deploy Status](https://github.com/somsne/WorkfineSheet/actions/workflows/deploy.yml/badge.svg)
 ![Test Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)
 ![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+
+**在线演示**: [https://somsne.github.io/WorkfineSheet/](https://somsne.github.io/WorkfineSheet/)
 
 **项目**: 基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组件  
 **特点**: 🎯 模块化架构 · 📝 Excel 公式支持 · 🎨 单元格样式 · ✅ 完整测试覆盖 · 🤖 100%由AI生成  

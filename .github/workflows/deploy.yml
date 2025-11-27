@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  # 允许手动触发
+  workflow_dispatch:
+
+# 设置 GITHUB_TOKEN 权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许一个并发部署，跳过正在运行的队列
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # 构建任务
+  build:
+    name: 构建静态站点
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+      
+      - name: 安装依赖
+        run: npm ci
+      
+      - name: 运行测试
+        run: npm test
+      
+      - name: 构建生产版本
+        run: npm run build
+        env:
+          NODE_ENV: production
+      
+      - name: 设置 GitHub Pages
+        uses: actions/configure-pages@v4
+      
+      - name: 上传构建产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+  # 部署任务
+  deploy:
+    name: 部署到 GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      
+      - name: 生成部署报告
+        run: |
+          echo "## 🚀 部署成功" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**访问地址**: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**提交**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**分支**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**时间**: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
