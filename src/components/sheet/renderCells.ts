@@ -131,6 +131,138 @@ function drawStrikethrough(
   ctx.restore()
 }
 
+/**
+ * Calculate text X position based on horizontal alignment
+ * @param cellX Cell left X position
+ * @param cellWidth Cell width
+ * @param textWidth Text width (from measureText)
+ * @param textAlign Horizontal alignment: 'left' | 'center' | 'right'
+ * @param padding Horizontal padding (default: 6px)
+ * @returns Calculated X position for fillText
+ */
+function calculateTextX(
+  cellX: number,
+  cellWidth: number,
+  textWidth: number,
+  textAlign: 'left' | 'center' | 'right' = 'left',
+  padding: number = 6
+): number {
+  switch (textAlign) {
+    case 'left':
+      return cellX + padding
+    case 'center':
+      return cellX + (cellWidth - textWidth) / 2
+    case 'right':
+      return cellX + cellWidth - textWidth - padding
+    default:
+      return cellX + padding
+  }
+}
+
+/**
+ * Calculate text Y position based on vertical alignment
+ * @param cellY Cell top Y position
+ * @param cellHeight Cell height
+ * @param fontSize Font size
+ * @param verticalAlign Vertical alignment: 'top' | 'middle' | 'bottom'
+ * @param padding Vertical padding (default: 4px)
+ * @returns Object with textY position and appropriate textBaseline setting
+ */
+function calculateTextY(
+  cellY: number,
+  cellHeight: number,
+  _fontSize: number,
+  verticalAlign: 'top' | 'middle' | 'bottom' = 'middle',
+  padding: number = 4
+): { textY: number; textBaseline: CanvasTextBaseline } {
+  switch (verticalAlign) {
+    case 'top':
+      return {
+        textY: cellY + padding,
+        textBaseline: 'top'
+      }
+    case 'middle':
+      return {
+        textY: cellY + cellHeight / 2,
+        textBaseline: 'middle'
+      }
+    case 'bottom':
+      return {
+        textY: cellY + cellHeight - padding,
+        textBaseline: 'bottom'
+      }
+    default:
+      return {
+        textY: cellY + cellHeight / 2,
+        textBaseline: 'middle'
+      }
+  }
+}
+
+/**
+ * Wrap text to fit within a given width
+ * @param ctx Canvas context (needed for measureText)
+ * @param text Text to wrap
+ * @param maxWidth Maximum width in pixels
+ * @param padding Horizontal padding to subtract from maxWidth
+ * @returns Array of text lines
+ */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  padding: number = 12
+): string[] {
+  const availableWidth = maxWidth - padding
+  const lines: string[] = []
+  
+  // 检查文本是否包含空格（英文）
+  const hasSpaces = text.includes(' ')
+  
+  if (hasSpaces) {
+    // 英文模式：按空格分词
+    const words = text.split(' ')
+    let currentLine = ''
+    
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word
+      const metrics = ctx.measureText(testLine)
+      
+      if (metrics.width > availableWidth && currentLine) {
+        lines.push(currentLine)
+        currentLine = word
+      } else {
+        currentLine = testLine
+      }
+    }
+    
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+  } else {
+    // 中文模式：逐字符检查
+    let currentLine = ''
+    
+    for (const char of text) {
+      const testLine = currentLine + char
+      const metrics = ctx.measureText(testLine)
+      
+      if (metrics.width > availableWidth && currentLine) {
+        lines.push(currentLine)
+        currentLine = char
+      } else {
+        currentLine = testLine
+      }
+    }
+    
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+  }
+  
+  return lines.length > 0 ? lines : [text]
+}
+
 export interface CellsRenderConfig {
   containerWidth: number
   containerHeight: number
@@ -230,48 +362,116 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
         ctx.rect(cellX, cellY, colWidth, rowHeight)
         ctx.clip()
         
+        // Draw background color if specified (留出1px的网格线空间)
+        if (style.backgroundColor && style.backgroundColor !== '#FFFFFF') {
+          ctx.fillStyle = style.backgroundColor
+          ctx.fillRect(cellX + 0.5, cellY + 0.5, colWidth - 1, rowHeight - 1)
+        }
+        
         // Apply cell style
         ctx.font = buildFontString(style)
         ctx.fillStyle = style.color || '#000'
         
-        // Handle newlines
+        // Handle newlines and wrapping
         const text = String(displayValue)
-        const lines = text.split('\n')
+        let lines: string[]
+        
+        if (style.wrapText) {
+          // Auto-wrap: split by newlines first, then wrap each line
+          const rawLines = text.split('\n')
+          lines = []
+          for (const rawLine of rawLines) {
+            const wrappedLines = wrapText(ctx, rawLine, colWidth)
+            lines.push(...wrappedLines)
+          }
+        } else {
+          // No wrapping: just split by newlines
+          lines = text.split('\n')
+        }
         
         if (lines.length === 1) {
-          // Single line: use original center alignment
-          const textX = cellX + 6
-          const textY = cellY + rowHeight / 2
-          ctx.fillText(text, textX, textY)
-          
-          // Measure text for decorations
+          // Single line: apply alignment
           const textMetrics = ctx.measureText(text)
           const textWidth = textMetrics.width
           
+          // Calculate vertical alignment
+          const { textY, textBaseline } = calculateTextY(
+            cellY,
+            rowHeight,
+            style.fontSize || 13,
+            style.verticalAlign || 'middle'
+          )
+          ctx.textBaseline = textBaseline
+          
+          // Calculate horizontal alignment
+          const textX = calculateTextX(
+            cellX,
+            colWidth,
+            textWidth,
+            style.textAlign || 'left'
+          )
+          
+          // Handle text rotation (以文本块中心为原点)
+          const rotation = style.textRotation || 0
+          if (rotation !== 0) {
+            // 以文本块的中心点作为旋转原点
+            const textCenterX = textX + textWidth / 2
+            const textCenterY = textY
+            ctx.translate(textCenterX, textCenterY)
+            ctx.rotate((rotation * Math.PI) / 180)
+            ctx.translate(-textCenterX, -textCenterY)
+          }
+          
+          ctx.fillText(text, textX, textY)
+          
           // Draw underline
           if (style.underline) {
-            drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, 'middle')
+            drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, textBaseline)
           }
           
           // Draw strikethrough
           if (style.strikethrough) {
-            drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, 'middle')
+            drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, textBaseline)
           }
         } else {
-          // Multi-line: draw from top
+          // Multi-line: draw from top (vertical align for multi-line uses top as start)
+          const lineHeight = (style.fontSize || 13) * 1.4 // Line height = fontSize * 1.4
+          const totalHeight = lines.length * lineHeight
+          
+          // Calculate starting Y based on vertical alignment
+          let startY: number
+          const vAlign = style.verticalAlign || 'top'
+          if (vAlign === 'top') {
+            startY = cellY + 4
+          } else if (vAlign === 'middle') {
+            const centered = cellY + (rowHeight - totalHeight) / 2
+            // If content would overflow above cell, start from top instead
+            startY = Math.max(centered, cellY + 4)
+          } else { // bottom
+            const fromBottom = cellY + rowHeight - totalHeight - 4
+            // If content would overflow above cell, start from top instead
+            startY = Math.max(fromBottom, cellY + 4)
+          }
+          
           ctx.textBaseline = 'top'
-          const textX = cellX + 6
-          const lineHeight = 18
           
           lines.forEach((line, index) => {
-            const textY = cellY + 4 + index * lineHeight
-            // Only draw lines within cell bounds
+            const textY = startY + index * lineHeight
+            // Only draw lines within cell bounds (check top is within cell)
             if (textY >= cellY && textY < cellY + rowHeight) {
-              ctx.fillText(line, textX, textY)
-              
-              // Measure text for decorations
+              // Measure text for alignment
               const textMetrics = ctx.measureText(line)
               const textWidth = textMetrics.width
+              
+              // Calculate horizontal alignment
+              const textX = calculateTextX(
+                cellX,
+                colWidth,
+                textWidth,
+                style.textAlign || 'left'
+              )
+              
+              ctx.fillText(line, textX, textY)
               
               // Draw underline for multi-line
               if (style.underline) {
