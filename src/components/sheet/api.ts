@@ -4,6 +4,7 @@
  */
 
 import type { SelectedCell } from './rowcol'
+import type { CellStyle } from './types'
 
 /**
  * 行列尺寸 API
@@ -151,9 +152,99 @@ export interface FreezeAPI {
 }
 
 /**
+ * 样式 API
+ */
+export interface StyleAPI {
+  /**
+   * 获取单元格样式
+   */
+  getCellStyle(row: number, col: number): CellStyle
+  
+  /**
+   * 设置单元格样式（部分更新）
+   */
+  setCellStyle(row: number, col: number, style: Partial<CellStyle>): void
+  
+  /**
+   * 清除单元格样式
+   */
+  clearCellStyle(row: number, col: number): void
+  
+  /**
+   * 设置范围样式（批量）
+   */
+  setRangeStyle(startRow: number, startCol: number, endRow: number, endCol: number, style: Partial<CellStyle>): void
+  
+  // 快捷方法 - 字体样式
+  /**
+   * 设置粗体
+   */
+  setBold(row: number, col: number, bold: boolean): void
+  
+  /**
+   * 设置斜体
+   */
+  setItalic(row: number, col: number, italic: boolean): void
+  
+  /**
+   * 设置下划线
+   */
+  setUnderline(row: number, col: number, underline: boolean | 'single' | 'double'): void
+  
+  /**
+   * 设置删除线
+   */
+  setStrikethrough(row: number, col: number, strikethrough: boolean): void
+  
+  // 快捷方法 - 字体属性
+  /**
+   * 设置字体
+   */
+  setFontFamily(row: number, col: number, fontFamily: string): void
+  
+  /**
+   * 设置字号
+   */
+  setFontSize(row: number, col: number, fontSize: number): void
+  
+  // 快捷方法 - 颜色
+  /**
+   * 设置字体颜色
+   */
+  setTextColor(row: number, col: number, color: string): void
+  
+  /**
+   * 设置背景色
+   */
+  setBackgroundColor(row: number, col: number, color: string): void
+  
+  // 快捷方法 - 对齐
+  /**
+   * 设置水平对齐
+   */
+  setTextAlign(row: number, col: number, align: 'left' | 'center' | 'right'): void
+  
+  /**
+   * 设置垂直对齐
+   */
+  setVerticalAlign(row: number, col: number, align: 'top' | 'middle' | 'bottom'): void
+  
+  // 快捷方法 - 其他
+  /**
+   * 设置自动换行
+   */
+  setWrapText(row: number, col: number, wrap: boolean): void
+  
+  /**
+   * 设置文字旋转角度
+   */
+  setTextRotation(row: number, col: number, rotation: number): void
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI {
   /**
    * 刷新绘制
    */
@@ -200,6 +291,12 @@ export function createSheetAPI(context: {
   // 单元格值
   getCellValue: (row: number, col: number) => string
   setCellValue: (row: number, col: number, value: string) => void
+  
+  // 样式相关
+  getCellStyleFn: (row: number, col: number) => CellStyle
+  setCellStyleFn: (row: number, col: number, style: Partial<CellStyle>) => void
+  clearCellStyleFn: (row: number, col: number) => void
+  setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style: Partial<CellStyle>) => void
   
   // 绘制
   draw: () => void
@@ -317,6 +414,79 @@ export function createSheetAPI(context: {
     // 其他
     redraw: context.draw,
     getCellValue: context.getCellValue,
-    setCellValue: context.setCellValue
+    setCellValue: context.setCellValue,
+    
+    // 样式 API
+    getCellStyle: context.getCellStyleFn,
+    setCellStyle(row: number, col: number, style: Partial<CellStyle>): void {
+      context.setCellStyleFn(row, col, style)
+      context.draw()
+    },
+    clearCellStyle(row: number, col: number): void {
+      context.clearCellStyleFn(row, col)
+      context.draw()
+    },
+    setRangeStyle(startRow: number, startCol: number, endRow: number, endCol: number, style: Partial<CellStyle>): void {
+      context.setRangeStyleFn(startRow, startCol, endRow, endCol, style)
+      context.draw()
+    },
+    
+    // 快捷方法 - 字体样式
+    setBold(row: number, col: number, bold: boolean): void {
+      context.setCellStyleFn(row, col, { bold })
+      context.draw()
+    },
+    setItalic(row: number, col: number, italic: boolean): void {
+      context.setCellStyleFn(row, col, { italic })
+      context.draw()
+    },
+    setUnderline(row: number, col: number, underline: boolean | 'single' | 'double'): void {
+      context.setCellStyleFn(row, col, { underline })
+      context.draw()
+    },
+    setStrikethrough(row: number, col: number, strikethrough: boolean): void {
+      context.setCellStyleFn(row, col, { strikethrough })
+      context.draw()
+    },
+    
+    // 快捷方法 - 字体属性
+    setFontFamily(row: number, col: number, fontFamily: string): void {
+      context.setCellStyleFn(row, col, { fontFamily })
+      context.draw()
+    },
+    setFontSize(row: number, col: number, fontSize: number): void {
+      context.setCellStyleFn(row, col, { fontSize })
+      context.draw()
+    },
+    
+    // 快捷方法 - 颜色
+    setTextColor(row: number, col: number, color: string): void {
+      context.setCellStyleFn(row, col, { color })
+      context.draw()
+    },
+    setBackgroundColor(row: number, col: number, color: string): void {
+      context.setCellStyleFn(row, col, { backgroundColor: color })
+      context.draw()
+    },
+    
+    // 快捷方法 - 对齐
+    setTextAlign(row: number, col: number, align: 'left' | 'center' | 'right'): void {
+      context.setCellStyleFn(row, col, { textAlign: align })
+      context.draw()
+    },
+    setVerticalAlign(row: number, col: number, align: 'top' | 'middle' | 'bottom'): void {
+      context.setCellStyleFn(row, col, { verticalAlign: align })
+      context.draw()
+    },
+    
+    // 快捷方法 - 其他
+    setWrapText(row: number, col: number, wrap: boolean): void {
+      context.setCellStyleFn(row, col, { wrapText: wrap })
+      context.draw()
+    },
+    setTextRotation(row: number, col: number, rotation: number): void {
+      context.setCellStyleFn(row, col, { textRotation: rotation })
+      context.draw()
+    }
   }
 }

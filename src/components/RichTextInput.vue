@@ -623,7 +623,7 @@ const editorStyle = computed(() => {
     padding: '2px 4px',
     fontSize: `${props.cellStyle?.fontSize || 13}px`,
     fontFamily: props.cellStyle?.fontFamily || 'sans-serif',
-    lineHeight: '18px',
+    lineHeight: `${(props.cellStyle?.fontSize || 13) * 1.4}px`,
     border: isInSelectableState.value 
       ? '2px solid #10b981'
       : formulaMode.value 

@@ -1,9 +1,13 @@
 <template>
-  <div ref="container" class="sheet-container" @contextmenu="onContextMenu">
-    <canvas ref="gridCanvas" class="grid-canvas"></canvas>
-    <canvas ref="contentCanvas" class="content-canvas"></canvas>
+  <div class="sheet-wrapper">
+    <!-- 样式工具栏 -->
+    <StyleToolbar v-if="api" :api="api" :current-selection="selected" :selection-range="selectionRange" />
     
-    <!-- RichTextInput 富文本编辑器 -->
+    <div ref="container" class="sheet-container" @contextmenu="onContextMenu">
+      <canvas ref="gridCanvas" class="grid-canvas"></canvas>
+      <canvas ref="contentCanvas" class="content-canvas"></canvas>
+      
+      <!-- RichTextInput 富文本编辑器 -->
     <RichTextInput
       ref="overlayInput"
       :visible="overlay.visible"
@@ -74,6 +78,7 @@
           (已完成 {{ calculationProgress.completed }})
         </span>
       </div>
+    </div>
     </div>
   </div>
 </template>
@@ -155,6 +160,7 @@ interface FormulaReference {
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
+import StyleToolbar from './StyleToolbar.vue'
 // @ts-ignore
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
@@ -900,6 +906,39 @@ function onKeyDown(e: KeyboardEvent) {
     selected.row = 0
     selected.col = 0
     draw()
+    return
+  }
+
+  // Handle Ctrl+B (Bold)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+    e.preventDefault()
+    if (selected.row >= 0 && selected.col >= 0) {
+      const currentStyle = model.getCellStyle(selected.row, selected.col)
+      model.setCellStyle(selected.row, selected.col, { bold: !currentStyle.bold })
+      draw()
+    }
+    return
+  }
+
+  // Handle Ctrl+I (Italic)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+    e.preventDefault()
+    if (selected.row >= 0 && selected.col >= 0) {
+      const currentStyle = model.getCellStyle(selected.row, selected.col)
+      model.setCellStyle(selected.row, selected.col, { italic: !currentStyle.italic })
+      draw()
+    }
+    return
+  }
+
+  // Handle Ctrl+U (Underline)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+    e.preventDefault()
+    if (selected.row >= 0 && selected.col >= 0) {
+      const currentStyle = model.getCellStyle(selected.row, selected.col)
+      model.setCellStyle(selected.row, selected.col, { underline: !currentStyle.underline })
+      draw()
+    }
     return
   }
 
@@ -1729,6 +1768,13 @@ const api = createSheetAPI({
     draw()
   },
   
+  // 样式相关
+  getCellStyleFn: (row: number, col: number) => model.getCellStyle(row, col),
+  setCellStyleFn: (row: number, col: number, style) => model.setCellStyle(row, col, style),
+  clearCellStyleFn: (row: number, col: number) => model.clearCellStyle(row, col),
+  setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => 
+    model.setRangeStyle(startRow, startCol, endRow, endCol, style),
+  
   // 绘制
   draw,
   
@@ -1742,14 +1788,19 @@ defineExpose(api)
 </script>
 
 <style scoped>
-.sheet-container {
-  position: absolute;
-  top: 0;
-  left: 0;
+.sheet-wrapper {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
+}
+
+.sheet-container {
+  position: relative;
+  flex: 1;
   background: #fff;
   border: 1px solid #ddd;
+  overflow: hidden;
 }
 
 .grid-canvas,
