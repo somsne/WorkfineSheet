@@ -206,8 +206,8 @@ export class FormulaEngine {
    * 所以我们这里获取的已经是计算后的值
    */
   private replaceReferencesWithValues(expression: string): string {
-    // 首先处理范围引用 (A1:B2)
-    expression = expression.replace(/([A-Za-z]+\d+):([A-Za-z]+\d+)/gi, (match) => {
+    // 首先处理范围引用 (A1:B2, $A$1:$B$2, etc.)
+    expression = expression.replace(/(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/gi, (match) => {
       const rangeStr = match.toUpperCase()
       const range = this.parseRangeReference(rangeStr)
       if (!range) return match

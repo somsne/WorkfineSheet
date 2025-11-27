@@ -328,11 +328,11 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   ctx.textBaseline = 'middle'
 
   // Draw visible cells from model
-  for (let r = startRow; r < endRow; r++) {
+  for (let r = startRow; r <= endRow; r++) {
     const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
     const rowHeight = getRowHeight(r, sizes, geometryConfig)
     
-    for (let c = startCol; c < endCol; c++) {
+    for (let c = startCol; c <= endCol; c++) {
       const displayValue = getCellValue(r, c)
       if (displayValue !== null && displayValue !== undefined) {
         const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft

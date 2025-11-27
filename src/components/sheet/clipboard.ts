@@ -82,6 +82,7 @@ export async function copyRange(
 
 /**
  * 粘贴内部剪贴板数据（保留公式）
+ * Excel 行为：无论是否有选区，都从起始位置按照剪贴板数据大小粘贴
  */
 export function pasteInternal(
   data: InternalClipboardCell[][],
@@ -89,55 +90,24 @@ export function pasteInternal(
   srcStartCol: number,
   destStartRow: number,
   destStartCol: number,
-  target: PasteTarget,
-  selectionRange?: { startRow: number; startCol: number; endRow: number; endCol: number }
+  target: PasteTarget
 ): void {
-  if (selectionRange) {
-    // 有选区：填充整个选区（Excel 行为）
-    const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
-    const selHeight = selEndRow - selStartRow + 1
-    const selWidth = selEndCol - selStartCol + 1
-    const dataHeight = data.length
-    const dataWidth = Math.max(...data.map(row => row.length))
-    
-    // 如果选区大于数据，重复填充
-    for (let r = 0; r < selHeight; r++) {
-      for (let c = 0; c < selWidth; c++) {
-        const dataRow = data[r % dataHeight]
-        const cell = dataRow ? (dataRow[c % dataWidth] || { value: '', isFormula: false }) : { value: '', isFormula: false }
-        
-        const srcRow = srcStartRow + (r % dataHeight)
-        const srcCol = srcStartCol + (c % dataWidth)
-        const destRow = selStartRow + r
-        const destCol = selStartCol + c
-        
-        if (cell.isFormula) {
-          // 公式：使用 copyCell 保持相对/绝对引用
-          target.copyCell(srcRow, srcCol, destRow, destCol)
-        } else {
-          // 普通值：直接设置
-          target.setValue(destRow, destCol, cell.value)
-        }
-      }
-    }
-  } else {
-    // 无选区：从当前位置粘贴数据
-    for (let r = 0; r < data.length; r++) {
-      const row = data[r] ?? []
-      for (let c = 0; c < row.length; c++) {
-        const cell = row[c] || { value: '', isFormula: false }
-        const srcRow = srcStartRow + r
-        const srcCol = srcStartCol + c
-        const destRow = destStartRow + r
-        const destCol = destStartCol + c
-        
-        if (cell.isFormula) {
-          // 公式：使用 copyCell 保持相对/绝对引用
-          target.copyCell(srcRow, srcCol, destRow, destCol)
-        } else {
-          // 普通值：直接设置
-          target.setValue(destRow, destCol, cell.value)
-        }
+  // 按照剪贴板数据的实际大小粘贴
+  for (let r = 0; r < data.length; r++) {
+    const row = data[r] ?? []
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c] || { value: '', isFormula: false }
+      const srcRow = srcStartRow + r
+      const srcCol = srcStartCol + c
+      const destRow = destStartRow + r
+      const destCol = destStartCol + c
+      
+      if (cell.isFormula) {
+        // 公式：使用 copyCell 保持相对/绝对引用
+        target.copyCell(srcRow, srcCol, destRow, destCol)
+      } else {
+        // 普通值：直接设置
+        target.setValue(destRow, destCol, cell.value)
       }
     }
   }
@@ -145,44 +115,23 @@ export function pasteInternal(
 
 /**
  * 粘贴外部数据（从系统剪贴板）
+ * Excel 行为：无论是否有选区，都从起始位置按照剪贴板数据大小粘贴
  */
 export function pasteExternal(
   data: string[][],
   destStartRow: number,
   destStartCol: number,
-  target: PasteTarget,
-  selectionRange?: { startRow: number; startCol: number; endRow: number; endCol: number }
+  target: PasteTarget
 ): void {
-  if (selectionRange) {
-    // 有选区：填充整个选区（Excel 行为）
-    const { startRow: selStartRow, startCol: selStartCol, endRow: selEndRow, endCol: selEndCol } = selectionRange
-    const selHeight = selEndRow - selStartRow + 1
-    const selWidth = selEndCol - selStartCol + 1
-    const dataHeight = data.length
-    const dataWidth = Math.max(...data.map(row => row.length))
-    
-    // 如果选区大于数据，重复填充
-    for (let r = 0; r < selHeight; r++) {
-      for (let c = 0; c < selWidth; c++) {
-        const dataRow = data[r % dataHeight]
-        const value = dataRow ? (dataRow[c % dataWidth] || '') : ''
-        const destRow = selStartRow + r
-        const destCol = selStartCol + c
-        
-        target.setValue(destRow, destCol, value)
-      }
-    }
-  } else {
-    // 无选区：从当前位置粘贴数据
-    for (let r = 0; r < data.length; r++) {
-      const row = data[r] ?? []
-      for (let c = 0; c < row.length; c++) {
-        const value = row[c] || ''
-        const destRow = destStartRow + r
-        const destCol = destStartCol + c
-        
-        target.setValue(destRow, destCol, value)
-      }
+  // 按照剪贴板数据的实际大小粘贴
+  for (let r = 0; r < data.length; r++) {
+    const row = data[r] ?? []
+    for (let c = 0; c < row.length; c++) {
+      const value = row[c] || ''
+      const destRow = destStartRow + r
+      const destCol = destStartCol + c
+      
+      target.setValue(destRow, destCol, value)
     }
   }
 }

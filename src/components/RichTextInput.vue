@@ -485,20 +485,42 @@ function handlePaste(e: ClipboardEvent) {
       text = text.slice(0, MAX_PASTE_LENGTH)
     }
     
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return
+    // 获取当前光标位置
+    const cursorPosition = getCursorPosition()
+    const currentText = internal.value
     
-    const range = selection.getRangeAt(0)
-    range.deleteContents()
-    range.insertNode(document.createTextNode(text))
+    // 在光标位置插入文本
+    const before = currentText.slice(0, cursorPosition)
+    const after = currentText.slice(cursorPosition)
+    const newText = before + text + after
     
-    // 移动光标到插入文本后
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
+    // 直接更新 internal.value，避免从 DOM 读取导致的换行符问题
+    internal.value = newText
     
-    // 触发 input 事件
-    handleInput(new Event('input'))
+    // 计算新的光标位置
+    const newCursorPos = cursorPosition + text.length
+    
+    // 更新编辑器内容
+    updateEditorContent(newText, false)
+    
+    // 设置光标到插入文本后的位置
+    nextTick(() => {
+      setCursorPosition(newCursorPos)
+      cursorPos.value = newCursorPos
+      
+      // 更新可选择状态
+      if (formulaMode.value) {
+        updateSelectableState()
+        const selection = window.getSelection()
+        hasTextSelection.value = !!(selection && !selection.isCollapsed)
+      }
+      
+      // 调整大小
+      adjustSize()
+      
+      // 通知父组件
+      emit('input-change')
+    })
   } catch (error) {
     console.warn('[RichTextInput] handlePaste error:', error)
   }

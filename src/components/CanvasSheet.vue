@@ -1345,10 +1345,12 @@ async function onCopy() {
  * 1. 从 Excel 复制的数据（TSV 格式）
  * 2. 从本表复制的数据（包含公式）
  * 3. 自动处理相对/绝对引用（$符号）
+ * 4. Excel 行为：无论是否有选区，都从左上角开始粘贴剪贴板数据，然后选中被影响的区域
  */
 async function onPaste() {
-  const destStartRow = selected.row
-  const destStartCol = selected.col
+  // 确定粘贴起始位置：如果有选区，从选区左上角开始；否则从当前单元格开始
+  const destStartRow = selectionRange.startRow !== -1 ? selectionRange.startRow : selected.row
+  const destStartCol = selectionRange.startCol !== -1 ? selectionRange.startCol : selected.col
   
   const target = {
     setValue: (r: number, c: number, v: string) => formulaSheet.setValue(r, c, v),
@@ -1359,7 +1361,8 @@ async function onPaste() {
   if (internalClipboard.data && isInternalClipboardValid(lastCopyTs.value)) {
     console.log('Pasting from internal clipboard with formula metadata')
     
-    const selRange = selectionRange.startRow !== -1 ? selectionRange : undefined
+    const dataHeight = internalClipboard.data.length
+    const dataWidth = Math.max(...internalClipboard.data.map(row => row.length))
     
     pasteInternal(
       internalClipboard.data,
@@ -1367,12 +1370,20 @@ async function onPaste() {
       internalClipboard.startCol,
       destStartRow,
       destStartCol,
-      target,
-      selRange
+      target
     )
     
+    // 粘贴后选中所有被影响的单元格
+    const pasteEndRow = destStartRow + dataHeight - 1
+    const pasteEndCol = destStartCol + dataWidth - 1
+    
+    selectionRange.startRow = destStartRow
+    selectionRange.startCol = destStartCol
+    selectionRange.endRow = pasteEndRow
+    selectionRange.endCol = pasteEndCol
+    
     draw()
-    console.log('Pasted from internal clipboard')
+    console.log(`Pasted from internal clipboard, selected range: (${destStartRow},${destStartCol}) to (${pasteEndRow},${pasteEndCol})`)
     return
   }
   
@@ -1387,12 +1398,22 @@ async function onPaste() {
   
   console.log(`Pasting ${data.length} rows to (${destStartRow}, ${destStartCol})`)
   
-  const selRange = selectionRange.startRow !== -1 ? selectionRange : undefined
+  const dataHeight = data.length
+  const dataWidth = Math.max(...data.map(row => row.length), 0)
   
-  pasteExternal(data, destStartRow, destStartCol, target, selRange)
+  pasteExternal(data, destStartRow, destStartCol, target)
+  
+  // 粘贴后选中所有被影响的单元格
+  const pasteEndRow = destStartRow + dataHeight - 1
+  const pasteEndCol = destStartCol + dataWidth - 1
+  
+  selectionRange.startRow = destStartRow
+  selectionRange.startCol = destStartCol
+  selectionRange.endRow = pasteEndRow
+  selectionRange.endCol = pasteEndCol
   
   draw()
-  console.log('Pasted from clipboard')
+  console.log(`Pasted from clipboard, selected range: (${destStartRow},${destStartCol}) to (${pasteEndRow},${pasteEndCol})`)
 }
 
 function onOverlaySave(val: string) {
