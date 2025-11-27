@@ -30,7 +30,9 @@ describe('StyleToolbar 组件', () => {
       setTextAlign: vi.fn(),
       setVerticalAlign: vi.fn(),
       setWrapText: vi.fn(),
-      setTextRotation: vi.fn()
+      setTextRotation: vi.fn(),
+      getShowGridLines: vi.fn(() => true),
+      setShowGridLines: vi.fn()
     } as any
   })
 

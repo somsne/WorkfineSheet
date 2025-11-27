@@ -50,8 +50,12 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
-  // Background colors for headers
-  ctx.fillStyle = '#f0f0f0'
+  // Background colors for headers - support dark mode
+  const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const headerBgColor = isDarkMode ? '#161616' : '#f0f0f0'
+  const headerTextColor = isDarkMode ? '#e0e0e0' : '#333'
+  
+  ctx.fillStyle = headerBgColor
   ctx.fillRect(0, 0, w, colHeaderHeight)
   ctx.fillRect(0, 0, rowHeaderWidth, h)
 
@@ -62,7 +66,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
 
   ctx.strokeStyle = '#999'
   ctx.lineWidth = 1
-  ctx.fillStyle = '#333'
+  ctx.fillStyle = headerTextColor
   ctx.font = '12px sans-serif'
   ctx.textBaseline = 'middle'
 
@@ -152,14 +156,14 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   
   // Redraw header mask layer to cover any overflow content
   // This ensures headers are always on top
-  ctx.fillStyle = '#f0f0f0'
+  ctx.fillStyle = headerBgColor
   // Column header mask
   ctx.fillRect(0, 0, w, colHeaderHeight)
   // Row header mask  
   ctx.fillRect(0, 0, rowHeaderWidth, h)
   
   // Redraw column labels and separator lines
-  ctx.fillStyle = '#333'
+  ctx.fillStyle = headerTextColor
   ctx.font = '12px sans-serif'
   ctx.textBaseline = 'middle'
   ctx.strokeStyle = '#999'
@@ -250,7 +254,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   
   // Top-left corner mask layer to cover any scrolled content
   // Expand by 1px to fully cover border lines
-  ctx.fillStyle = '#f0f0f0'
+  ctx.fillStyle = headerBgColor
   ctx.fillRect(0, 0, rowHeaderWidth + 1, colHeaderHeight + 1)
   
   // Redraw top-left corner right and bottom border lines to ensure complete borders

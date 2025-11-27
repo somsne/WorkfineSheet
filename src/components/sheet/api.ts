@@ -4,7 +4,7 @@
  */
 
 import type { SelectedCell } from './rowcol'
-import type { CellStyle } from './types'
+import type { CellStyle, CellBorder, BorderEdge } from './types'
 
 /**
  * 行列尺寸 API
@@ -242,9 +242,94 @@ export interface StyleAPI {
 }
 
 /**
+ * 边框 API
+ */
+export interface BorderAPI {
+  /**
+   * 获取单元格边框
+   */
+  getCellBorder(row: number, col: number): CellBorder | undefined
+  
+  /**
+   * 设置单元格边框（部分更新）
+   */
+  setCellBorder(row: number, col: number, border: Partial<CellBorder>): void
+  
+  /**
+   * 清除单元格边框
+   */
+  clearCellBorder(row: number, col: number): void
+  
+  /**
+   * 设置范围边框（所有单元格全边框）
+   */
+  setRangeBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    border: Partial<CellBorder>
+  ): void
+  
+  /**
+   * 设置范围外边框（只设置最外层）
+   */
+  setRangeOuterBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    edge: BorderEdge
+  ): void
+  
+  /**
+   * 清除范围边框
+   */
+  clearRangeBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number
+  ): void
+  
+  // 快捷方法
+  /**
+   * 设置全边框（所有单元格四边都有边框）
+   */
+  setAllBorders(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    edge: BorderEdge
+  ): void
+  
+  /**
+   * 设置外边框（只有外围有边框）
+   */
+  setOuterBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    edge: BorderEdge
+  ): void
+  
+  /**
+   * 清除所有边框
+   */
+  clearAllBorders(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number
+  ): void
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI {
   /**
    * 刷新绘制
    */
@@ -298,6 +383,14 @@ export function createSheetAPI(context: {
   clearCellStyleFn: (row: number, col: number) => void
   setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style: Partial<CellStyle>) => void
   
+  // 边框相关
+  getCellBorderFn: (row: number, col: number) => CellBorder | undefined
+  setCellBorderFn: (row: number, col: number, border: Partial<CellBorder>) => void
+  clearCellBorderFn: (row: number, col: number) => void
+  setRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, border: Partial<CellBorder>) => void
+  setRangeOuterBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, edge: BorderEdge) => void
+  clearRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number) => void
+  
   // 绘制
   draw: () => void
   
@@ -305,6 +398,8 @@ export function createSheetAPI(context: {
   hiddenRows?: Set<number>
   hiddenCols?: Set<number>
   showGridLines?: boolean
+  setShowGridLinesFn?: (show: boolean) => void
+  getShowGridLinesFn?: () => boolean
   
   // 冻结（预留，当前可能未实现）
   frozenRows?: number
@@ -382,12 +477,17 @@ export function createSheetAPI(context: {
       }
     },
     setShowGridLines(show: boolean): void {
-      if (context.showGridLines !== undefined) {
+      if (context.setShowGridLinesFn) {
+        context.setShowGridLinesFn(show)
+      } else if (context.showGridLines !== undefined) {
         context.showGridLines = show
         context.draw()
       }
     },
     getShowGridLines(): boolean {
+      if (context.getShowGridLinesFn) {
+        return context.getShowGridLinesFn()
+      }
       return context.showGridLines ?? true
     },
     
@@ -486,6 +586,85 @@ export function createSheetAPI(context: {
     },
     setTextRotation(row: number, col: number, rotation: number): void {
       context.setCellStyleFn(row, col, { textRotation: rotation })
+      context.draw()
+    },
+    
+    // ==================== 边框 API ====================
+    
+    // 基础方法
+    getCellBorder: context.getCellBorderFn,
+    setCellBorder(row: number, col: number, border: Partial<CellBorder>): void {
+      context.setCellBorderFn(row, col, border)
+      context.draw()
+    },
+    clearCellBorder(row: number, col: number): void {
+      context.clearCellBorderFn(row, col)
+      context.draw()
+    },
+    setRangeBorder(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number,
+      border: Partial<CellBorder>
+    ): void {
+      context.setRangeBorderFn(startRow, startCol, endRow, endCol, border)
+      context.draw()
+    },
+    setRangeOuterBorder(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number,
+      edge: BorderEdge
+    ): void {
+      context.setRangeOuterBorderFn(startRow, startCol, endRow, endCol, edge)
+      context.draw()
+    },
+    clearRangeBorder(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number
+    ): void {
+      context.clearRangeBorderFn(startRow, startCol, endRow, endCol)
+      context.draw()
+    },
+    
+    // 快捷方法
+    setAllBorders(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number,
+      edge: BorderEdge
+    ): void {
+      const border: CellBorder = {
+        top: edge,
+        right: edge,
+        bottom: edge,
+        left: edge
+      }
+      context.setRangeBorderFn(startRow, startCol, endRow, endCol, border)
+      context.draw()
+    },
+    setOuterBorder(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number,
+      edge: BorderEdge
+    ): void {
+      context.setRangeOuterBorderFn(startRow, startCol, endRow, endCol, edge)
+      context.draw()
+    },
+    clearAllBorders(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number
+    ): void {
+      context.clearRangeBorderFn(startRow, startCol, endRow, endCol)
       context.draw()
     }
   }

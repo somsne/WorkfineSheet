@@ -19,6 +19,226 @@ export function initializeDemoData(model: SheetModel): void {
     verticalAlign: 'middle'
   })
 
+  // ===== G3～J20：边框样式演示区域 =====
+  // 标题
+  model.setValue(2, 6, '边框样式演示')
+  model.setCellStyle(2, 6, {
+    bold: true,
+    fontSize: 16,
+    color: '#1e40af',
+    backgroundColor: '#dbeafe',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+
+  // 所有边框示例 (G5-H8)
+  model.setValue(4, 6, '所有边框')
+  model.setCellStyle(4, 6, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 5; row <= 7; row++) {
+    for (let col = 6; col <= 7; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle'
+      })
+      model.setCellBorder(row, col, {
+        top: { style: 'thin', color: '#000000' },
+        right: { style: 'thin', color: '#000000' },
+        bottom: { style: 'thin', color: '#000000' },
+        left: { style: 'thin', color: '#000000' }
+      })
+    }
+  }
+
+  // 外边框示例 (I5-J8)
+  model.setValue(4, 8, '外边框')
+  model.setCellStyle(4, 8, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 5; row <= 7; row++) {
+    for (let col = 8; col <= 9; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: '#fef9c3'
+      })
+    }
+  }
+  // 只设置外边框
+  for (let row = 5; row <= 7; row++) {
+    model.setCellBorder(row, 8, {
+      top: row === 5 ? { style: 'medium', color: '#0891b2' } : undefined,
+      bottom: row === 7 ? { style: 'medium', color: '#0891b2' } : undefined,
+      left: { style: 'medium', color: '#0891b2' }
+    })
+    model.setCellBorder(row, 9, {
+      top: row === 5 ? { style: 'medium', color: '#0891b2' } : undefined,
+      bottom: row === 7 ? { style: 'medium', color: '#0891b2' } : undefined,
+      right: { style: 'medium', color: '#0891b2' }
+    })
+  }
+
+  // 粗边框示例 (G10-H12)
+  model.setValue(9, 6, '粗边框')
+  model.setCellStyle(9, 6, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 10; row <= 11; row++) {
+    for (let col = 6; col <= 7; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: '#fee2e2'
+      })
+      model.setCellBorder(row, col, {
+        top: { style: 'thick', color: '#dc2626' },
+        right: { style: 'thick', color: '#dc2626' },
+        bottom: { style: 'thick', color: '#dc2626' },
+        left: { style: 'thick', color: '#dc2626' }
+      })
+    }
+  }
+
+  // 虚线边框示例 (I10-J12)
+  model.setValue(9, 8, '虚线边框')
+  model.setCellStyle(9, 8, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 10; row <= 11; row++) {
+    for (let col = 8; col <= 9; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: '#e0e7ff'
+      })
+      model.setCellBorder(row, col, {
+        top: { style: 'dashed', color: '#6366f1' },
+        right: { style: 'dashed', color: '#6366f1' },
+        bottom: { style: 'dashed', color: '#6366f1' },
+        left: { style: 'dashed', color: '#6366f1' }
+      })
+    }
+  }
+
+  // 点线边框示例 (G14-H16)
+  model.setValue(13, 6, '点线边框')
+  model.setCellStyle(13, 6, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 14; row <= 15; row++) {
+    for (let col = 6; col <= 7; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: '#d1fae5'
+      })
+      model.setCellBorder(row, col, {
+        top: { style: 'dotted', color: '#059669' },
+        right: { style: 'dotted', color: '#059669' },
+        bottom: { style: 'dotted', color: '#059669' },
+        left: { style: 'dotted', color: '#059669' }
+      })
+    }
+  }
+
+  // 双线边框示例 (I14-J16)
+  model.setValue(13, 8, '双线边框')
+  model.setCellStyle(13, 8, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  for (let row = 14; row <= 15; row++) {
+    for (let col = 8; col <= 9; col++) {
+      model.setValue(row, col, `${String.fromCharCode(65 + col)}${row + 1}`)
+      model.setCellStyle(row, col, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: '#fae8ff'
+      })
+      model.setCellBorder(row, col, {
+        top: { style: 'double', color: '#c026d3' },
+        right: { style: 'double', color: '#c026d3' },
+        bottom: { style: 'double', color: '#c026d3' },
+        left: { style: 'double', color: '#c026d3' }
+      })
+    }
+  }
+
+  // 混合边框示例 - 表格效果 (G18-J20)
+  model.setValue(17, 6, '表格边框')
+  model.setCellStyle(17, 6, {
+    bold: true,
+    textAlign: 'center',
+    backgroundColor: '#f3f4f6'
+  })
+  
+  // 表格表头
+  const borderHeaders = ['姓名', '年龄', '城市', '职位']
+  borderHeaders.forEach((header, index) => {
+    model.setValue(18, 6 + index, header)
+    model.setCellStyle(18, 6 + index, {
+      bold: true,
+      backgroundColor: '#3b82f6',
+      color: '#ffffff',
+      textAlign: 'center',
+      verticalAlign: 'middle'
+    })
+    // 表头边框
+    model.setCellBorder(18, 6 + index, {
+      top: { style: 'thick', color: '#1e40af' },
+      right: { style: 'thin', color: '#60a5fa' },
+      bottom: { style: 'medium', color: '#1e40af' },
+      left: { style: 'thin', color: '#60a5fa' }
+    })
+  })
+  
+  // 表格数据行
+  const borderData = [
+    ['张三', '28', '北京', '工程师'],
+    ['李四', '32', '上海', '经理']
+  ]
+  
+  borderData.forEach((rowData, rowIndex) => {
+    rowData.forEach((value, colIndex) => {
+      model.setValue(19 + rowIndex, 6 + colIndex, value)
+      model.setCellStyle(19 + rowIndex, 6 + colIndex, {
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        backgroundColor: rowIndex % 2 === 0 ? '#f0f9ff' : '#ffffff'
+      })
+      // 数据行边框
+      model.setCellBorder(19 + rowIndex, 6 + colIndex, {
+        top: { style: 'thin', color: '#cbd5e1' },
+        right: { style: 'thin', color: '#cbd5e1' },
+        bottom: { style: 'thin', color: '#cbd5e1' },
+        left: { style: 'thin', color: '#cbd5e1' }
+      })
+    })
+  })
+
   // ===== 第 2 行：水平对齐演示 =====
   model.setValue(2, 0, '水平对齐')
   model.setCellStyle(2, 0, {

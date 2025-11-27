@@ -3,7 +3,8 @@
  * Depends on geometry module for positions and the FormulaSheet for values.
  */
 
-import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle } from './types'
+import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge } from './types'
+import { BORDER_PRESETS } from './types'
 import { getRowHeight, getColWidth, getRowTop, getColLeft } from './geometry'
 
 /**
@@ -283,6 +284,10 @@ export interface CellsRenderConfig {
   getCellValue: (row: number, col: number) => string | number | null | undefined
   // Style provider
   getCellStyle?: (row: number, col: number) => CellStyle
+  // Border provider
+  model?: {
+    getCellBorder: (row: number, col: number) => CellBorder | undefined
+  }
   // Helper for selection range text
   getSelectionRangeText?: (startRow: number, startCol: number, endRow: number, endCol: number) => string
   // Visible range
@@ -493,6 +498,25 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     }
   }
 
+  // Draw cell borders (after cell content, before selection highlights)
+  // This ensures borders are visible but don't cover selection highlights
+  if (config.model && config.model.getCellBorder) {
+    for (let r = startRow; r <= endRow; r++) {
+      const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+      const rowHeight = getRowHeight(r, sizes, geometryConfig)
+      
+      for (let c = startCol; c <= endCol; c++) {
+        const border = config.model.getCellBorder(r, c)
+        if (border) {
+          const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+          const colWidth = getColWidth(c, sizes, geometryConfig)
+          
+          drawCellBorder(ctx, cellX, cellY, colWidth, rowHeight, border)
+        }
+      }
+    }
+  }
+
   // Highlight selection range (fill with light blue)
   if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
     ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
@@ -593,4 +617,144 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   
   // Restore clipping region
   ctx.restore()
+}
+
+// ==================== 边框绘制功能 ====================
+
+/**
+ * Draw a single border edge (one side of a cell)
+ * @param ctx Canvas context
+ * @param x1 Start X coordinate
+ * @param y1 Start Y coordinate
+ * @param x2 End X coordinate
+ * @param y2 End Y coordinate
+ * @param edge Border edge configuration
+ * @param direction Line direction (horizontal or vertical)
+ */
+function drawBorderEdge(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  edge: BorderEdge,
+  direction: 'horizontal' | 'vertical'
+): void {
+  if (edge.style === 'none') return
+
+  const preset = BORDER_PRESETS[edge.style]
+  const width = edge.width ?? preset.width
+  const color = edge.color ?? '#000000'
+
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineWidth = width
+
+  // Set line dash pattern for dashed/dotted styles
+  if (preset.pattern.length > 0) {
+    ctx.setLineDash([...preset.pattern])
+  }
+
+  // Double border requires special handling
+  if (edge.style === 'double') {
+    drawDoubleBorder(ctx, x1, y1, x2, y2, width, direction)
+  } else {
+    // Single line border
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+/**
+ * Draw double border (two parallel lines)
+ * @param ctx Canvas context
+ * @param x1 Start X coordinate
+ * @param y1 Start Y coordinate
+ * @param x2 End X coordinate
+ * @param y2 End Y coordinate
+ * @param width Total border width
+ * @param direction Line direction
+ */
+function drawDoubleBorder(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  width: number,
+  direction: 'horizontal' | 'vertical'
+): void {
+  const gap = 1 // Gap between the two lines
+  const lineWidth = Math.max(1, Math.floor((width - gap) / 2))
+  
+  ctx.lineWidth = lineWidth
+
+  if (direction === 'horizontal') {
+    // Top line
+    ctx.beginPath()
+    ctx.moveTo(x1, y1 - gap / 2 - lineWidth / 2)
+    ctx.lineTo(x2, y2 - gap / 2 - lineWidth / 2)
+    ctx.stroke()
+    
+    // Bottom line
+    ctx.beginPath()
+    ctx.moveTo(x1, y1 + gap / 2 + lineWidth / 2)
+    ctx.lineTo(x2, y2 + gap / 2 + lineWidth / 2)
+    ctx.stroke()
+  } else {
+    // Left line
+    ctx.beginPath()
+    ctx.moveTo(x1 - gap / 2 - lineWidth / 2, y1)
+    ctx.lineTo(x2 - gap / 2 - lineWidth / 2, y2)
+    ctx.stroke()
+    
+    // Right line
+    ctx.beginPath()
+    ctx.moveTo(x1 + gap / 2 + lineWidth / 2, y1)
+    ctx.lineTo(x2 + gap / 2 + lineWidth / 2, y2)
+    ctx.stroke()
+  }
+}
+
+/**
+ * Draw all borders for a single cell
+ * @param ctx Canvas context
+ * @param x Cell X position
+ * @param y Cell Y position
+ * @param width Cell width
+ * @param height Cell height
+ * @param border Cell border configuration
+ */
+export function drawCellBorder(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  border: CellBorder
+): void {
+  if (!border) return
+
+  // Draw borders in order: top -> right -> bottom -> left
+  // This ensures proper corner connections
+  
+  if (border.top) {
+    drawBorderEdge(ctx, x, y, x + width, y, border.top, 'horizontal')
+  }
+  
+  if (border.right) {
+    drawBorderEdge(ctx, x + width, y, x + width, y + height, border.right, 'vertical')
+  }
+  
+  if (border.bottom) {
+    drawBorderEdge(ctx, x, y + height, x + width, y + height, border.bottom, 'horizontal')
+  }
+  
+  if (border.left) {
+    drawBorderEdge(ctx, x, y, x, y + height, border.left, 'vertical')
+  }
 }

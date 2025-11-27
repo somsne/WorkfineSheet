@@ -894,7 +894,7 @@ defineExpose({
 <style scoped>
 /* 光标样式 */
 div[contenteditable] {
-  caret-color: #000;
+  caret-color: var(--caret-color, #000);
   cursor: text; /* 文本编辑光标 */
   user-select: text; /* 确保可以选中文本 */
   -webkit-user-select: text;
@@ -913,12 +913,28 @@ div[contenteditable] span {
 /* 选区背景色 */
 div[contenteditable]::selection,
 div[contenteditable] span::selection {
-  background-color: rgba(0, 120, 215, 0.3);
+  background-color: var(--selection-bg, rgba(0, 120, 215, 0.3));
 }
 
 /* 空内容占位 */
 div[contenteditable]:empty::before {
   content: '';
-  color: #999;
+  color: var(--placeholder-color, #999);
+}
+
+/* 暗黑模式支持 */
+@media (prefers-color-scheme: dark) {
+  div[contenteditable] {
+    --caret-color: #fff;
+  }
+  
+  div[contenteditable]::selection,
+  div[contenteditable] span::selection {
+    --selection-bg: rgba(100, 180, 255, 0.4);
+  }
+  
+  div[contenteditable]:empty::before {
+    --placeholder-color: #666;
+  }
 }
 </style>

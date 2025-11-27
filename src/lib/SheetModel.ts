@@ -1,5 +1,5 @@
 import type { FormulaMetadata } from './FormulaMetadata'
-import type { CellStyle } from '../components/sheet/types'
+import type { CellStyle, CellBorder, BorderEdge } from '../components/sheet/types'
 import { DEFAULT_CELL_STYLE } from '../components/sheet/types'
 
 export type CellKey = string
@@ -20,6 +20,9 @@ export class SheetModel {
   
   // 样式存储（使用 Map 优化查询性能）
   private cellStyles: Map<CellKey, CellStyle> = new Map()
+  
+  // 边框存储
+  private cellBorders: Map<CellKey, CellBorder> = new Map()
 
   getCell(r: number, c: number): Cell | null {
     const k = keyFor(r, c)
@@ -138,5 +141,144 @@ export class SheetModel {
    */
   getStyledCellCount(): number {
     return this.cellStyles.size
+  }
+
+  // ==================== 边框管理方法 ====================
+
+  /**
+   * 设置单元格边框
+   * 会合并现有边框，而不是完全替换
+   * @param r 行号
+   * @param c 列号
+   * @param border 要设置的边框（部分属性）
+   */
+  setCellBorder(r: number, c: number, border: Partial<CellBorder>): void {
+    const k = keyFor(r, c)
+    const currentBorder = this.cellBorders.get(k) || {}
+    this.cellBorders.set(k, { ...currentBorder, ...border })
+  }
+
+  /**
+   * 获取单元格边框
+   * @param r 行号
+   * @param c 列号
+   * @returns 单元格边框，如果没有设置则返回 undefined
+   */
+  getCellBorder(r: number, c: number): CellBorder | undefined {
+    const k = keyFor(r, c)
+    return this.cellBorders.get(k)
+  }
+
+  /**
+   * 清除单元格边框
+   * @param r 行号
+   * @param c 列号
+   */
+  clearCellBorder(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cellBorders.delete(k)
+  }
+
+  /**
+   * 批量设置边框（选区全边框）
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @param border 要设置的边框
+   */
+  setRangeBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    border: Partial<CellBorder>
+  ): void {
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        this.setCellBorder(r, c, border)
+      }
+    }
+  }
+
+  /**
+   * 设置范围外边框（只设置最外层四边）
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @param edge 边框样式
+   */
+  setRangeOuterBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    edge: BorderEdge
+  ): void {
+    // 上边和下边
+    for (let c = startCol; c <= endCol; c++) {
+      // 上边框
+      const topKey = keyFor(startRow, c)
+      const topBorder = this.cellBorders.get(topKey) || {}
+      this.cellBorders.set(topKey, { ...topBorder, top: edge })
+      
+      // 下边框
+      const bottomKey = keyFor(endRow, c)
+      const bottomBorder = this.cellBorders.get(bottomKey) || {}
+      this.cellBorders.set(bottomKey, { ...bottomBorder, bottom: edge })
+    }
+    
+    // 左边和右边
+    for (let r = startRow; r <= endRow; r++) {
+      // 左边框
+      const leftKey = keyFor(r, startCol)
+      const leftBorder = this.cellBorders.get(leftKey) || {}
+      this.cellBorders.set(leftKey, { ...leftBorder, left: edge })
+      
+      // 右边框
+      const rightKey = keyFor(r, endCol)
+      const rightBorder = this.cellBorders.get(rightKey) || {}
+      this.cellBorders.set(rightKey, { ...rightBorder, right: edge })
+    }
+  }
+
+  /**
+   * 清除范围边框
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   */
+  clearRangeBorder(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number
+  ): void {
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        this.clearCellBorder(r, c)
+      }
+    }
+  }
+
+  /**
+   * 检查单元格是否有边框
+   * @param r 行号
+   * @param c 列号
+   * @returns 是否有边框
+   */
+  hasCellBorder(r: number, c: number): boolean {
+    const k = keyFor(r, c)
+    return this.cellBorders.has(k)
+  }
+
+  /**
+   * 获取所有有边框的单元格数量
+   * @returns 边框单元格数量
+   */
+  getBorderedCellCount(): number {
+    return this.cellBorders.size
   }
 }

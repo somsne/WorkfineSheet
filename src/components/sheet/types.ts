@@ -156,3 +156,57 @@ export type StyleKey = keyof CellStyle
  * 样式值类型
  */
 export type StyleValue = CellStyle[StyleKey]
+
+// ==================== 单元格边框 ====================
+
+/**
+ * 边框线型
+ */
+export type BorderStyle = 
+  | 'none'        // 无边框
+  | 'thin'        // 细线 (1px)
+  | 'medium'      // 中等线 (2px)
+  | 'thick'       // 粗线 (3px)
+  | 'dashed'      // 虚线
+  | 'dotted'      // 点线
+  | 'double'      // 双线
+
+/**
+ * 单条边框配置
+ */
+export interface BorderEdge {
+  style: BorderStyle
+  color?: string  // 默认 #000000
+  width?: number  // 自定义宽度，覆盖 style 预设
+}
+
+/**
+ * 单元格四边边框
+ */
+export interface CellBorder {
+  top?: BorderEdge
+  right?: BorderEdge
+  bottom?: BorderEdge
+  left?: BorderEdge
+}
+
+/**
+ * 边框预设配置
+ */
+export const BORDER_PRESETS = {
+  thin: { width: 1, pattern: [] as number[] },
+  medium: { width: 2, pattern: [] as number[] },
+  thick: { width: 3, pattern: [] as number[] },
+  dashed: { width: 1, pattern: [4, 2] },
+  dotted: { width: 1, pattern: [1, 1] },
+  double: { width: 3, pattern: [] as number[] }
+} as const
+
+/**
+ * 默认边框样式
+ */
+export const DEFAULT_BORDER_EDGE: Required<BorderEdge> = {
+  style: 'thin',
+  color: '#000000',
+  width: 1
+}

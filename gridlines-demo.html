@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网格线功能测试</title>
+  <style>
+    body {
+      margin: 20px;
+      font-family: sans-serif;
+    }
+    .demo {
+      border: 1px solid #ccc;
+      width: 400px;
+      height: 300px;
+      position: relative;
+      background: white;
+    }
+    .grid {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        repeating-linear-gradient(0deg, #ddd 0, #ddd 1px, transparent 1px, transparent 30px),
+        repeating-linear-gradient(90deg, #ddd 0, #ddd 1px, transparent 1px, transparent 100px);
+      transition: opacity 0.3s;
+    }
+    .grid.hidden {
+      opacity: 0;
+    }
+    button {
+      margin: 10px 0;
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+    button.active {
+      background: #e3f2fd;
+      border-color: #2196f3;
+      color: #1976d2;
+    }
+    button:hover {
+      background: #eeeeee;
+    }
+    .status {
+      margin: 10px 0;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>网格线功能演示</h1>
+  
+  <button id="toggleBtn" class="active" title="显示/隐藏网格线">
+    ⊞ 切换网格线
+  </button>
+  
+  <div class="status">
+    当前状态: <strong id="status">显示</strong>
+  </div>
+  
+  <div class="demo">
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <script>
+    let showGridLines = true;
+    const toggleBtn = document.getElementById('toggleBtn');
+    const grid = document.getElementById('grid');
+    const status = document.getElementById('status');
+
+    function updateUI() {
+      if (showGridLines) {
+        toggleBtn.classList.add('active');
+        grid.classList.remove('hidden');
+        status.textContent = '显示';
+      } else {
+        toggleBtn.classList.remove('active');
+        grid.classList.add('hidden');
+        status.textContent = '隐藏';
+      }
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      showGridLines = !showGridLines;
+      console.log('网格线状态:', showGridLines ? '显示' : '隐藏');
+      updateUI();
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>

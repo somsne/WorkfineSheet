@@ -119,13 +119,85 @@
     >
       ⏎
     </button>
+
+    <div class="separator"></div>
+
+    <!-- 边框设置 -->
+    <div class="border-dropdown">
+      <button 
+        @click="toggleBorderMenu" 
+        class="style-btn border-btn" 
+        title="边框设置"
+      >
+        ▦
+      </button>
+      <div v-if="showBorderMenu" class="border-menu">
+        <div class="border-menu-item" @click="applyAllBorders">
+          <span class="border-icon">⊞</span>
+          <span>所有边框</span>
+        </div>
+        <div class="border-menu-item" @click="applyOuterBorder">
+          <span class="border-icon">▢</span>
+          <span>外边框</span>
+        </div>
+        <div class="border-menu-item" @click="applyTopBorder">
+          <span class="border-icon">⎺</span>
+          <span>上边框</span>
+        </div>
+        <div class="border-menu-item" @click="applyBottomBorder">
+          <span class="border-icon">⎽</span>
+          <span>下边框</span>
+        </div>
+        <div class="border-menu-item" @click="applyLeftBorder">
+          <span class="border-icon">⎸</span>
+          <span>左边框</span>
+        </div>
+        <div class="border-menu-item" @click="applyRightBorder">
+          <span class="border-icon">⎹</span>
+          <span>右边框</span>
+        </div>
+        <div class="border-menu-divider"></div>
+        <div class="border-menu-item" @click="clearBorders">
+          <span class="border-icon">○</span>
+          <span>清除边框</span>
+        </div>
+        <div class="border-menu-divider"></div>
+        <div class="border-style-section">
+          <label>边框样式：</label>
+          <select v-model="borderStyle" class="border-style-select">
+            <option value="thin">细线</option>
+            <option value="medium">中等</option>
+            <option value="thick">粗线</option>
+            <option value="dashed">虚线</option>
+            <option value="dotted">点线</option>
+            <option value="double">双线</option>
+          </select>
+        </div>
+        <div class="border-color-section">
+          <label>边框颜色：</label>
+          <input type="color" v-model="borderColor" class="border-color-input" />
+        </div>
+      </div>
+    </div>
+
+    <div class="separator"></div>
+
+    <!-- 网格线切换 -->
+    <button 
+      :class="{ active: showGridLines }" 
+      @click="toggleGridLines" 
+      class="style-btn" 
+      title="显示/隐藏网格线"
+    >
+      ⊞
+    </button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { SheetAPI } from './sheet/api'
-import type { CellStyle } from './sheet/types'
+import type { CellStyle, BorderStyle } from './sheet/types'
 
 const props = defineProps<{
   api: SheetAPI
@@ -145,6 +217,30 @@ const backgroundColor = ref('#FFFFFF')
 const textAlign = ref<'left' | 'center' | 'right'>('left')
 const verticalAlign = ref<'top' | 'middle' | 'bottom'>('middle')
 const wrapText = ref(false)
+
+// 边框设置状态
+const showBorderMenu = ref(false)
+const borderStyle = ref<BorderStyle>('thin')
+const borderColor = ref('#000000')
+
+// 网格线状态
+const showGridLines = ref(true)
+
+// 点击外部关闭边框菜单
+const handleClickOutside = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  if (!target.closest('.border-dropdown')) {
+    showBorderMenu.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 
 // 监听选区变化，更新工具栏状态
 watch(() => [props.currentSelection.row, props.currentSelection.col], () => {
@@ -240,6 +336,144 @@ function toggleWrapText() {
   wrapText.value = !wrapText.value
   applyStyleToSelection({ wrapText: wrapText.value })
 }
+
+// 边框功能
+function toggleBorderMenu() {
+  showBorderMenu.value = !showBorderMenu.value
+}
+
+function getSelectionRange() {
+  if (props.selectionRange.startRow >= 0 && props.selectionRange.startCol >= 0) {
+    return {
+      startRow: props.selectionRange.startRow,
+      startCol: props.selectionRange.startCol,
+      endRow: props.selectionRange.endRow,
+      endCol: props.selectionRange.endCol
+    }
+  }
+  return {
+    startRow: props.currentSelection.row,
+    startCol: props.currentSelection.col,
+    endRow: props.currentSelection.row,
+    endCol: props.currentSelection.col
+  }
+}
+
+function applyAllBorders() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  props.api.setAllBorders(
+    range.startRow,
+    range.startCol,
+    range.endRow,
+    range.endCol,
+    { style: borderStyle.value, color: borderColor.value }
+  )
+  showBorderMenu.value = false
+}
+
+function applyOuterBorder() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  props.api.setOuterBorder(
+    range.startRow,
+    range.startCol,
+    range.endRow,
+    range.endCol,
+    { style: borderStyle.value, color: borderColor.value }
+  )
+  showBorderMenu.value = false
+}
+
+function applyTopBorder() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      if (row === range.startRow) {
+        props.api.setCellBorder(row, col, {
+          top: { style: borderStyle.value, color: borderColor.value }
+        })
+      }
+    }
+  }
+  showBorderMenu.value = false
+}
+
+function applyBottomBorder() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      if (row === range.endRow) {
+        props.api.setCellBorder(row, col, {
+          bottom: { style: borderStyle.value, color: borderColor.value }
+        })
+      }
+    }
+  }
+  showBorderMenu.value = false
+}
+
+function applyLeftBorder() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      if (col === range.startCol) {
+        props.api.setCellBorder(row, col, {
+          left: { style: borderStyle.value, color: borderColor.value }
+        })
+      }
+    }
+  }
+  showBorderMenu.value = false
+}
+
+function applyRightBorder() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      if (col === range.endCol) {
+        props.api.setCellBorder(row, col, {
+          right: { style: borderStyle.value, color: borderColor.value }
+        })
+      }
+    }
+  }
+  showBorderMenu.value = false
+}
+
+function clearBorders() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  props.api.clearAllBorders(
+    range.startRow,
+    range.startCol,
+    range.endRow,
+    range.endCol
+  )
+  showBorderMenu.value = false
+}
+
+// 网格线功能
+function toggleGridLines() {
+  showGridLines.value = !showGridLines.value
+  props.api.setShowGridLines(showGridLines.value)
+}
+
+// 初始化网格线状态
+onMounted(() => {
+  showGridLines.value = props.api.getShowGridLines()
+})
 </script>
 
 <style scoped>
@@ -248,86 +482,66 @@ function toggleWrapText() {
   align-items: center;
   gap: 6px;
   padding: 10px 16px;
-  background: linear-gradient(to bottom, #fafafa 0%, #f5f5f5 100%);
-  border-bottom: 1px solid #d0d0d0;
+  background: var(--toolbar-bg, linear-gradient(to bottom, #fafafa 0%, #f5f5f5 100%));
+  border-bottom: 1px solid var(--toolbar-border, #d0d0d0);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   flex-wrap: wrap;
   min-height: 48px;
 }
 
-.font-select {
+.font-select,
+.font-size-select,
+.align-select {
   padding: 6px 10px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--select-border, #d0d0d0);
   border-radius: 4px;
-  background: white;
+  background: var(--select-bg, white);
+  color: var(--select-text, #000);
   font-size: 13px;
-  min-width: 140px;
   height: 32px;
   cursor: pointer;
   transition: all 0.2s;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.font-select:hover {
-  border-color: #999;
-}
-
-.font-select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+.font-select {
+  min-width: 140px;
 }
 
 .font-size-select {
-  padding: 6px 10px;
-  border: 1px solid #d0d0d0;
-  border-radius: 4px;
-  background: white;
-  font-size: 13px;
   width: 65px;
-  height: 32px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.font-size-select:hover {
-  border-color: #999;
-}
-
-.font-size-select:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
 .align-select {
-  padding: 6px 10px;
-  border: 1px solid #d0d0d0;
-  border-radius: 4px;
-  background: white;
-  font-size: 13px;
   width: 90px;
-  height: 32px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+.font-select:hover,
+.font-size-select:hover,
 .align-select:hover {
-  border-color: #999;
+  border-color: var(--select-border-hover, #999);
 }
 
+.font-select:focus,
+.font-size-select:focus,
 .align-select:focus {
   outline: none;
   border-color: #3b82f6;
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
+/* 夜间模式下的 option 元素 */
+.font-select option,
+.font-size-select option,
+.align-select option {
+  background: var(--select-bg, white);
+  color: var(--select-text, #000);
+}
+
 .separator {
   width: 1px;
   height: 24px;
-  background: #d0d0d0;
+  background: var(--separator-color, #d0d0d0);
   margin: 0 6px;
 }
 
@@ -335,9 +549,10 @@ function toggleWrapText() {
   width: 32px;
   height: 32px;
   padding: 0;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--btn-border, #d0d0d0);
   border-radius: 4px;
-  background: white;
+  background: var(--btn-bg, white);
+  color: var(--btn-text, #000);
   cursor: pointer;
   font-size: 15px;
   font-weight: 500;
@@ -349,8 +564,8 @@ function toggleWrapText() {
 }
 
 .style-btn:hover {
-  background: #f0f0f0;
-  border-color: #999;
+  background: var(--btn-bg-hover, #f0f0f0);
+  border-color: var(--btn-border-hover, #999);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -381,17 +596,17 @@ function toggleWrapText() {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--btn-border, #d0d0d0);
   border-radius: 4px;
-  background: white;
+  background: var(--btn-bg, white);
   cursor: pointer;
   transition: all 0.15s;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .color-picker label:hover {
-  background: #f0f0f0;
-  border-color: #999;
+  background: var(--btn-bg-hover, #f0f0f0);
+  border-color: var(--btn-border-hover, #999);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -402,6 +617,7 @@ function toggleWrapText() {
 .color-label {
   font-weight: 600;
   font-size: 14px;
+  color: var(--btn-text, #000);
   pointer-events: none;
 }
 
@@ -411,5 +627,118 @@ function toggleWrapText() {
   height: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+/* 边框下拉菜单 */
+.border-dropdown {
+  position: relative;
+}
+
+.border-btn {
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.border-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--menu-bg, white);
+  border: 1px solid var(--menu-border, #d0d0d0);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 200px;
+  z-index: 1000;
+}
+
+.border-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  color: var(--menu-text, #333);
+  user-select: none;
+}
+
+.border-menu-item:hover {
+  background: var(--menu-hover, #f0f0f0);
+}
+
+.border-icon {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+  color: var(--icon-color, #666);
+}
+
+.border-menu-divider {
+  height: 1px;
+  background: var(--menu-border, #e0e0e0);
+  margin: 6px 0;
+}
+
+.border-style-section,
+.border-color-section {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.border-style-section label,
+.border-color-section label {
+  font-size: 12px;
+  color: var(--label-text, #666);
+  white-space: nowrap;
+}
+
+.border-style-select {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--select-border, #d0d0d0);
+  border-radius: 4px;
+  background: var(--select-bg, white);
+  color: var(--select-text, #000);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.border-color-input {
+  width: 40px;
+  height: 24px;
+  border: 1px solid var(--select-border, #d0d0d0);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* 夜间模式 */
+@media (prefers-color-scheme: dark) {
+  .style-toolbar {
+    --toolbar-bg: linear-gradient(to bottom, #2a2a2a 0%, #1e1e1e 100%);
+    --toolbar-border: #404040;
+    --select-bg: #2d2d2d;
+    --select-text: #e0e0e0;
+    --select-border: #505050;
+    --select-border-hover: #707070;
+    --separator-color: #505050;
+    --btn-bg: #2d2d2d;
+    --btn-text: #e0e0e0;
+    --btn-border: #505050;
+    --btn-border-hover: #707070;
+    --btn-bg-hover: #3a3a3a;
+  }
+
+  .border-menu {
+    --menu-bg: #2d2d2d;
+    --menu-border: #505050;
+    --menu-text: #e0e0e0;
+    --menu-hover: #3a3a3a;
+    --icon-color: #b0b0b0;
+    --label-text: #b0b0b0;
+  }
 }
 </style>

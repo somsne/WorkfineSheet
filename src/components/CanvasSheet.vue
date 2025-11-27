@@ -600,6 +600,7 @@ function drawCells(w: number, h: number) {
     geometryConfig: cfg,
     getCellValue: (r, c) => formulaSheet.getValue(r, c),
     getCellStyle: (r, c) => model.getCellStyle(r, c),
+    model: model, // 提供边框访问
     getSelectionRangeText,
     startRow,
     endRow,
@@ -1775,13 +1776,29 @@ const api = createSheetAPI({
   setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => 
     model.setRangeStyle(startRow, startCol, endRow, endCol, style),
   
+  // 边框相关
+  getCellBorderFn: (row: number, col: number) => model.getCellBorder(row, col),
+  setCellBorderFn: (row: number, col: number, border) => model.setCellBorder(row, col, border),
+  clearCellBorderFn: (row: number, col: number) => model.clearCellBorder(row, col),
+  setRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, border) =>
+    model.setRangeBorder(startRow, startCol, endRow, endCol, border),
+  setRangeOuterBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, edge) =>
+    model.setRangeOuterBorder(startRow, startCol, endRow, endCol, edge),
+  clearRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number) =>
+    model.clearRangeBorder(startRow, startCol, endRow, endCol),
+  
   // 绘制
   draw,
   
   // 隐藏/显示（阶段 14 新增）
   hiddenRows: hiddenRows.value,
   hiddenCols: hiddenCols.value,
-  showGridLines: showGridLines.value
+  showGridLines: showGridLines.value,
+  setShowGridLinesFn: (show: boolean) => {
+    showGridLines.value = show
+    draw()
+  },
+  getShowGridLinesFn: () => showGridLines.value
 })
 
 defineExpose(api)
@@ -1798,8 +1815,8 @@ defineExpose(api)
 .sheet-container {
   position: relative;
   flex: 1;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--sheet-bg, #fff);
+  border: 1px solid var(--sheet-border, #ddd);
   overflow: hidden;
 }
 
@@ -1823,7 +1840,7 @@ defineExpose(api)
   left: 2px;
   width: 8px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--scrollbar-thumb, rgba(0, 0, 0, 0.25));
   cursor: pointer;
 }
 
@@ -1839,7 +1856,7 @@ defineExpose(api)
   top: 2px;
   height: 8px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--scrollbar-thumb, rgba(0, 0, 0, 0.25));
   cursor: pointer;
 }
 
@@ -1857,8 +1874,8 @@ defineExpose(api)
   top: 10px;
   right: 20px;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #e0e0e0;
+  background: var(--progress-bg, rgba(255, 255, 255, 0.95));
+  border: 1px solid var(--progress-border, #e0e0e0);
   border-radius: 8px;
   padding: 8px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -1876,7 +1893,7 @@ defineExpose(api)
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #333;
+  color: var(--progress-text, #333);
 }
 
 .progress-icon {
@@ -1890,7 +1907,27 @@ defineExpose(api)
 }
 
 .progress-detail {
-  color: #666;
+  color: var(--progress-detail, #666);
   font-size: 12px;
+}
+
+/* 暗黑模式支持 */
+@media (prefers-color-scheme: dark) {
+  .sheet-container {
+    /* 数据区域保持白色背景 */
+    --sheet-border: #404040;
+  }
+  
+  .v-scrollbar-thumb,
+  .h-scrollbar-thumb {
+    --scrollbar-thumb: rgba(255, 255, 255, 0.25);
+  }
+  
+  .calculation-progress {
+    --progress-bg: rgba(30, 30, 30, 0.95);
+    --progress-border: #404040;
+    --progress-text: #e0e0e0;
+    --progress-detail: #b0b0b0;
+  }
 }
 </style>
