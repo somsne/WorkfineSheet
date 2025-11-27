@@ -2,7 +2,9 @@
   <div ref="container" class="sheet-container" @contextmenu="onContextMenu">
     <canvas ref="gridCanvas" class="grid-canvas"></canvas>
     <canvas ref="contentCanvas" class="content-canvas"></canvas>
-    <SheetOverlayInput
+    
+    <!-- RichTextInput 富文本编辑器 -->
+    <RichTextInput
       ref="overlayInput"
       :visible="overlay.visible"
       :value="overlay.value"
@@ -13,8 +15,9 @@
       :width="overlay.width"
       :height="overlay.height"
       :mode="overlay.mode"
+      :is-formula="overlay.value.startsWith('=')"
       :cell-style="model.getCellStyle(overlay.row, overlay.col)"
-      :formula-references="formulaReferences"
+      :formula-references="richTextFormulaReferences"
       @save="onOverlaySave"
       @cancel="onOverlayCancel"
       @input-change="updateFormulaReferences"
@@ -76,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, reactive, watch, computed } from 'vue'
 import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft, getRowAtY as geomGetRowAtY, getColAtX as geomGetColAtX, getVisibleRange as geomGetVisibleRange, ensureVisible as geomEnsureVisible } from './sheet/geometry'
 import type { GeometryConfig, SizeAccess } from './sheet/types'
 import { setCanvasSize, createRedrawScheduler } from './sheet/renderCore'
@@ -150,8 +153,8 @@ interface FormulaReference {
   color: string
 }
 
-// @ts-ignore - Vue SFC typing handled via vue-tsc at build time
-import SheetOverlayInput from './SheetOverlayInput.vue'
+// @ts-ignore
+import RichTextInput from './RichTextInput.vue'
 // @ts-ignore
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
@@ -278,7 +281,40 @@ const internalClipboard = reactive<{
 })
 const formulaReferences = ref<FormulaReference[]>([])
 
-
+// 为 RichTextInput 转换 FormulaReference 格式
+const richTextFormulaReferences = computed(() => {
+  // 依赖 formulaReferences.value 以触发重新计算
+  const refs = formulaReferences.value
+  
+  // 从 overlayInput 获取当前值，而不是使用 overlay.value
+  // 因为 RichTextInput 内部管理自己的值，overlay.value 不会实时更新
+  const text = (overlayInput.value as any)?.getCurrentValue?.() || overlay.value
+  const result: Array<{ ref: string; color: string; startIndex: number; endIndex: number }> = []
+  
+  for (const ref of refs) {
+    // 在文本中查找引用的所有出现位置（不区分大小写）
+    const textUpper = text.toUpperCase()
+    const refUpper = ref.range.toUpperCase()
+    
+    let searchStart = 0
+    while (searchStart < text.length) {
+      const startIndex = textUpper.indexOf(refUpper, searchStart)
+      if (startIndex === -1) break
+      
+      const endIndex = startIndex + ref.range.length
+      result.push({
+        ref: ref.range,
+        color: ref.color,
+        startIndex,
+        endIndex
+      })
+      
+      searchStart = endIndex
+    }
+  }
+  
+  return result
+})
 
 // Viewport state for scrolling
 const viewport = reactive({
@@ -1206,6 +1242,14 @@ function onMouseUp(): void {
       selectionRange.endRow = -1
       selectionRange.endCol = -1
       
+      // 重置拖拽状态，避免进入框选模式
+      dragState.isDragging = false
+      dragState.startRow = -1
+      dragState.startCol = -1
+      dragState.currentRow = -1
+      dragState.currentCol = -1
+      dragState.justFinishedDrag = false
+      
       draw()
       return
     }
@@ -1229,6 +1273,14 @@ function onMouseUp(): void {
     selectionRange.startCol = -1
     selectionRange.endRow = -1
     selectionRange.endCol = -1
+    
+    // 重置拖拽状态，避免进入框选模式
+    dragState.isDragging = false
+    dragState.startRow = -1
+    dragState.startCol = -1
+    dragState.currentRow = -1
+    dragState.currentCol = -1
+    dragState.justFinishedDrag = false
     
     // 绘制选择区域的视觉反馈
     draw()

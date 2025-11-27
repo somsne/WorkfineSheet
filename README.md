@@ -58,6 +58,8 @@ npm run preview
 
 ## 📚 文档导航
 
+> 📂 **完整文档索引**: [docs/DOCS_INDEX.md](./docs/DOCS_INDEX.md) - 查看所有 40+ 篇文档
+
 ### 🏗️ 架构与设计
 - **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - 完整的模块架构设计
 - **[docs/PROJECT_STRUCTURE.md](./docs/PROJECT_STRUCTURE.md)** - 项目目录结构说明
@@ -68,15 +70,13 @@ npm run preview
 - **[docs/GITHUB_ACTIONS.md](./docs/GITHUB_ACTIONS.md)** - CI/CD 自动化配置
 - **[refactor-progress.md](./refactor-progress.md)** - 详细的重构进度跟踪
 
+### 🔥 最新功能
+- **[docs/RICHTEXTINPUT_COMPLETE.md](./docs/RICHTEXTINPUT_COMPLETE.md)** - RichTextInput 富文本编辑器完成报告
+
 ### 🧪 测试文档
 - **[docs/TEST_SUMMARY.md](./docs/TEST_SUMMARY.md)** - 测试工作总结
 - **[docs/COMPLETION_REPORT.md](./docs/COMPLETION_REPORT.md)** - 项目完成报告
 - **[docs/QUICK_TEST.md](./docs/QUICK_TEST.md)** - 快速功能验证（5 分钟）
-
-### 📋 历史文档
-- **[docs/FORMULA_PLAN.md](./docs/FORMULA_PLAN.md)** - 公式功能规划
-- **[docs/FORMULA_PROGRESS.md](./docs/FORMULA_PROGRESS.md)** - 公式实现进度
-- **[docs/PHASE*.md](./docs/)** - 各阶段完成报告
 
 > � **快速上手**: 建议阅读顺序  
 > 1. [PROJECT_STRUCTURE.md](./docs/PROJECT_STRUCTURE.md) - 了解项目结构  

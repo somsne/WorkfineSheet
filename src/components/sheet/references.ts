@@ -70,21 +70,21 @@ export function parseFormulaReferences(formula: string): FormulaReference[] {
   let match
   while ((match = rangeRegex.exec(formula)) !== null) {
     const rangeStr = match[0].toUpperCase()
-    if (seen.has(rangeStr)) continue
-    seen.add(rangeStr)
     
     const startAddr = match[1]?.toUpperCase()
     const endAddr = match[2]?.toUpperCase()
     
     if (!startAddr || !endAddr) continue
     
+    // 使用规范化的键来去重（移除 $ 符号）
+    const seenKey = `${startAddr.replace(/\$/g,'')}:${endAddr.replace(/\$/g,'')}`
+    if (seen.has(seenKey)) continue
+    seen.add(seenKey)
+    
     const startRef = parseCellAddr(startAddr)
     const endRef = parseCellAddr(endAddr)
     
     if (startRef && endRef) {
-      const seenKey = `${startAddr.replace(/\$/g,'')}:${endAddr.replace(/\$/g,'')}`
-      if (seen.has(seenKey)) continue
-      seen.add(seenKey)
       references.push({
         range: rangeStr,
         startRow: Math.min(startRef.row, endRef.row),
