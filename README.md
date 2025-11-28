@@ -61,8 +61,13 @@
 
 ### 开发模式
 ```bash
-# 确保使用推荐的 Node 版本
-node --version  # 应该 >= 18.0.0
+# 使用 nvm 切换到项目推荐版本（仓库已提供 .nvmrc）
+nvm use
+# 如未安装对应版本，可先安装
+# nvm install
+
+# 校验当前 Node 版本（应 >= 18，推荐 20）
+node -v
 
 npm install
 npm run dev
@@ -71,8 +76,15 @@ npm run dev
 
 ### 生产构建
 ```bash
+nvm use && node -v
 npm run build
 npm run preview
+```
+
+### 运行测试
+```bash
+nvm use && node -v
+npm run test
 ```
 
 ---

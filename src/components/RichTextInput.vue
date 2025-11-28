@@ -81,6 +81,9 @@ function initializeEditor() {
     const len = internal.value.length
     setCursorPosition(len)
     cursorPos.value = len
+    
+    // 初始化时更新可选择状态（对于输入 = 进入公式模式的情况）
+    updateSelectableState()
   } catch (error) {
     // 测试环境中可能无法设置光标，忽略错误
     console.warn('[RichTextInput] initializeEditor error:', error)
@@ -218,9 +221,10 @@ function escapeHtml(text: string): string {
  * - 超长文本（>10000字符）截断并警告
  */
 function generateFormulaHtml(text: string): string {
-  // 边界情况：空内容
+  // 边界情况：空内容 - 使用零宽空格而不是 <br>
+  // <br> 可能会干扰 IME 输入法的组合状态
   if (!text || text.length === 0) {
-    return '<br>'
+    return '\u200B'  // 零宽空格，保持光标可见但不干扰 IME
   }
   
   // 边界情况：超长文本保护（防止性能问题）
@@ -291,7 +295,7 @@ function generateFormulaHtml(text: string): string {
     html += '\u200B' // 零宽空格
   }
   
-  return html || '<br>' // 空内容需要 br 保持高度
+  return html || '\u200B' // 空内容用零宽空格保持光标可见
 }
 
 /**
@@ -299,6 +303,9 @@ function generateFormulaHtml(text: string): string {
  */
 function updateEditorContent(text: string, preserveCursor: boolean = true) {
   if (!editorRef) return
+  
+  // 关键：在 IME 组合期间不更新编辑器内容，否则会中断输入法
+  if (isComposing.value) return
   
   const currentPos = preserveCursor ? getCursorPosition() : text.length
   const html = generateFormulaHtml(text)
@@ -540,8 +547,18 @@ function handleCopy(e: ClipboardEvent) {
 /**
  * 输入法事件
  */
-function handleCompositionStart() {
+function handleCompositionStart(e: CompositionEvent) {
+  // 如果已经在组合中，忽略重复的 compositionstart 事件
+  // 这是某些浏览器/输入法的已知问题
+  if (isComposing.value) {
+    e.stopPropagation()
+    return
+  }
   isComposing.value = true
+}
+
+function handleCompositionUpdate(_e: CompositionEvent) {
+  // 组合更新事件，目前不需要特殊处理
 }
 
 function handleCompositionEnd(e: CompositionEvent) {
@@ -584,7 +601,9 @@ function adjustSize() {
   if (!editorRef) return
   
   const text = internal.value || ''
-  const lines = text.split('\n')
+  // 移除尾部换行符，因为空内容时 contenteditable 可能返回 "\n"
+  const trimmedText = text.replace(/\n+$/, '')
+  const lines = trimmedText ? trimmedText.split('\n') : ['']
   const lineCount = lines.length
   
   // 计算高度
@@ -883,6 +902,7 @@ defineExpose({
       @paste="handlePaste"
       @copy="handleCopy"
       @compositionstart="handleCompositionStart"
+      @compositionupdate="handleCompositionUpdate"
       @compositionend="handleCompositionEnd"
       @blur="handleBlur"
       @click.stop="handleClick"

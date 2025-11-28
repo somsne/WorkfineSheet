@@ -7,6 +7,17 @@
       <canvas ref="gridCanvas" class="grid-canvas"></canvas>
       <canvas ref="contentCanvas" class="content-canvas"></canvas>
       
+      <!-- 隐藏的 IME 输入代理 textarea，用于捕获中文输入法的首字符 -->
+      <textarea
+        ref="imeProxy"
+        class="ime-proxy"
+        @compositionstart="onImeCompositionStart"
+        @compositionupdate="onImeCompositionUpdate"
+        @compositionend="onImeCompositionEnd"
+        @input="onImeInput"
+        @keydown="onImeKeyDown"
+      ></textarea>
+      
       <!-- RichTextInput 富文本编辑器 -->
     <RichTextInput
       ref="overlayInput"
@@ -84,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, reactive, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, reactive, watch, computed, nextTick } from 'vue'
 import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft, getRowAtY as geomGetRowAtY, getColAtX as geomGetColAtX, getVisibleRange as geomGetVisibleRange, ensureVisible as geomEnsureVisible } from './sheet/geometry'
 import type { GeometryConfig, SizeAccess } from './sheet/types'
 import { setCanvasSize, createRedrawScheduler } from './sheet/renderCore'
@@ -160,6 +171,7 @@ interface FormulaReference {
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
+// @ts-ignore
 import StyleToolbar from './StyleToolbar.vue'
 // @ts-ignore
 import ContextMenu from './ContextMenu.vue'
@@ -178,8 +190,16 @@ const container = ref<HTMLElement | null>(null)
 const gridCanvas = ref<HTMLCanvasElement | null>(null)
 const contentCanvas = ref<HTMLCanvasElement | null>(null)
 const overlayInput = ref(null)
+const imeProxy = ref<HTMLTextAreaElement | null>(null)  // IME 输入代理
 // 最近一次应用内复制的时间戳（用于避免误用陈旧的内部剪贴板）
 const lastCopyTs = ref(0)
+
+// IME 输入状态
+const imeState = reactive({
+  isComposing: false,       // 是否正在输入法组合中
+  compositionText: '',      // 当前组合的文本
+  cursorPos: 0,             // 组合文本中的光标位置
+})
 
 // 自定义行高和列宽
 const rowHeights = ref<Map<number, number>>(new Map()) // 存储自定义的行高
@@ -400,6 +420,109 @@ function draw() {
   // 先绘制单元格内容，再绘制网格和表头（确保表头在最上层）
   drawCells(w, h)
   drawGrid(w, h)
+  
+  // 如果正在 IME 组合中，在选中单元格上绘制组合文本
+  if (imeState.isComposing && imeState.compositionText && selected.row >= 0 && selected.col >= 0 && !overlay.visible) {
+    drawImeCompositionText()
+  }
+}
+
+/**
+ * 在 canvas 上绘制 IME 组合中的文本
+ * 让用户在输入法组合期间能看到正在输入的内容（如拼音）
+ * 根据单元格样式显示
+ */
+function drawImeCompositionText() {
+  if (!contentCanvas.value) return
+  const ctx = contentCanvas.value.getContext('2d')
+  if (!ctx) return
+  
+  const row = selected.row
+  const col = selected.col
+  const text = imeState.compositionText
+  
+  // 获取单元格样式
+  const cellStyle = model.getCellStyle(row, col)
+  
+  // 计算单元格位置
+  const cellX = ROW_HEADER_WIDTH + getColLeft(col) - viewport.scrollLeft
+  const cellY = COL_HEADER_HEIGHT + getRowTop(row) - viewport.scrollTop
+  const cellWidth = getColWidth(col)
+  const cellHeight = getRowHeight(row)
+  
+  // 确保在可见区域内
+  if (cellX + cellWidth < ROW_HEADER_WIDTH || cellY + cellHeight < COL_HEADER_HEIGHT) {
+    return
+  }
+  
+  // 绘制背景覆盖单元格原内容
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(
+    Math.max(cellX, ROW_HEADER_WIDTH),
+    Math.max(cellY, COL_HEADER_HEIGHT),
+    cellWidth,
+    cellHeight
+  )
+  ctx.clip()
+  
+  // 使用单元格背景色或白色
+  ctx.fillStyle = cellStyle.backgroundColor || '#fff'
+  ctx.fillRect(cellX, cellY, cellWidth, cellHeight)
+  
+  // 构建字体样式
+  const fontSize = cellStyle.fontSize || 13
+  const fontFamily = cellStyle.fontFamily || 'Arial, sans-serif'
+  const fontWeight = cellStyle.bold ? 'bold' : 'normal'
+  const fontStyle = cellStyle.italic ? 'italic' : 'normal'
+  ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+  
+  // 使用单元格文字颜色
+  const textColor = cellStyle.color || '#000'
+  ctx.fillStyle = textColor
+  ctx.textBaseline = 'middle'
+  
+  // 计算文本位置（考虑对齐方式）
+  const padding = 4
+  let textX = cellX + padding
+  const textY = cellY + cellHeight / 2
+  
+  // 水平对齐
+  const textWidth = ctx.measureText(text).width
+  if (cellStyle.textAlign === 'center') {
+    textX = cellX + (cellWidth - textWidth) / 2
+  } else if (cellStyle.textAlign === 'right') {
+    textX = cellX + cellWidth - textWidth - padding
+  }
+  
+  // 绘制文本
+  ctx.fillText(text, textX, textY)
+  
+  // 绘制下划线表示这是组合中的文本
+  ctx.strokeStyle = textColor
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(textX, textY + fontSize / 2 + 2)
+  ctx.lineTo(textX + textWidth, textY + fontSize / 2 + 2)
+  ctx.stroke()
+  
+  // 计算光标位置（根据 cursorPos 计算光标在文本中的像素位置）
+  const cursorPos = imeState.cursorPos
+  const textBeforeCursor = text.substring(0, cursorPos)
+  const cursorOffsetX = ctx.measureText(textBeforeCursor).width
+  const cursorX = textX + cursorOffsetX
+  const cursorTop = textY - fontSize / 2
+  const cursorBottom = textY + fontSize / 2
+  
+  // 绘制光标
+  ctx.strokeStyle = textColor
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(cursorX, cursorTop)
+  ctx.lineTo(cursorX, cursorBottom)
+  ctx.stroke()
+  
+  ctx.restore()
 }
 
 
@@ -647,6 +770,8 @@ function onClick(e: MouseEvent) {
 
   if (needsRedraw) {
     draw()
+    // 选择单元格后，聚焦到 IME 代理以接收输入法输入
+    focusImeProxy()
   }
 }
 
@@ -861,6 +986,15 @@ function onDoubleClick(e: MouseEvent) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  // 如果焦点在 IME 代理上，让 IME 代理处理，不要在这里处理普通字符
+  if (e.target === imeProxy.value) {
+    // 只处理特殊键，普通字符让 imeProxy 的 input 事件处理
+    const specialKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Escape', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', 'F2', 'Delete', 'Backspace']
+    if (!specialKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+      return
+    }
+  }
+  
   // Only handle keyboard when not in edit mode
   if (overlay.visible) return
 
@@ -975,9 +1109,15 @@ function onKeyDown(e: KeyboardEvent) {
     selected.row >= 0 &&
     selected.col >= 0
   ) {
-    // Open overlay in typing mode with empty value
-    openOverlay(selected.row, selected.col, '', 'typing')
-    // Don't prevent default - let the key event propagate to the input element
+    // 如果输入 = 号，进入公式输入模式（值为 =，触发公式模式）
+    if (e.key === '=') {
+      e.preventDefault()  // 阻止默认，因为我们已经设置了初始值 =
+      openOverlay(selected.row, selected.col, '=', 'typing')
+    } else {
+      // 其他字符，打开空的 overlay
+      openOverlay(selected.row, selected.col, '', 'typing')
+    }
+    // Don't prevent default for other chars - let the key event propagate to the input element
     return
   }
 
@@ -1077,6 +1217,8 @@ function onKeyDown(e: KeyboardEvent) {
     selectionRange.endCol = -1
     ensureVisible(newRow, newCol)
     draw()
+    // 移动后聚焦 IME 代理，以便接收输入法输入
+    focusImeProxy()
   }
 }
 
@@ -1339,6 +1481,8 @@ function onMouseUp(): void {
   const needsRedraw = endDragSelection(selectionState, DEFAULT_COLS)
   if (needsRedraw) {
     draw()
+    // 拖拽选择结束后，聚焦 IME 代理
+    focusImeProxy()
   }
 }
 
@@ -1492,6 +1636,9 @@ function onOverlaySave(val: string) {
   selectionRange.endCol = -1
   
   draw()
+  
+  // 编辑完成后，聚焦 IME 代理以便继续输入
+  focusImeProxy()
 }
 
 function onOverlayCancel() {
@@ -1499,12 +1646,261 @@ function onOverlayCancel() {
   Object.assign(overlay, closeOverlay())
   formulaReferences.value = []  // 清空引用高亮
   draw()
+  
+  // 取消编辑后，聚焦 IME 代理
+  focusImeProxy()
 }
 
-function onCompositionStart() {
+function onCompositionStart(e: CompositionEvent) {
+  // 如果事件来自 IME 代理，由 IME 代理自己的事件处理器处理
+  if (e.target === imeProxy.value) {
+    return
+  }
+  
   if (!overlay.visible) {
     if (selected.row < 0 || selected.col < 0) return
     openOverlay(selected.row, selected.col, '', 'typing')
+  }
+}
+
+// ==================== IME 输入代理处理 ====================
+
+/**
+ * 聚焦到 IME 代理输入框
+ * 当选择单元格但编辑器未打开时调用，以便接收 IME 输入
+ */
+function focusImeProxy() {
+  if (!imeProxy.value || overlay.visible) return
+  
+  // 使用 setTimeout 延迟聚焦，等待可能的 dblclick 事件处理完成
+  // 这样如果双击打开了编辑器，focusImeProxy 就不会抢夺焦点
+  setTimeout(() => {
+    // 再次检查，因为在延迟期间可能编辑器已经打开
+    if (!imeProxy.value || overlay.visible) return
+    
+    if (selected.row >= 0 && selected.col >= 0) {
+      // 将 imeProxy 定位到当前选中单元格的位置，使输入法候选框显示在正确位置
+      const cellX = ROW_HEADER_WIDTH + getColLeft(selected.col) - viewport.scrollLeft
+      const cellY = COL_HEADER_HEIGHT + getRowTop(selected.row) - viewport.scrollTop
+      const cellWidth = getColWidth(selected.col)
+      const cellHeight = getRowHeight(selected.row)
+      
+      imeProxy.value.style.left = `${cellX + 2}px`  // 加一点内边距
+      imeProxy.value.style.top = `${cellY + 2}px`
+      imeProxy.value.style.width = `${cellWidth - 4}px`
+      imeProxy.value.style.height = `${cellHeight - 4}px`
+      
+      imeProxy.value.value = ''  // 清空代理输入框
+      imeProxy.value.focus()
+    }
+  }, 50)  // 50ms 延迟，足够让 dblclick 事件先处理
+}
+
+/**
+ * IME 组合开始事件
+ * 当用户开始使用输入法时触发（如开始输入中文拼音）
+ */
+function onImeCompositionStart(_e: CompositionEvent) {
+  imeState.isComposing = true
+  imeState.compositionText = ''
+  // 不在这里打开编辑器，让 imeProxy 完成整个 IME 组合过程
+  // 编辑器将在 compositionend 时打开，带上最终文本
+}
+
+/**
+ * IME 组合更新事件
+ * 当输入法组合文本更新时触发（如拼音变化）
+ */
+function onImeCompositionUpdate(e: CompositionEvent) {
+  // 保存组合文本，用于在 canvas 上显示
+  imeState.compositionText = e.data || ''
+  // 获取光标位置
+  if (imeProxy.value) {
+    imeState.cursorPos = imeProxy.value.selectionStart || imeState.compositionText.length
+  }
+  // 触发重绘以显示组合文本
+  draw()
+}
+
+/**
+ * IME 组合结束事件
+ * 当用户确认输入法选择时触发（如选择了一个汉字）
+ */
+function onImeCompositionEnd(e: CompositionEvent) {
+  imeState.isComposing = false
+  const finalText = e.data || ''
+  
+  // 清空代理输入框和组合文本
+  if (imeProxy.value) {
+    imeProxy.value.value = ''
+  }
+  imeState.compositionText = ''
+  draw()  // 清除 canvas 上的组合文本显示
+  
+  // 如果有最终文本，打开编辑器并设置初始值
+  if (finalText && selected.row >= 0 && selected.col >= 0) {
+    if (!overlay.visible) {
+      openOverlay(selected.row, selected.col, finalText, 'typing')
+      
+      // 将光标移到文本末尾
+      nextTick(() => {
+        if (overlayInput.value) {
+          const editor = (overlayInput.value as any).getEditorElement?.()
+          if (editor) {
+            editor.focus()
+            // 将光标移到末尾
+            const range = document.createRange()
+            const selection = window.getSelection()
+            range.selectNodeContents(editor)
+            range.collapse(false)
+            selection?.removeAllRanges()
+            selection?.addRange(range)
+          }
+        }
+      })
+    } else {
+      // 编辑器已经打开，追加文本
+      if (overlayInput.value) {
+        const editor = (overlayInput.value as any).getEditorElement?.()
+        if (editor) {
+          // 在当前位置插入文本
+          const selection = window.getSelection()
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0)
+            range.deleteContents()
+            range.insertNode(document.createTextNode(finalText))
+            range.collapse(false)
+            selection.removeAllRanges()
+            selection.addRange(range)
+          } else {
+            // 没有选区，追加到末尾
+            editor.textContent += finalText
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * IME 代理输入框的 input 事件
+ * 处理非 IME 的直接输入（如英文字符）
+ */
+function onImeInput(e: Event) {
+  // 如果正在 IME 组合中，不处理（由 compositionend 处理）
+  if (imeState.isComposing) return
+  
+  const target = e.target as HTMLTextAreaElement
+  const value = target.value
+  
+  if (value && selected.row >= 0 && selected.col >= 0) {
+    // 有输入内容，打开编辑器
+    if (!overlay.visible) {
+      openOverlay(selected.row, selected.col, value, 'typing')
+      
+      // 将焦点转移到编辑器
+      nextTick(() => {
+        if (overlayInput.value) {
+          const editor = (overlayInput.value as any).getEditorElement?.()
+          if (editor) {
+            editor.focus()
+            // 将光标移到末尾
+            const range = document.createRange()
+            const selection = window.getSelection()
+            range.selectNodeContents(editor)
+            range.collapse(false)
+            selection?.removeAllRanges()
+            selection?.addRange(range)
+          }
+        }
+      })
+    }
+    
+    // 清空代理
+    target.value = ''
+  }
+}
+
+/**
+ * IME 代理输入框的 keydown 事件
+ * 处理特殊按键（如方向键、Enter 等）
+ */
+function onImeKeyDown(e: KeyboardEvent) {
+  // 如果正在 IME 组合中
+  if (imeState.isComposing) {
+    // 左右方向键用于在组合文本中移动光标
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      // 等待浏览器处理完方向键后更新光标位置
+      setTimeout(() => {
+        if (imeProxy.value) {
+          imeState.cursorPos = imeProxy.value.selectionStart || 0
+          draw()
+        }
+      }, 0)
+    }
+    return
+  }
+  
+  // Enter 键：移动到下一行（与 Excel 行为一致）
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault()
+    e.stopPropagation()  // 阻止冒泡，避免 window 的 keydown 再次处理
+    if (selected.row >= 0 && selected.col >= 0) {
+      let newRow = selected.row + 1
+      let newCol = selected.col
+      if (newRow >= DEFAULT_ROWS) {
+        newRow = 0
+        newCol = selected.col + 1
+        if (newCol >= DEFAULT_COLS) {
+          newCol = DEFAULT_COLS - 1
+        }
+      }
+      selected.row = newRow
+      selected.col = newCol
+      // 清除选区
+      selectionRange.startRow = newRow
+      selectionRange.startCol = newCol
+      selectionRange.endRow = newRow
+      selectionRange.endCol = newCol
+      ensureVisible(newRow, newCol)
+      draw()
+    }
+    return
+  }
+  
+  // F2 键：打开编辑器
+  if (e.key === 'F2') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (selected.row >= 0 && selected.col >= 0 && !overlay.visible) {
+      const editValue = formulaSheet.getDisplayValue(selected.row, selected.col)
+      openOverlay(selected.row, selected.col, editValue, 'edit')
+    }
+    return
+  }
+  
+  // Delete 和 Backspace：清空选中单元格
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (selected.row >= 0 && selected.col >= 0) {
+      formulaSheet.setValue(selected.row, selected.col, '')
+      draw()
+    }
+    return
+  }
+  
+  // 方向键、Tab、Escape 等导航键：不在这里处理，让 window 的 keydown 事件自然处理
+  // 这样可以避免重复处理导致跳两行/两列的问题
+  const navigationKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Escape', 'Home', 'End', 'PageUp', 'PageDown']
+  if (navigationKeys.includes(e.key)) {
+    // 不做任何处理，让事件冒泡到 window
+    return
+  }
+  
+  // Ctrl/Cmd 组合键：不在这里处理，让 window 的 keydown 处理
+  if (e.ctrlKey || e.metaKey) {
+    return
   }
 }
 
@@ -1825,6 +2221,7 @@ defineExpose(api)
   position: absolute;
   top: 0;
   left: 0;
+  cursor: default;  /* 默认指针，不是文本光标 */
 }
 
 /* 自定义滚动条样式 */
@@ -1866,6 +2263,37 @@ defineExpose(api)
 
 .content-canvas {
   z-index: 20;
+}
+
+/* 隐藏的 IME 输入代理 - 用于捕获中文输入法的首字符
+ * 视觉上完全透明，但可以接收焦点和输入
+ * 位置会动态设置到当前选中单元格，以便输入法候选框定位正确
+ */
+.ime-proxy {
+  position: absolute;
+  padding: 2px 4px;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;  /* 文字透明 */
+  font-size: 13px;
+  font-family: Arial, sans-serif;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+  z-index: 50;
+  box-sizing: border-box;
+  caret-color: transparent;  /* 光标透明 */
+  opacity: 0;  /* 完全不可见 */
+  cursor: default;  /* 保持默认指针 */
+  pointer-events: none;  /* 不响应鼠标事件，让事件穿透到 canvas */
+}
+
+/* 当 textarea 获得焦点时，仍然保持透明，但让输入法能正确工作 */
+.ime-proxy:focus {
+  opacity: 0;
 }
 
 /* 计算进度指示器 */
