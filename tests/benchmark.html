@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>基准测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #667eea; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .score-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; padding: 32px; color: white; text-align: center; margin: 24px 0; }
+    .score-value { font-size: 4rem; font-weight: 700; line-height: 1; }
+    .score-label { font-size: 1.25rem; opacity: 0.9; margin-top: 8px; }
+    .score-desc { font-size: 0.9rem; opacity: 0.7; margin-top: 16px; }
+    .controls { display: flex; justify-content: center; gap: 16px; margin: 24px 0; }
+    button { padding: 14px 32px; background: white; color: #667eea; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    button.running { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+    .benchmark-list { display: grid; gap: 16px; }
+    .benchmark-item { background: white; border-radius: 12px; padding: 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .benchmark-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+    .benchmark-icon.render { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .benchmark-icon.formula { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+    .benchmark-icon.data { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+    .benchmark-icon.memory { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .benchmark-icon.interaction { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+    .benchmark-info { flex: 1; }
+    .benchmark-name { font-weight: 600; color: #1f2937; margin-bottom: 4px; }
+    .benchmark-desc { font-size: 0.85rem; color: #6b7280; }
+    .benchmark-result { text-align: right; min-width: 120px; }
+    .benchmark-score { font-size: 1.5rem; font-weight: 700; color: #667eea; }
+    .benchmark-time { font-size: 0.8rem; color: #9ca3af; }
+    .benchmark-status { font-size: 0.85rem; color: #9ca3af; }
+    .progress-bar { width: 100%; height: 4px; background: #e5e7eb; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.3s ease; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 8px; }
+    .badge.excellent { background: #d1fae5; color: #065f46; }
+    .badge.good { background: #dbeafe; color: #1e40af; }
+    .badge.average { background: #fef3c7; color: #92400e; }
+    .badge.poor { background: #fee2e2; color: #991b1b; }
+    .summary { background: white; border-radius: 12px; padding: 24px; margin-top: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .summary h3 { color: #1f2937; margin-bottom: 16px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .summary-item { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .summary-value { font-size: 1.5rem; font-weight: 700; color: #667eea; }
+    .summary-label { font-size: 0.85rem; color: #6b7280; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>📈 基准测试 (Benchmark)</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>WorkfineSheet 基准测试</h2>
+      <p>运行标准化基准测试，使用真实的 SheetModel 和 FormulaSheet 组件评估性能。可用于版本间性能对比和回归检测。</p>
+    </div>
+    
+    <div class="score-card">
+      <div class="score-value" id="totalScore">--</div>
+      <div class="score-label">综合评分</div>
+      <div class="score-desc" id="scoreDesc">点击下方按钮开始测试</div>
+    </div>
+    
+    <div class="controls">
+      <button id="runBtn" onclick="runAllBenchmarks()">🚀 运行全部基准测试</button>
+    </div>
+    
+    <div class="benchmark-list" id="benchmarkList">
+      <div class="benchmark-item" data-benchmark="dataWrite">
+        <div class="benchmark-icon data">💾</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">数据写入</div>
+          <div class="benchmark-desc">SheetModel 写入 50,000 单元格</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-dataWrite"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-dataWrite">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="dataRead">
+        <div class="benchmark-icon data">📖</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">数据读取</div>
+          <div class="benchmark-desc">SheetModel 读取 50,000 单元格</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-dataRead"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-dataRead">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="formulaSet">
+        <div class="benchmark-icon formula">📐</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">公式设置</div>
+          <div class="benchmark-desc">FormulaSheet 设置 2,000 个公式</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-formulaSet"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-formulaSet">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="formulaCalc">
+        <div class="benchmark-icon formula">🔢</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">公式计算</div>
+          <div class="benchmark-desc">FormulaSheet 计算 2,000 个公式结果</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-formulaCalc"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-formulaCalc">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="styleSet">
+        <div class="benchmark-icon interaction">🎨</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">样式设置</div>
+          <div class="benchmark-desc">SheetModel 设置 10,000 个单元格样式</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-styleSet"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-styleSet">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="renderBasic">
+        <div class="benchmark-icon render">🖼️</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">基础渲染</div>
+          <div class="benchmark-desc">Canvas 渲染 5,000 单元格 (30 帧)</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-renderBasic"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-renderBasic">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="renderScroll">
+        <div class="benchmark-icon render">📜</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">滚动渲染</div>
+          <div class="benchmark-desc">50 次随机滚动渲染测试</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-renderScroll"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-renderScroll">等待测试</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="summary" id="summary" style="display: none;">
+      <h3>📊 测试总结</h3>
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-value" id="summaryTotal">--</div>
+          <div class="summary-label">总耗时</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="summaryPassed">--</div>
+          <div class="summary-label">通过基准</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="summaryGrade">--</div>
+          <div class="summary-label">评级</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-value" id="summaryThroughput">--</div>
+          <div class="summary-label">平均吞吐量</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from '../src/components/sheet/geometry.ts'
+    
+    // 基准值定义 (毫秒)
+    const baselines = {
+      dataWrite: { excellent: 100, good: 300, average: 600, count: 50000 },
+      dataRead: { excellent: 50, good: 150, average: 300, count: 50000 },
+      formulaSet: { excellent: 200, good: 500, average: 1000, count: 2000 },
+      formulaCalc: { excellent: 100, good: 300, average: 600, count: 2000 },
+      styleSet: { excellent: 100, good: 300, average: 600, count: 10000 },
+      renderBasic: { excellent: 16, good: 33, average: 50, count: 30, isFps: true },
+      renderScroll: { excellent: 16, good: 33, average: 50, count: 50, isFps: true }
+    }
+    
+    // 渲染配置
+    const geometryCfg = {
+      defaultColWidth: 80,
+      defaultRowHeight: 25,
+      frozenCols: 0,
+      frozenRows: 0,
+      colHeaderHeight: 0,
+      rowHeaderWidth: 0
+    }
+    
+    // 创建隐藏 canvas
+    const testCanvas = document.createElement('canvas')
+    testCanvas.width = 1200
+    testCanvas.height = 600
+    const testCtx = testCanvas.getContext('2d')
+    
+    const results = {}
+    
+    function formatTime(ms) {
+      if (ms < 1000) return `${ms.toFixed(0)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getGrade(value, baseline) {
+      if (value <= baseline.excellent) return { grade: 'excellent', label: '优秀', score: 100 }
+      if (value <= baseline.good) return { grade: 'good', label: '良好', score: 80 }
+      if (value <= baseline.average) return { grade: 'average', label: '一般', score: 60 }
+      return { grade: 'poor', label: '较差', score: 40 }
+    }
+    
+    function updateStatus(name, status, time, extraInfo = null) {
+      const statusEl = document.getElementById(`status-${name}`)
+      const progressEl = document.getElementById(`progress-${name}`)
+      
+      if (status === 'running') {
+        statusEl.innerHTML = '⏳ 测试中...'
+        progressEl.style.width = '50%'
+      } else if (status === 'done') {
+        const baseline = baselines[name]
+        const { grade, label } = getGrade(time, baseline)
+        
+        let rateHtml
+        if (baseline.isFps) {
+          // 对于渲染测试，显示 FPS
+          const fps = extraInfo?.fps || (1000 / time)
+          rateHtml = `${fps.toFixed(1)} FPS`
+          results[name] = { time, grade, rate: Math.round(fps) }
+        } else {
+          const rate = Math.round(baseline.count / (time / 1000))
+          rateHtml = `${rate.toLocaleString()}/秒`
+          results[name] = { time, grade, rate }
+        }
+        
+        statusEl.innerHTML = `
+          <div class="benchmark-score">${formatTime(time)}</div>
+          <div class="benchmark-time">${rateHtml}</div>
+          <span class="badge ${grade}">${label}</span>
+        `
+        progressEl.style.width = '100%'
+      }
+    }
+    
+    // 数据写入测试
+    async function benchmarkDataWrite() {
+      updateStatus('dataWrite', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.dataWrite.count
+      const model = new SheetModel()
+      
+      const start = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.setValue(Math.floor(i / 100), i % 100, `Value-${i}`)
+      }
+      const time = performance.now() - start
+      
+      updateStatus('dataWrite', 'done', time)
+      return time
+    }
+    
+    // 数据读取测试
+    async function benchmarkDataRead() {
+      updateStatus('dataRead', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.dataRead.count
+      const model = new SheetModel()
+      
+      // 先填充数据
+      for (let i = 0; i < count; i++) {
+        model.setValue(Math.floor(i / 100), i % 100, `Value-${i}`)
+      }
+      
+      const start = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.getValue(Math.floor(i / 100), i % 100)
+      }
+      const time = performance.now() - start
+      
+      updateStatus('dataRead', 'done', time)
+      return time
+    }
+    
+    // 公式设置测试
+    async function benchmarkFormulaSet() {
+      updateStatus('formulaSet', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.formulaSet.count
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 先填充基础数据
+      for (let r = 0; r < 100; r++) {
+        for (let c = 0; c < 10; c++) {
+          model.setValue(r, c, r * 10 + c)
+        }
+      }
+      
+      const formulas = ['=A1+B1', '=SUM(A1:E1)', '=AVERAGE(A1:J1)', '=A1*2']
+      
+      const start = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 100
+        const c = i % 50
+        sheet.setValue(r, c, formulas[i % formulas.length])
+      }
+      const time = performance.now() - start
+      
+      updateStatus('formulaSet', 'done', time)
+      
+      // 保存 sheet 供后续计算测试使用
+      window._benchmarkSheet = sheet
+      window._benchmarkFormulaCount = count
+      
+      return time
+    }
+    
+    // 公式计算测试
+    async function benchmarkFormulaCalc() {
+      updateStatus('formulaCalc', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const sheet = window._benchmarkSheet
+      const count = window._benchmarkFormulaCount || baselines.formulaCalc.count
+      
+      const start = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 100
+        const c = i % 50
+        sheet.getValue(r, c)
+      }
+      const time = performance.now() - start
+      
+      updateStatus('formulaCalc', 'done', time)
+      return time
+    }
+    
+    // 样式设置测试
+    async function benchmarkStyleSet() {
+      updateStatus('styleSet', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.styleSet.count
+      const model = new SheetModel()
+      
+      // 先填充数据
+      for (let i = 0; i < count; i++) {
+        model.setValue(Math.floor(i / 100), i % 100, `Cell-${i}`)
+      }
+      
+      const styles = [
+        { bgColor: '#ffcccc' },
+        { fontWeight: 'bold' },
+        { color: '#0000ff' },
+        { textAlign: 'center' }
+      ]
+      
+      const start = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.setCellStyle(Math.floor(i / 100), i % 100, styles[i % styles.length])
+      }
+      const time = performance.now() - start
+      
+      updateStatus('styleSet', 'done', time)
+      return time
+    }
+    
+    // 渲染辅助函数
+    function renderCells(ctx, model, viewport, sizes, totalRows, totalCols) {
+      const { startRow, endRow, startCol, endCol } = getVisibleRange(
+        ctx.canvas.width, ctx.canvas.height, viewport, sizes, geometryCfg, totalRows, totalCols
+      )
+      
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          const x = getColLeft(col, sizes, geometryCfg) - viewport.scrollLeft
+          const y = getRowTop(row, sizes, geometryCfg) - viewport.scrollTop
+          const w = getColWidth(col, sizes, geometryCfg)
+          const h = getRowHeight(row, sizes, geometryCfg)
+          
+          ctx.strokeStyle = '#e0e0e0'
+          ctx.strokeRect(x, y, w, h)
+          
+          const value = model.getValue(row, col)
+          if (value !== undefined && value !== null && value !== '') {
+            ctx.fillStyle = '#333'
+            ctx.font = '12px Arial'
+            ctx.fillText(String(value).substring(0, 10), x + 4, y + 16)
+          }
+        }
+      }
+    }
+    
+    // 基础渲染测试
+    async function benchmarkRenderBasic() {
+      updateStatus('renderBasic', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const totalRows = 100, totalCols = 50
+      
+      // 填充数据
+      for (let r = 0; r < totalRows; r++) {
+        for (let c = 0; c < totalCols; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      const sizes = { colWidths: new Map(), rowHeights: new Map(), hiddenCols: new Set(), hiddenRows: new Set() }
+      const viewport = { scrollLeft: 0, scrollTop: 0 }
+      
+      const iterations = baselines.renderBasic.count
+      const times = []
+      
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now()
+        renderCells(testCtx, model, viewport, sizes, totalRows, totalCols)
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const fps = 1000 / avgTime
+      
+      updateStatus('renderBasic', 'done', avgTime, { fps })
+      return avgTime
+    }
+    
+    // 滚动渲染测试
+    async function benchmarkRenderScroll() {
+      updateStatus('renderScroll', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const totalRows = 500, totalCols = 100
+      
+      // 填充大量数据
+      for (let r = 0; r < totalRows; r++) {
+        for (let c = 0; c < totalCols; c++) {
+          model.setValue(r, c, (Math.random() * 1000).toFixed(2))
+        }
+      }
+      
+      const sizes = { colWidths: new Map(), rowHeights: new Map(), hiddenCols: new Set(), hiddenRows: new Set() }
+      
+      // 生成随机滚动位置
+      const iterations = baselines.renderScroll.count
+      const times = []
+      
+      for (let i = 0; i < iterations; i++) {
+        const viewport = {
+          scrollLeft: Math.random() * 5000,
+          scrollTop: Math.random() * 10000
+        }
+        
+        const start = performance.now()
+        renderCells(testCtx, model, viewport, sizes, totalRows, totalCols)
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const fps = 1000 / avgTime
+      
+      updateStatus('renderScroll', 'done', avgTime, { fps })
+      return avgTime
+    }
+    
+    // 运行所有测试
+    window.runAllBenchmarks = async function() {
+      const btn = document.getElementById('runBtn')
+      btn.classList.add('running')
+      btn.textContent = '⏳ 测试中...'
+      btn.disabled = true
+      
+      document.getElementById('totalScore').textContent = '...'
+      document.getElementById('scoreDesc').textContent = '正在运行基准测试 (真实组件)'
+      document.getElementById('summary').style.display = 'none'
+      
+      // 重置所有状态
+      for (const name of Object.keys(baselines)) {
+        document.getElementById(`status-${name}`).innerHTML = '等待测试'
+        document.getElementById(`progress-${name}`).style.width = '0%'
+      }
+      
+      const startTime = performance.now()
+      
+      // 依次运行测试
+      await benchmarkDataWrite()
+      await benchmarkDataRead()
+      await benchmarkFormulaSet()
+      await benchmarkFormulaCalc()
+      await benchmarkStyleSet()
+      await benchmarkRenderBasic()
+      await benchmarkRenderScroll()
+      
+      const totalTime = performance.now() - startTime
+      
+      // 计算总分
+      let totalScore = 0
+      let passedCount = 0
+      let totalRate = 0
+      let rateCount = 0
+      
+      for (const [name, result] of Object.entries(results)) {
+        const baseline = baselines[name]
+        const { score } = getGrade(result.time, baseline)
+        totalScore += score
+        
+        // 渲染测试不计入吞吐量统计
+        if (!baseline.isFps) {
+          totalRate += result.rate
+          rateCount++
+        }
+        
+        if (result.grade === 'excellent' || result.grade === 'good') {
+          passedCount++
+        }
+      }
+      
+      const avgScore = Math.round(totalScore / Object.keys(results).length)
+      const avgRate = rateCount > 0 ? Math.round(totalRate / rateCount) : 0
+      
+      // 更新总分显示
+      document.getElementById('totalScore').textContent = avgScore
+      
+      let gradeText, gradeEmoji
+      if (avgScore >= 90) { gradeText = '性能卓越'; gradeEmoji = '🏆' }
+      else if (avgScore >= 75) { gradeText = '性能优良'; gradeEmoji = '🥇' }
+      else if (avgScore >= 60) { gradeText = '性能一般'; gradeEmoji = '🥈' }
+      else { gradeText = '需要优化'; gradeEmoji = '⚠️' }
+      
+      document.getElementById('scoreDesc').textContent = `${gradeEmoji} ${gradeText} (使用真实 SheetModel + FormulaSheet)`
+      
+      // 显示总结
+      document.getElementById('summary').style.display = 'block'
+      document.getElementById('summaryTotal').textContent = formatTime(totalTime)
+      document.getElementById('summaryPassed').textContent = `${passedCount}/${Object.keys(baselines).length}`
+      document.getElementById('summaryGrade').textContent = gradeText
+      document.getElementById('summaryThroughput').textContent = `${avgRate.toLocaleString()}/秒`
+      
+      // 恢复按钮
+      btn.classList.remove('running')
+      btn.textContent = '🔄 重新测试'
+      btn.disabled = false
+    }
+  </script>
+</body>
+</html>

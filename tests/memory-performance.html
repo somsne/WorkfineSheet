@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>内存性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #43e97b; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #10b981; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(67, 233, 123, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    button.extreme { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.good { background: #d1fae5; color: #065f46; }
+    .badge.warning { background: #fef3c7; color: #92400e; }
+    .badge.bad { background: #fee2e2; color: #991b1b; }
+    .memory-bar { width: 100%; height: 24px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+    .memory-bar-fill { height: 100%; background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%); transition: width 0.5s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; color: white; font-size: 0.75rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>🧠 内存性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>内存性能测试</h2>
+      <p>分析 SheetModel 和 FormulaSheet 的内存使用情况，评估存储效率。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricHeapUsed">--</div>
+          <div class="label">已用堆内存</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricHeapTotal">--</div>
+          <div class="label">总堆内存</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricPerCell">--</div>
+          <div class="label">每单元格内存</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricEfficiency">--</div>
+          <div class="label">存储效率</div>
+        </div>
+      </div>
+      
+      <div class="memory-bar">
+        <div class="memory-bar-fill" id="memoryBarFill" style="width: 0%">0%</div>
+      </div>
+      <p style="font-size: 0.8rem; color: #9ca3af; margin-top: 8px;">
+        注意: 内存 API (performance.memory) 仅在 Chrome 中可用
+      </p>
+    </div>
+    
+    <!-- 基础内存占用 -->
+    <div class="test-section">
+      <h3>📊 测试 1: SheetModel 基础内存占用</h3>
+      <p class="desc">测量空 SheetModel 和基础组件的内存使用</p>
+      <div class="controls">
+        <button onclick="testBaseMemory()">测量基础内存</button>
+        <button onclick="forceGC()" class="secondary">强制 GC</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 数据内存效率 -->
+    <div class="test-section">
+      <h3>💾 测试 2: 数据内存效率</h3>
+      <p class="desc">测试每万单元格的内存增量</p>
+      <div class="controls">
+        <button onclick="testDataMemory(1000)">1,000 单元格</button>
+        <button onclick="testDataMemory(10000)">10,000 单元格</button>
+        <button onclick="testDataMemory(50000)">50,000 单元格</button>
+        <button onclick="testDataMemory(100000)" class="extreme">100,000 单元格</button>
+      </div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 样式内存开销 -->
+    <div class="test-section">
+      <h3>🎨 测试 3: 样式内存开销</h3>
+      <p class="desc">分析样式存储的内存消耗</p>
+      <div class="controls">
+        <button onclick="testStyleMemory('none')">无样式</button>
+        <button onclick="testStyleMemory('simple')">简单样式</button>
+        <button onclick="testStyleMemory('complex')">复杂样式</button>
+        <button onclick="testStyleMemory('compare')">对比测试</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 公式元数据内存 -->
+    <div class="test-section">
+      <h3>📐 测试 4: 公式元数据内存</h3>
+      <p class="desc">分析公式元数据的内存占用</p>
+      <div class="controls">
+        <button onclick="testFormulaMemory(100)">100 个公式</button>
+        <button onclick="testFormulaMemory(500)">500 个公式</button>
+        <button onclick="testFormulaMemory(1000)">1,000 个公式</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 稀疏存储效率 -->
+    <div class="test-section">
+      <h3>🗂️ 测试 5: 稀疏存储效率</h3>
+      <p class="desc">对比连续数据与分散数据的内存使用</p>
+      <div class="controls">
+        <button onclick="testSparseStorage('dense')">连续存储</button>
+        <button onclick="testSparseStorage('sparse')">稀疏存储</button>
+        <button onclick="testSparseStorage('compare')">对比测试</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    
+    function formatMemory(bytes) {
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+      return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+    }
+    
+    function getMemoryUsage() {
+      if (performance.memory) {
+        return {
+          used: performance.memory.usedJSHeapSize,
+          total: performance.memory.totalJSHeapSize,
+          limit: performance.memory.jsHeapSizeLimit
+        }
+      }
+      return null
+    }
+    
+    function updateMemoryDisplay() {
+      const mem = getMemoryUsage()
+      if (!mem) {
+        document.getElementById('metricHeapUsed').textContent = 'N/A'
+        document.getElementById('metricHeapTotal').textContent = 'N/A'
+        return
+      }
+      
+      const percent = (mem.used / mem.total * 100).toFixed(1)
+      
+      document.getElementById('metricHeapUsed').textContent = formatMemory(mem.used)
+      document.getElementById('metricHeapTotal').textContent = formatMemory(mem.total)
+      
+      const bar = document.getElementById('memoryBarFill')
+      bar.style.width = `${percent}%`
+      bar.textContent = `${percent}%`
+    }
+    
+    // 测试 1: 基础内存占用
+    window.testBaseMemory = async function() {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 测量中...'
+      
+      if (window.gc) window.gc()
+      await new Promise(r => setTimeout(r, 500))
+      
+      const before = getMemoryUsage()
+      
+      // 创建空 SheetModel
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      await new Promise(r => setTimeout(r, 100))
+      
+      const after = getMemoryUsage()
+      
+      updateMemoryDisplay()
+      
+      if (!before || !after) {
+        resultDiv.innerHTML = `
+⚠️ 内存 API 不可用
+
+请使用 Chrome 浏览器并启用 --enable-precise-memory-info 标志，
+或使用 --expose-gc 参数启动以获取精确内存数据。
+
+📊 已创建的实例:
+  • SheetModel: 1 个空实例
+  • FormulaSheet: 1 个空实例
+  
+💡 提示: 可以使用 Chrome DevTools Memory 面板手动检查内存使用情况
+`
+        return
+      }
+      
+      const delta = after.used - before.used
+      
+      resultDiv.innerHTML = `
+✅ 基础内存测量完成 (真实 SheetModel + FormulaSheet)
+
+📊 内存状态:
+  • 测量前: ${formatMemory(before.used)}
+  • 测量后: ${formatMemory(after.used)}
+  • 增量: <span class="badge ${delta < 1024 * 1024 ? 'good' : 'warning'}">${formatMemory(delta)}</span>
+
+📈 堆内存分布:
+  • 已用堆: ${formatMemory(after.used)} / ${formatMemory(after.total)}
+  • 使用率: ${(after.used / after.total * 100).toFixed(1)}%
+
+💡 说明:
+  • 空 SheetModel + FormulaSheet 的基础内存开销
+  • 包含 Map 数据结构和公式引擎初始化
+`
+    }
+    
+    window.forceGC = function() {
+      if (window.gc) {
+        window.gc()
+        updateMemoryDisplay()
+        alert('GC 已执行')
+      } else {
+        alert('请使用 --expose-gc 参数启动 Chrome 以启用手动 GC')
+      }
+    }
+    
+    // 测试 2: 数据内存效率
+    window.testDataMemory = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 准备测试...'
+      
+      if (window.gc) window.gc()
+      await new Promise(r => setTimeout(r, 200))
+      
+      const before = getMemoryUsage()
+      
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 并填充数据...'
+      
+      const model = new SheetModel()
+      const rows = Math.ceil(Math.sqrt(count))
+      const cols = Math.ceil(count / rows)
+      
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      await new Promise(r => setTimeout(r, 100))
+      
+      const after = getMemoryUsage()
+      
+      updateMemoryDisplay()
+      
+      if (!before || !after) {
+        resultDiv.innerHTML = `
+⚠️ 内存 API 不可用，但测试已完成
+
+📊 测试规模: ${count.toLocaleString()} 单元格 (${rows}×${cols})
+
+✅ SheetModel 数据已成功创建和存储
+
+💡 使用 Chrome DevTools Memory 面板可查看实际内存使用
+`
+        return
+      }
+      
+      const delta = after.used - before.used
+      const perCell = delta / count
+      
+      document.getElementById('metricPerCell').textContent = formatMemory(perCell)
+      
+      const efficiency = perCell < 100 ? '高' : perCell < 500 ? '中' : '低'
+      document.getElementById('metricEfficiency').textContent = efficiency
+      
+      resultDiv.innerHTML = `
+✅ 数据内存测试完成 (真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 单元格
+
+📈 内存分析:
+  • 测量前: ${formatMemory(before.used)}
+  • 测量后: ${formatMemory(after.used)}
+  • 总增量: <span class="badge ${delta < count * 200 ? 'good' : 'warning'}">${formatMemory(delta)}</span>
+  • 每单元格: <span class="badge ${perCell < 100 ? 'good' : perCell < 500 ? 'warning' : 'bad'}">${formatMemory(perCell)}</span>
+
+📊 效率评估:
+  • 存储效率: <span class="badge ${efficiency === '高' ? 'good' : efficiency === '中' ? 'warning' : 'bad'}">${efficiency}</span>
+
+💡 基准参考:
+  • 优秀: < 100 bytes/单元格
+  • 良好: 100-500 bytes/单元格
+  • 需优化: > 500 bytes/单元格
+`
+    }
+    
+    // 测试 3: 样式内存开销
+    window.testStyleMemory = async function(type) {
+      const resultDiv = document.getElementById('result3')
+      const count = 1000
+      
+      if (type === 'compare') {
+        resultDiv.innerHTML = '⏳ 对比测试中...'
+        
+        const results = {}
+        
+        for (const t of ['none', 'simple', 'complex']) {
+          if (window.gc) window.gc()
+          await new Promise(r => setTimeout(r, 200))
+          
+          const before = getMemoryUsage()
+          
+          const model = new SheetModel()
+          for (let r = 0; r < 100; r++) {
+            for (let c = 0; c < 10; c++) {
+              model.setValue(r, c, `Cell ${r * 10 + c}`)
+              if (t === 'simple') {
+                model.setCellStyle(r, c, { fontWeight: 'bold' })
+              } else if (t === 'complex') {
+                model.setCellStyle(r, c, {
+                  fontWeight: 'bold',
+                  fontStyle: 'italic',
+                  fontSize: 14,
+                  color: '#333333',
+                  bgColor: '#f0f0f0',
+                  textAlign: 'center'
+                })
+              }
+            }
+          }
+          
+          await new Promise(r => setTimeout(r, 100))
+          const after = getMemoryUsage()
+          results[t] = before && after ? (after.used - before.used) / count : 0
+        }
+        
+        if (results.none === 0) {
+          resultDiv.innerHTML = `
+⚠️ 内存 API 不可用
+
+测试已完成，但无法获取内存数据。
+请使用 Chrome 浏览器查看详细内存信息。
+`
+          return
+        }
+        
+        const simpleOverhead = results.simple - results.none
+        const complexOverhead = results.complex - results.none
+        
+        resultDiv.innerHTML = `
+✅ 样式内存对比测试完成 (真实 SheetModel)
+
+📊 测试规模: ${count} 单元格
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">类型</th><th>每单元格内存</th><th>额外开销</th></tr>
+<tr>
+  <td style="padding: 10px;">无样式</td>
+  <td>${formatMemory(results.none)}</td>
+  <td>-</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">简单样式</td>
+  <td>${formatMemory(results.simple)}</td>
+  <td>+${formatMemory(simpleOverhead)}</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">复杂样式</td>
+  <td>${formatMemory(results.complex)}</td>
+  <td>+${formatMemory(complexOverhead)}</td>
+</tr>
+</table>
+
+💡 分析:
+  • 简单样式增加 ${results.none > 0 ? ((simpleOverhead / results.none) * 100).toFixed(0) : '--'}% 内存
+  • 复杂样式增加 ${results.none > 0 ? ((complexOverhead / results.none) * 100).toFixed(0) : '--'}% 内存
+`
+      } else {
+        const model = new SheetModel()
+        
+        resultDiv.innerHTML = `⏳ 测试 ${type === 'none' ? '无样式' : type === 'simple' ? '简单样式' : '复杂样式'}...`
+        
+        if (window.gc) window.gc()
+        await new Promise(r => setTimeout(r, 200))
+        
+        const before = getMemoryUsage()
+        
+        for (let r = 0; r < 100; r++) {
+          for (let c = 0; c < 10; c++) {
+            model.setValue(r, c, `Cell ${r * 10 + c}`)
+            if (type === 'simple') {
+              model.setCellStyle(r, c, { fontWeight: 'bold' })
+            } else if (type === 'complex') {
+              model.setCellStyle(r, c, {
+                fontWeight: 'bold', fontStyle: 'italic', fontSize: 14,
+                color: '#333333', bgColor: '#f0f0f0'
+              })
+            }
+          }
+        }
+        
+        await new Promise(r => setTimeout(r, 100))
+        const after = getMemoryUsage()
+        
+        const perCell = before && after ? (after.used - before.used) / count : 0
+        
+        resultDiv.innerHTML = `
+✅ ${type === 'none' ? '无样式' : type === 'simple' ? '简单样式' : '复杂样式'}内存测试完成
+
+📊 每单元格内存: ${perCell > 0 ? formatMemory(perCell) : '(需要 Chrome 内存 API)'}
+`
+        updateMemoryDisplay()
+      }
+    }
+    
+    // 测试 4: 公式元数据内存
+    window.testFormulaMemory = async function(count) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 测试中...'
+      
+      if (window.gc) window.gc()
+      await new Promise(r => setTimeout(r, 200))
+      
+      // 纯值测试
+      const beforeValue = getMemoryUsage()
+      const valueModel = new SheetModel()
+      for (let i = 0; i < count; i++) {
+        valueModel.setValue(Math.floor(i / 50), i % 50, String(i))
+      }
+      await new Promise(r => setTimeout(r, 100))
+      const afterValue = getMemoryUsage()
+      
+      if (window.gc) window.gc()
+      await new Promise(r => setTimeout(r, 200))
+      
+      // 公式测试
+      const beforeFormula = getMemoryUsage()
+      const formulaModel = new SheetModel()
+      const formulaSheet = new FormulaSheet(formulaModel)
+      
+      // 先填充基础数据
+      for (let r = 0; r < 50; r++) {
+        for (let c = 0; c < 10; c++) {
+          formulaModel.setValue(r, c, r * 10 + c)
+        }
+      }
+      
+      // 添加公式
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 50
+        const c = i % 50
+        formulaSheet.setValue(r, c, `=A${(i % 50) + 1}+B${(i % 50) + 1}`)
+      }
+      
+      await new Promise(r => setTimeout(r, 100))
+      const afterFormula = getMemoryUsage()
+      
+      updateMemoryDisplay()
+      
+      if (!beforeValue || !afterValue || !beforeFormula || !afterFormula) {
+        resultDiv.innerHTML = `
+✅ 公式创建完成 (真实 FormulaSheet)
+
+📊 测试规模: ${count} 个公式
+
+⚠️ 内存 API 不可用，无法显示精确内存数据
+使用 Chrome DevTools Memory 面板可查看详细信息
+`
+        return
+      }
+      
+      const valueMemory = (afterValue.used - beforeValue.used) / count
+      const formulaMemory = (afterFormula.used - beforeFormula.used) / count
+      const metadataOverhead = formulaMemory - valueMemory
+      
+      resultDiv.innerHTML = `
+✅ 公式元数据内存测试完成 (真实 FormulaSheet)
+
+📊 测试规模: ${count} 个公式
+
+📈 内存分析:
+  • 纯值单元格: <span class="badge good">${formatMemory(valueMemory)}</span>/单元格
+  • 公式单元格: <span class="badge ${formulaMemory < 500 ? 'good' : 'warning'}">${formatMemory(formulaMemory)}</span>/单元格
+  • 元数据开销: <span class="badge ${metadataOverhead < 300 ? 'good' : 'warning'}">${formatMemory(metadataOverhead)}</span>/公式
+
+💡 说明:
+  • FormulaSheet 包含公式解析元数据
+  • 元数据用于支持引用调整和公式高亮
+`
+    }
+    
+    // 测试 5: 稀疏存储效率
+    window.testSparseStorage = async function(type) {
+      const resultDiv = document.getElementById('result5')
+      const cellCount = 10000
+      
+      if (type === 'compare') {
+        resultDiv.innerHTML = '⏳ 对比测试中...'
+        
+        const results = {}
+        
+        // 连续存储
+        if (window.gc) window.gc()
+        await new Promise(r => setTimeout(r, 200))
+        
+        const beforeDense = getMemoryUsage()
+        const denseModel = new SheetModel()
+        for (let i = 0; i < cellCount; i++) {
+          denseModel.setValue(Math.floor(i / 100), i % 100, `D-${i}`)
+        }
+        await new Promise(r => setTimeout(r, 100))
+        const afterDense = getMemoryUsage()
+        results.dense = beforeDense && afterDense ? afterDense.used - beforeDense.used : 0
+        
+        // 稀疏存储
+        if (window.gc) window.gc()
+        await new Promise(r => setTimeout(r, 200))
+        
+        const beforeSparse = getMemoryUsage()
+        const sparseModel = new SheetModel()
+        for (let i = 0; i < cellCount; i++) {
+          sparseModel.setValue(Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), `S-${i}`)
+        }
+        await new Promise(r => setTimeout(r, 100))
+        const afterSparse = getMemoryUsage()
+        results.sparse = beforeSparse && afterSparse ? afterSparse.used - beforeSparse.used : 0
+        
+        updateMemoryDisplay()
+        
+        if (results.dense === 0) {
+          resultDiv.innerHTML = `
+✅ 存储测试完成
+
+📊 测试规模: ${cellCount.toLocaleString()} 单元格
+
+⚠️ 内存 API 不可用，无法显示精确对比数据
+使用 Chrome DevTools Memory 面板可查看详细信息
+
+💡 说明:
+  • SheetModel 使用 Map 结构存储数据
+  • 无论数据分布如何，Map 都提供 O(1) 的读写性能
+`
+          return
+        }
+        
+        const efficiency = results.sparse / results.dense
+        
+        resultDiv.innerHTML = `
+✅ 稀疏存储对比测试完成 (真实 SheetModel)
+
+📊 测试规模: ${cellCount.toLocaleString()} 单元格
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">存储方式</th><th>范围</th><th>内存占用</th></tr>
+<tr>
+  <td style="padding: 10px;">连续存储</td>
+  <td>100×100</td>
+  <td>${formatMemory(results.dense)}</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">稀疏存储</td>
+  <td>1000×1000 (分散)</td>
+  <td>${formatMemory(results.sparse)}</td>
+</tr>
+</table>
+
+📈 分析:
+  • 稀疏存储开销: ${efficiency < 1 ? '更少' : `${((efficiency - 1) * 100).toFixed(0)}% 更多`}
+  • Map 结构对两种分布都高效
+`
+      } else {
+        const model = new SheetModel()
+        const isDense = type === 'dense'
+        
+        resultDiv.innerHTML = `⏳ 测试 ${isDense ? '连续' : '稀疏'} 存储...`
+        
+        if (window.gc) window.gc()
+        await new Promise(r => setTimeout(r, 200))
+        
+        const before = getMemoryUsage()
+        
+        for (let i = 0; i < cellCount; i++) {
+          const r = isDense ? Math.floor(i / 100) : Math.floor(Math.random() * 1000)
+          const c = isDense ? i % 100 : Math.floor(Math.random() * 1000)
+          model.setValue(r, c, `${type}-${i}`)
+        }
+        
+        await new Promise(r => setTimeout(r, 100))
+        const after = getMemoryUsage()
+        
+        const memory = before && after ? after.used - before.used : 0
+        
+        resultDiv.innerHTML = `
+✅ ${isDense ? '连续' : '稀疏'}存储测试完成
+
+📊 内存占用: ${memory > 0 ? formatMemory(memory) : '(需要 Chrome 内存 API)'}
+  • 每单元格: ${memory > 0 ? formatMemory(memory / cellCount) : '--'}
+`
+        updateMemoryDisplay()
+      }
+    }
+    
+    // 初始化显示
+    updateMemoryDisplay()
+    setInterval(updateMemoryDisplay, 2000)
+  </script>
+</body>
+</html>

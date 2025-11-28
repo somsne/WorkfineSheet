@@ -184,6 +184,11 @@ export class FormulaMetadataParser {
     newRow: number,
     newCol: number
   ): string {
+    // 检查是否是被删除的引用
+    if (ref.originalText === '#REF!') {
+      return '#REF!'
+    }
+    
     // 计算实际的行列号
     const actualRow = ref.isRowAbsolute ? ref.absoluteRow! : newRow + ref.rowOffset
     const actualCol = ref.isColAbsolute ? ref.absoluteCol! : newCol + ref.colOffset
@@ -281,7 +286,9 @@ export class FormulaMetadataParser {
     
     switch (operation) {
       case 'insertRow':
-        if (actualRow >= index) {
+        // 只有相对引用才跟随数据移动
+        // 绝对引用 ($) 保持指向原来的位置
+        if (!ref.isRowAbsolute && actualRow >= index) {
           newActualRow = actualRow + count
         }
         if (formulaRow >= index) {
@@ -290,10 +297,14 @@ export class FormulaMetadataParser {
         break
 
       case 'deleteRow':
-        if (actualRow === index) {
+        // 检查删除的是否是被引用的行
+        if (actualRow >= index && actualRow < index + count) {
           isDeleted = true
-        } else if (actualRow > index) {
-          newActualRow = actualRow - count
+        } else if (actualRow >= index + count) {
+          // 只有相对引用才调整位置
+          if (!ref.isRowAbsolute) {
+            newActualRow = actualRow - count
+          }
         }
         if (formulaRow > index) {
           newFormulaRow = formulaRow - count
@@ -301,7 +312,8 @@ export class FormulaMetadataParser {
         break
 
       case 'insertCol':
-        if (actualCol >= index) {
+        // 只有相对引用才跟随数据移动
+        if (!ref.isColAbsolute && actualCol >= index) {
           newActualCol = actualCol + count
         }
         if (formulaCol >= index) {
@@ -310,10 +322,14 @@ export class FormulaMetadataParser {
         break
 
       case 'deleteCol':
-        if (actualCol === index) {
+        // 检查删除的是否是被引用的列
+        if (actualCol >= index && actualCol < index + count) {
           isDeleted = true
-        } else if (actualCol > index) {
-          newActualCol = actualCol - count
+        } else if (actualCol >= index + count) {
+          // 只有相对引用才调整位置
+          if (!ref.isColAbsolute) {
+            newActualCol = actualCol - count
+          }
         }
         if (formulaCol > index) {
           newFormulaCol = formulaCol - count

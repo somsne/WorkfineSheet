@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据操作性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #4facfe; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #00b4d8; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(79, 172, 254, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    button.extreme { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    .progress { width: 100%; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin: 10px 0; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); width: 0%; transition: width 0.3s ease; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>💾 数据操作性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>数据操作性能测试</h2>
+      <p>测试 SheetModel 数据层的读写性能，包括单元格操作、批量加载、样式设置等核心功能。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricReadRate">--</div>
+          <div class="label">读取速率/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricWriteRate">--</div>
+          <div class="label">写入速率/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricStyleRate">--</div>
+          <div class="label">样式设置/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricDataSize">--</div>
+          <div class="label">数据量</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 单元格读写测试 -->
+    <div class="test-section">
+      <h3>📝 测试 1: 单元格读写速度</h3>
+      <p class="desc">测试 SheetModel.getValue/setValue 的基础性能</p>
+      <div class="controls">
+        <button onclick="testCellReadWrite(1000)">1,000 次</button>
+        <button onclick="testCellReadWrite(10000)">10,000 次</button>
+        <button onclick="testCellReadWrite(100000)">100,000 次</button>
+        <button onclick="testCellReadWrite(500000)" class="extreme">⚡ 500K 次</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 批量数据加载 -->
+    <div class="test-section">
+      <h3>📊 测试 2: 批量数据加载</h3>
+      <p class="desc">测试大量数据的加载性能</p>
+      <div class="controls">
+        <button onclick="testBatchLoad(1000)">1,000 单元格</button>
+        <button onclick="testBatchLoad(10000)">10,000 单元格</button>
+        <button onclick="testBatchLoad(50000)">50,000 单元格</button>
+        <button onclick="testBatchLoad(100000)" class="extreme">🔥 100K 单元格</button>
+      </div>
+      <div class="progress" id="progress2"><div class="progress-bar" id="progressBar2"></div></div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 样式批量设置 -->
+    <div class="test-section">
+      <h3>🎨 测试 3: 样式批量设置</h3>
+      <p class="desc">测试 setCellStyle 批量设置样式的性能</p>
+      <div class="controls">
+        <button onclick="testStyleBatch(100)">100 单元格</button>
+        <button onclick="testStyleBatch(1000)">1,000 单元格</button>
+        <button onclick="testStyleBatch(5000)">5,000 单元格</button>
+        <button onclick="testStyleBatch(10000)" class="extreme">10,000 单元格</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 公式单元格测试 -->
+    <div class="test-section">
+      <h3>📐 测试 4: 公式单元格性能</h3>
+      <p class="desc">测试 FormulaSheet 设置和获取公式的性能</p>
+      <div class="controls">
+        <button onclick="testFormulaCells(100)">100 个公式</button>
+        <button onclick="testFormulaCells(500)">500 个公式</button>
+        <button onclick="testFormulaCells(1000)">1,000 个公式</button>
+        <button onclick="testFormulaCells(2000)" class="extreme">2,000 个公式</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 稀疏数据测试 -->
+    <div class="test-section">
+      <h3>🗂️ 测试 5: 稀疏数据存储效率</h3>
+      <p class="desc">测试稀疏存储模型在不同数据分布下的性能</p>
+      <div class="controls">
+        <button onclick="testSparseData('dense')">连续存储</button>
+        <button onclick="testSparseData('sparse')">稀疏存储</button>
+        <button onclick="testSparseData('compare')">对比测试</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    
+    function formatTime(ms) {
+      if (ms < 0.001) return `${(ms * 1000000).toFixed(2)} ns`
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 单元格读写
+    window.testCellReadWrite = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const cols = 100
+      
+      // 写入测试
+      resultDiv.innerHTML = '⏳ 测试写入...'
+      const writeStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / cols)
+        const c = i % cols
+        model.setValue(r, c, `Value-${i}`)
+      }
+      const writeTime = performance.now() - writeStart
+      
+      resultDiv.innerHTML = '⏳ 测试读取...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 读取测试
+      const readStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / cols)
+        const c = i % cols
+        const val = model.getValue(r, c)
+      }
+      const readTime = performance.now() - readStart
+      
+      const writeRate = Math.round(count / (writeTime / 1000))
+      const readRate = Math.round(count / (readTime / 1000))
+      
+      document.getElementById('metricReadRate').textContent = readRate.toLocaleString()
+      document.getElementById('metricWriteRate').textContent = writeRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 单元格读写测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次操作
+
+⏱️ 写入性能:
+  • 总时间: <span class="badge ${getSpeedClass(writeTime, {fast: 100, medium: 500})}">${formatTime(writeTime)}</span>
+  • 平均时间: ${formatTime(writeTime / count)}/次
+  • 写入速率: <span class="badge fast">${writeRate.toLocaleString()} 次/秒</span>
+
+⏱️ 读取性能:
+  • 总时间: <span class="badge ${getSpeedClass(readTime, {fast: 50, medium: 200})}">${formatTime(readTime)}</span>
+  • 平均时间: ${formatTime(readTime / count)}/次
+  • 读取速率: <span class="badge fast">${readRate.toLocaleString()} 次/秒</span>
+
+📈 性能评估:
+  ${writeTime / count < 0.01 ? '🚀 优秀 - 读写性能极佳' : 
+    writeTime / count < 0.1 ? '✅ 良好 - 读写性能正常' : 
+    '⚠️ 需优化 - 读写性能较慢'}
+`
+    }
+    
+    // 测试 2: 批量数据加载
+    window.testBatchLoad = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      const progressBar = document.getElementById('progressBar2')
+      
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      progressBar.style.width = '0%'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const rows = Math.ceil(Math.sqrt(count))
+      const cols = Math.ceil(count / rows)
+      
+      const loadStart = performance.now()
+      let loaded = 0
+      
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols && loaded < count; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+          loaded++
+        }
+        if (r % 50 === 0) {
+          progressBar.style.width = `${(r / rows * 100)}%`
+          await new Promise(resolve => setTimeout(resolve, 0))
+        }
+      }
+      const loadTime = performance.now() - loadStart
+      
+      progressBar.style.width = '100%'
+      
+      const loadRate = Math.round(count / (loadTime / 1000))
+      document.getElementById('metricDataSize').textContent = `${count.toLocaleString()}`
+      
+      resultDiv.innerHTML = `
+✅ 批量数据加载测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${rows} 行 × ${cols} 列 = ${count.toLocaleString()} 单元格
+
+⏱️ 加载性能:
+  • 加载时间: <span class="badge ${getSpeedClass(loadTime, {fast: 200, medium: 1000})}">${formatTime(loadTime)}</span>
+  • 平均每单元格: ${formatTime(loadTime / count)}
+  • 加载速率: <span class="badge fast">${loadRate.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${loadTime < 200 ? '🚀 优秀 - 大数据加载极快' : 
+    loadTime < 1000 ? '✅ 良好 - 大数据加载正常' : 
+    '⚠️ 需优化 - 大数据加载较慢'}
+`
+    }
+    
+    // 测试 3: 样式批量设置
+    window.testStyleBatch = async function(count) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 并填充数据...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const rows = Math.ceil(Math.sqrt(count))
+      const cols = Math.ceil(count / rows)
+      
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `Cell-${r}-${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试样式设置...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const styles = [
+        { bgColor: '#ffcccc', fontWeight: 'bold' },
+        { bgColor: '#ccffcc', fontStyle: 'italic' },
+        { bgColor: '#ccccff', textAlign: 'center' },
+      ]
+      
+      const styleStart = performance.now()
+      let styleCount = 0
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setCellStyle(r, c, styles[styleCount % styles.length])
+          styleCount++
+        }
+      }
+      const styleTime = performance.now() - styleStart
+      
+      const styleRate = Math.round(count / (styleTime / 1000))
+      document.getElementById('metricStyleRate').textContent = styleRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 样式批量设置测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${rows} 行 × ${cols} 列 = ${count.toLocaleString()} 单元格
+
+⏱️ 样式设置性能:
+  • 总时间: <span class="badge ${getSpeedClass(styleTime, {fast: 100, medium: 500})}">${formatTime(styleTime)}</span>
+  • 平均每单元格: ${formatTime(styleTime / count)}
+  • 设置速率: <span class="badge fast">${styleRate.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${styleTime / count < 0.05 ? '🚀 优秀 - 样式设置极快' : 
+    styleTime / count < 0.2 ? '✅ 良好 - 样式设置正常' : 
+    '⚠️ 需优化 - 样式设置较慢'}
+`
+    }
+    
+    // 测试 4: 公式单元格
+    window.testFormulaCells = async function(count) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 创建 FormulaSheet 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 先填充基础数据
+      for (let r = 0; r < 100; r++) {
+        for (let c = 0; c < 10; c++) {
+          model.setValue(r, c, r * 10 + c)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试公式设置...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const formulas = ['=A1+B1', '=SUM(A1:A10)', '=AVERAGE(B1:B5)', '=A1*2+B1*3']
+      
+      const setStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 100
+        const c = (i % 50) + 10
+        sheet.setValue(r, c, formulas[i % formulas.length])
+      }
+      const setTime = performance.now() - setStart
+      
+      resultDiv.innerHTML = '⏳ 测试公式获取...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const getStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 100
+        const c = (i % 50) + 10
+        sheet.getValue(r, c)
+      }
+      const getTime = performance.now() - getStart
+      
+      const setRate = Math.round(count / (setTime / 1000))
+      const getRate = Math.round(count / (getTime / 1000))
+      
+      resultDiv.innerHTML = `
+✅ 公式单元格性能测试完成 (使用真实 FormulaSheet)
+
+📊 测试规模: ${count.toLocaleString()} 个公式
+
+⏱️ 公式设置性能:
+  • 总时间: <span class="badge ${getSpeedClass(setTime, {fast: 200, medium: 1000})}">${formatTime(setTime)}</span>
+  • 平均每公式: ${formatTime(setTime / count)}
+  • 设置速率: <span class="badge fast">${setRate.toLocaleString()} 公式/秒</span>
+
+⏱️ 公式获取性能:
+  • 总时间: <span class="badge ${getSpeedClass(getTime, {fast: 100, medium: 500})}">${formatTime(getTime)}</span>
+  • 平均每公式: ${formatTime(getTime / count)}
+  • 获取速率: <span class="badge fast">${getRate.toLocaleString()} 公式/秒</span>
+
+📈 性能评估:
+  ${setTime / count < 1 ? '🚀 优秀 - 公式处理极快' : 
+    setTime / count < 5 ? '✅ 良好 - 公式处理正常' : 
+    '⚠️ 需优化 - 公式处理较慢'}
+`
+    }
+    
+    // 测试 5: 稀疏数据存储
+    window.testSparseData = async function(type) {
+      const resultDiv = document.getElementById('result5')
+      const cellCount = 10000
+      
+      if (type === 'compare') {
+        resultDiv.innerHTML = '⏳ 对比测试中...'
+        await new Promise(r => setTimeout(r, 10))
+        
+        const results = {}
+        
+        // 连续存储
+        const denseModel = new SheetModel()
+        const denseStart = performance.now()
+        for (let i = 0; i < cellCount; i++) {
+          denseModel.setValue(Math.floor(i / 100), i % 100, `D-${i}`)
+        }
+        results.dense = { time: performance.now() - denseStart }
+        
+        // 稀疏存储
+        const sparseModel = new SheetModel()
+        const sparseStart = performance.now()
+        for (let i = 0; i < cellCount; i++) {
+          sparseModel.setValue(Math.floor(Math.random() * 1000), Math.floor(Math.random() * 1000), `S-${i}`)
+        }
+        results.sparse = { time: performance.now() - sparseStart }
+        
+        resultDiv.innerHTML = `
+✅ 稀疏存储对比测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${cellCount.toLocaleString()} 单元格
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">存储方式</th><th>范围</th><th>写入时间</th></tr>
+<tr>
+  <td style="padding: 10px;">连续存储</td>
+  <td>100×100</td>
+  <td><span class="badge fast">${formatTime(results.dense.time)}</span></td>
+</tr>
+<tr>
+  <td style="padding: 10px;">稀疏存储</td>
+  <td>1000×1000 (随机)</td>
+  <td><span class="badge fast">${formatTime(results.sparse.time)}</span></td>
+</tr>
+</table>
+
+📈 分析:
+  • SheetModel 使用 Map 结构，对稀疏和连续数据都有良好性能
+  • 写入性能差异: ${((results.sparse.time / results.dense.time - 1) * 100).toFixed(1)}%
+`
+      } else {
+        const model = new SheetModel()
+        const isDense = type === 'dense'
+        
+        resultDiv.innerHTML = `⏳ 测试 ${isDense ? '连续' : '稀疏'} 存储...`
+        await new Promise(r => setTimeout(r, 10))
+        
+        const writeStart = performance.now()
+        for (let i = 0; i < cellCount; i++) {
+          const r = isDense ? Math.floor(i / 100) : Math.floor(Math.random() * 1000)
+          const c = isDense ? i % 100 : Math.floor(Math.random() * 1000)
+          model.setValue(r, c, `${type}-${i}`)
+        }
+        const writeTime = performance.now() - writeStart
+        
+        resultDiv.innerHTML = `
+✅ ${isDense ? '连续' : '稀疏'}存储测试完成
+
+📊 写入时间: <span class="badge fast">${formatTime(writeTime)}</span>
+  • 写入速率: ${Math.round(cellCount / (writeTime / 1000)).toLocaleString()} 单元格/秒
+`
+      }
+    }
+  </script>
+</body>
+</html>

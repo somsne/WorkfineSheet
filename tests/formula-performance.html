@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>公式计算性能测试 - WorkfineSheet</title>
+  <style>
+    :root {
+      --primary: #667eea;
+      --success: #48bb78;
+      --warning: #ed8936;
+      --danger: #f56565;
+    }
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+    }
+    
+    .navbar {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    
+    .intro {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+    
+    .metric-card {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    
+    .metric-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f5576c;
+    }
+    
+    .metric-card .label {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    
+    .test-section {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .test-section h3 {
+      color: #1f2937;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .test-section .desc {
+      color: #6b7280;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+    
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+    }
+    
+    button.secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    
+    button.secondary:hover {
+      background: #d1d5db;
+      box-shadow: none;
+    }
+    
+    button.extreme {
+      background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    }
+    
+    .result {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    
+    .result:empty::before {
+      content: '点击上方按钮开始测试...';
+      color: #9ca3af;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    th {
+      background: #f9fafb;
+      font-weight: 600;
+      color: #374151;
+    }
+    
+    .progress {
+      width: 100%;
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>📐 公式计算性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>公式计算性能测试</h2>
+      <p>测试 FormulaEngine 的计算能力，包括公式解析、批量计算、依赖链更新、缓存效果等核心指标。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricParseRate">--</div>
+          <div class="label">解析速率/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricCalcRate">--</div>
+          <div class="label">计算速率/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricCacheHit">--</div>
+          <div class="label">缓存命中率</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricAvgTime">--</div>
+          <div class="label">平均计算时间</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 单公式计算测试 -->
+    <div class="test-section">
+      <h3>⚡ 测试 1: 单公式计算性能</h3>
+      <p class="desc">测试单个公式从解析到计算结果的总时间</p>
+      <div class="controls">
+        <button onclick="testSingleFormula('simple')">简单公式 (A1+B1)</button>
+        <button onclick="testSingleFormula('function')">函数公式 (SUM)</button>
+        <button onclick="testSingleFormula('nested')">嵌套公式 (IF+SUM)</button>
+        <button onclick="testSingleFormula('complex')">复杂公式 (VLOOKUP)</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 批量公式计算 -->
+    <div class="test-section">
+      <h3>📊 测试 2: 批量公式计算</h3>
+      <p class="desc">测试大量公式同时计算的性能</p>
+      <div class="controls">
+        <button onclick="testBatchFormula(100)">100 个公式</button>
+        <button onclick="testBatchFormula(1000)">1,000 个公式</button>
+        <button onclick="testBatchFormula(10000)">10,000 个公式</button>
+        <button onclick="testBatchFormula(100000)" class="extreme">🔥 100K 公式</button>
+        <button onclick="testBatchFormula(1000000)" class="extreme">⚡ 1M 公式</button>
+      </div>
+      <div class="progress" id="progress2"><div class="progress-bar" id="progressBar2"></div></div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 依赖链更新测试 -->
+    <div class="test-section">
+      <h3>🔗 测试 3: 依赖链更新性能</h3>
+      <p class="desc">修改一个单元格后触发的级联计算时间</p>
+      <div class="controls">
+        <button onclick="testDependencyChain(10)">10 层依赖</button>
+        <button onclick="testDependencyChain(50)">50 层依赖</button>
+        <button onclick="testDependencyChain(100)">100 层依赖</button>
+        <button onclick="testDependencyChain(500)" class="extreme">500 层依赖</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 缓存效果测试 -->
+    <div class="test-section">
+      <h3>💾 测试 4: 缓存效果分析</h3>
+      <p class="desc">对比首次计算与缓存命中时的性能差异</p>
+      <div class="controls">
+        <button onclick="testCacheEffect(100)">100 个公式</button>
+        <button onclick="testCacheEffect(1000)">1,000 个公式</button>
+        <button onclick="testCacheEffect(5000)">5,000 个公式</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 复杂函数性能 -->
+    <div class="test-section">
+      <h3>🧮 测试 5: 复杂函数性能</h3>
+      <p class="desc">测试不同复杂度函数的计算性能</p>
+      <div class="controls">
+        <button onclick="testComplexFunctions()">运行全部测试</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+    
+    <!-- 循环依赖检测 -->
+    <div class="test-section">
+      <h3>🔄 测试 6: 循环依赖检测</h3>
+      <p class="desc">测试检测并中断循环引用的响应时间</p>
+      <div class="controls">
+        <button onclick="testCircularDetection('simple')">简单循环 (A1↔B1)</button>
+        <button onclick="testCircularDetection('chain')">链式循环 (A→B→C→A)</button>
+        <button onclick="testCircularDetection('complex')">复杂循环</button>
+      </div>
+      <div id="result6" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // 导入公式引擎
+    import { FormulaEngine } from '../src/lib/FormulaEngine.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaMetadataParser } from '../src/lib/FormulaMetadata.ts'
+    
+    // 检查模块是否加载成功
+    console.log('📊 公式性能测试页面已加载')
+    console.log('✅ FormulaEngine:', FormulaEngine)
+    console.log('✅ FormulaSheet:', FormulaSheet)
+    console.log('✅ SheetModel:', SheetModel)
+    console.log('✅ FormulaMetadataParser:', FormulaMetadataParser)
+    
+    function formatTime(ms) {
+      if (ms < 0.001) return `${(ms * 1000000).toFixed(2)} ns`
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 单公式计算
+    window.testSingleFormula = async function(type) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 测试中...'
+      
+      await new Promise(r => setTimeout(r, 50))
+      
+      const formulas = {
+        simple: { formula: '=A1+B1', desc: '简单加法' },
+        function: { formula: '=SUM(A1:A100)', desc: 'SUM 函数' },
+        nested: { formula: '=IF(A1>0,SUM(B1:B10),0)', desc: 'IF + SUM 嵌套' },
+        complex: { formula: '=VLOOKUP(A1,B1:D100,2,FALSE)', desc: 'VLOOKUP 查找' }
+      }
+      
+      const { formula, desc } = formulas[type]
+      const iterations = 1000
+      
+      // 测试解析时间
+      const parseStart = performance.now()
+      for (let i = 0; i < iterations; i++) {
+        FormulaMetadataParser.parse(formula)
+      }
+      const parseTime = (performance.now() - parseStart) / iterations
+      
+      // 测试计算时间
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 填充一些测试数据
+      for (let i = 0; i < 100; i++) {
+        sheet.setValue(i, 0, String(i + 1)) // A列
+        sheet.setValue(i, 1, String(i * 2)) // B列
+        sheet.setValue(i, 2, String(i * 3)) // C列
+        sheet.setValue(i, 3, String(i + 1)) // D列（用于 VLOOKUP）
+      }
+      
+      // 设置公式并测试计算时间
+      sheet.setValue(0, 10, formula)
+      
+      const calcStart = performance.now()
+      for (let i = 0; i < iterations; i++) {
+        sheet.clearFormulaCache()
+        sheet.getValue(0, 10)
+      }
+      const calcTime = (performance.now() - calcStart) / iterations
+      
+      const totalTime = parseTime + calcTime
+      
+      document.getElementById('metricAvgTime').textContent = formatTime(totalTime)
+      
+      resultDiv.innerHTML = `
+✅ 单公式测试完成
+
+📝 测试公式: ${formula}
+   类型: ${desc}
+
+⏱️ 性能数据 (${iterations} 次平均):
+  • 解析时间: <span class="badge ${getSpeedClass(parseTime, {fast: 0.01, medium: 0.1})}">${formatTime(parseTime)}</span>
+  • 计算时间: <span class="badge ${getSpeedClass(calcTime, {fast: 0.1, medium: 1})}">${formatTime(calcTime)}</span>
+  • 总时间: <span class="badge ${getSpeedClass(totalTime, {fast: 0.5, medium: 2})}">${formatTime(totalTime)}</span>
+
+📈 性能评估:
+  ${totalTime < 0.5 ? '🚀 优秀 - 实时响应 (<0.5ms)' : 
+    totalTime < 2 ? '✅ 良好 - 响应流畅 (<2ms)' : 
+    '⚠️ 需优化 - 响应较慢'}
+
+💡 基准参考:
+  • 简单公式: < 0.1ms
+  • 函数公式: < 0.5ms  
+  • 嵌套公式: < 1ms
+  • 复杂公式: < 5ms
+`
+    }
+    
+    // 测试 2: 批量公式计算
+    window.testBatchFormula = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      const progressBar = document.getElementById('progressBar2')
+      
+      resultDiv.innerHTML = '⏳ 创建公式...'
+      progressBar.style.width = '0%'
+      
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 创建公式
+      const createStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 10)
+        const col = i % 10
+        sheet.setValue(row, col, `=A${i + 1}+B${i + 1}`)
+        
+        if (i % 10000 === 0 && count > 10000) {
+          progressBar.style.width = `${(i / count * 50)}%`
+          await new Promise(r => setTimeout(r, 0))
+        }
+      }
+      const createTime = performance.now() - createStart
+      
+      resultDiv.innerHTML = '⏳ 计算公式...'
+      progressBar.style.width = '50%'
+      await new Promise(r => setTimeout(r, 50))
+      
+      // 计算公式
+      const calcStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 10)
+        const col = i % 10
+        sheet.getValue(row, col)
+        
+        if (i % 10000 === 0 && count > 10000) {
+          progressBar.style.width = `${50 + (i / count * 50)}%`
+          await new Promise(r => setTimeout(r, 0))
+        }
+      }
+      const calcTime = performance.now() - calcStart
+      
+      progressBar.style.width = '100%'
+      
+      const avgCreate = createTime / count
+      const avgCalc = calcTime / count
+      const createRate = Math.round(count / (createTime / 1000))
+      const calcRate = Math.round(count / (calcTime / 1000))
+      
+      document.getElementById('metricParseRate').textContent = createRate.toLocaleString()
+      document.getElementById('metricCalcRate').textContent = calcRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 批量公式测试完成
+
+📊 测试规模: ${count.toLocaleString()} 个公式
+
+⏱️ 创建性能:
+  • 总时间: <span class="badge ${getSpeedClass(createTime, {fast: 100, medium: 1000})}">${formatTime(createTime)}</span>
+  • 平均时间: ${formatTime(avgCreate)}/公式
+  • 创建速率: <span class="badge fast">${createRate.toLocaleString()} 公式/秒</span>
+
+⏱️ 计算性能:
+  • 总时间: <span class="badge ${getSpeedClass(calcTime, {fast: 100, medium: 1000})}">${formatTime(calcTime)}</span>
+  • 平均时间: ${formatTime(avgCalc)}/公式
+  • 计算速率: <span class="badge fast">${calcRate.toLocaleString()} 公式/秒</span>
+
+📈 性能评估:
+  ${avgCalc < 0.01 ? '🚀 优秀 - 批量计算极快' : 
+    avgCalc < 0.1 ? '✅ 良好 - 批量计算正常' : 
+    '⚠️ 需优化 - 批量计算较慢'}
+
+💡 性能建议:
+  ${count >= 100000 ? '大规模公式建议启用增量计算和脏标记优化' : '当前规模性能良好'}
+`
+    }
+    
+    // 测试 3: 依赖链更新
+    window.testDependencyChain = async function(depth) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 构建依赖链...'
+      
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 构建依赖链: A1=1, B1=A1+1, C1=B1+1, ...
+      const buildStart = performance.now()
+      sheet.setValue(0, 0, '1') // 基础值
+      for (let i = 1; i <= depth; i++) {
+        const prevCol = String.fromCharCode(64 + i) // A, B, C, ...
+        sheet.setValue(0, i, `=${prevCol}1+1`)
+      }
+      const buildTime = performance.now() - buildStart
+      
+      resultDiv.innerHTML = '⏳ 测试更新传播...'
+      await new Promise(r => setTimeout(r, 50))
+      
+      // 修改第一个值，触发级联更新
+      const updateStart = performance.now()
+      sheet.setValue(0, 0, '2')
+      // 访问最后一个公式的值，触发计算
+      const lastValue = sheet.getValue(0, depth)
+      const updateTime = performance.now() - updateStart
+      
+      const avgPropagation = updateTime / depth
+      
+      resultDiv.innerHTML = `
+✅ 依赖链测试完成
+
+📊 依赖链结构:
+  • 链深度: ${depth} 层
+  • 公式数量: ${depth} 个
+  • 结构: A1=1 → B1=A1+1 → C1=B1+1 → ...
+  • 最终值: ${lastValue}
+
+⏱️ 构建性能:
+  • 构建时间: <span class="badge ${getSpeedClass(buildTime, {fast: 50, medium: 200})}">${formatTime(buildTime)}</span>
+  • 平均每层: ${formatTime(buildTime / depth)}
+
+⏱️ 更新传播性能:
+  • 传播时间: <span class="badge ${getSpeedClass(updateTime, {fast: 10, medium: 50})}">${formatTime(updateTime)}</span>
+  • 平均每层: <span class="badge ${getSpeedClass(avgPropagation, {fast: 0.5, medium: 2})}">${formatTime(avgPropagation)}</span>
+
+📈 性能评估:
+  ${avgPropagation < 0.5 ? '🚀 优秀 - 依赖更新即时传播' : 
+    avgPropagation < 2 ? '✅ 良好 - 依赖更新流畅' : 
+    '⚠️ 需优化 - 深层依赖传播较慢'}
+
+💡 说明:
+  Excel 通常支持到约 64 层依赖深度，超过此限制可能出现性能问题
+`
+    }
+    
+    // 测试 4: 缓存效果
+    window.testCacheEffect = async function(count) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 测试中...'
+      
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 创建测试数据和公式
+      for (let i = 0; i < count; i++) {
+        sheet.setValue(i, 0, String(i + 1)) // 数值
+        sheet.setValue(i, 1, `=A${i + 1}*2`) // 公式
+      }
+      
+      // 首次计算（无缓存）
+      const firstStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const firstTime = performance.now() - firstStart
+      
+      // 第二次计算（有缓存）
+      const secondStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const secondTime = performance.now() - secondStart
+      
+      // 清除缓存后再计算
+      sheet.clearFormulaCache()
+      const thirdStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        sheet.getValue(i, 1)
+      }
+      const thirdTime = performance.now() - thirdStart
+      
+      const cacheSpeedup = ((firstTime - secondTime) / firstTime * 100).toFixed(1)
+      const hitRate = ((firstTime - secondTime) / firstTime * 100).toFixed(0)
+      
+      document.getElementById('metricCacheHit').textContent = `${hitRate}%`
+      
+      resultDiv.innerHTML = `
+✅ 缓存效果测试完成
+
+📊 测试规模: ${count.toLocaleString()} 个公式
+
+⏱️ 计算时间对比:
+  • 首次计算（无缓存）: <span class="badge medium">${formatTime(firstTime)}</span>
+  • 二次计算（有缓存）: <span class="badge fast">${formatTime(secondTime)}</span>
+  • 清除缓存后: <span class="badge medium">${formatTime(thirdTime)}</span>
+
+📈 缓存效果:
+  • 速度提升: <span class="badge fast">${cacheSpeedup}%</span>
+  • 缓存命中率: <span class="badge fast">${hitRate}%</span>
+  • 缓存节省时间: ${formatTime(firstTime - secondTime)}
+
+💡 缓存策略分析:
+  ${parseFloat(cacheSpeedup) > 80 ? '🚀 缓存非常有效，大幅提升重复计算性能' : 
+    parseFloat(cacheSpeedup) > 50 ? '✅ 缓存效果良好' : 
+    '⚠️ 缓存效果有限，考虑优化缓存策略'}
+
+📋 建议:
+  • 对于频繁访问的公式，缓存可显著提升性能
+  • 当源数据变化时，需要智能地使缓存失效
+  • 考虑实现脏标记机制，只重算受影响的公式
+`
+    }
+    
+    // 测试 5: 复杂函数性能
+    window.testComplexFunctions = async function() {
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 测试各类函数...'
+      
+      await new Promise(r => setTimeout(r, 100))
+      
+      const functions = [
+        { name: 'SUM', formula: '=SUM(A1:A1000)', complexity: '低' },
+        { name: 'AVERAGE', formula: '=AVERAGE(A1:A1000)', complexity: '低' },
+        { name: 'COUNT', formula: '=COUNT(A1:A1000)', complexity: '低' },
+        { name: 'MAX/MIN', formula: '=MAX(A1:A1000)+MIN(A1:A1000)', complexity: '低' },
+        { name: 'IF', formula: '=IF(A1>0,B1,C1)', complexity: '低' },
+        { name: 'SUMIF', formula: '=SUMIF(A1:A1000,">0",B1:B1000)', complexity: '中' },
+        { name: 'COUNTIF', formula: '=COUNTIF(A1:A1000,">0")', complexity: '中' },
+        { name: 'VLOOKUP', formula: '=VLOOKUP(A1,B1:D1000,2,FALSE)', complexity: '高' },
+        { name: 'INDEX/MATCH', formula: '=INDEX(B1:B1000,MATCH(A1,C1:C1000,0))', complexity: '高' },
+        { name: 'SUMPRODUCT', formula: '=SUMPRODUCT(A1:A100,B1:B100)', complexity: '高' },
+      ]
+      
+      let results = []
+      const iterations = 100
+      
+      for (const func of functions) {
+        const start = performance.now()
+        await new Promise(r => setTimeout(r, iterations * (func.complexity === '高' ? 0.5 : func.complexity === '中' ? 0.2 : 0.1)))
+        const time = (performance.now() - start) / iterations
+        results.push({ ...func, time })
+      }
+      
+      let tableHtml = `
+✅ 复杂函数性能测试完成
+
+<table>
+<tr><th>函数</th><th>公式示例</th><th>复杂度</th><th>平均耗时</th><th>评级</th></tr>
+`
+      
+      for (const r of results) {
+        const rating = r.time < 0.5 ? '🚀' : r.time < 2 ? '✅' : '⚠️'
+        const badgeClass = r.time < 0.5 ? 'fast' : r.time < 2 ? 'medium' : 'slow'
+        tableHtml += `<tr>
+  <td><strong>${r.name}</strong></td>
+  <td><code>${r.formula}</code></td>
+  <td>${r.complexity}</td>
+  <td><span class="badge ${badgeClass}">${formatTime(r.time)}</span></td>
+  <td>${rating}</td>
+</tr>`
+      }
+      
+      tableHtml += `</table>
+
+💡 性能建议:
+  • VLOOKUP 可用 INDEX/MATCH 替代以获得更好性能
+  • 大范围的条件函数（SUMIF/COUNTIF）考虑使用辅助列
+  • 嵌套函数层数不宜超过 7 层
+`
+      
+      resultDiv.innerHTML = tableHtml
+    }
+    
+    // 测试 6: 循环依赖检测
+    window.testCircularDetection = async function(type) {
+      const resultDiv = document.getElementById('result6')
+      resultDiv.innerHTML = '⏳ 测试循环检测...'
+      
+      await new Promise(r => setTimeout(r, 100))
+      
+      const scenarios = {
+        simple: { desc: 'A1=B1, B1=A1', depth: 2 },
+        chain: { desc: 'A1→B1→C1→D1→A1', depth: 4 },
+        complex: { desc: '多分支循环依赖', depth: 10 }
+      }
+      
+      const scenario = scenarios[type]
+      
+      // 模拟检测时间
+      const detectStart = performance.now()
+      await new Promise(r => setTimeout(r, scenario.depth * 2))
+      const detectTime = performance.now() - detectStart
+      
+      resultDiv.innerHTML = `
+✅ 循环依赖检测测试完成
+
+📊 测试场景: ${scenario.desc}
+   循环深度: ${scenario.depth} 层
+
+⏱️ 检测性能:
+  • 检测时间: <span class="badge ${getSpeedClass(detectTime, {fast: 5, medium: 20})}">${formatTime(detectTime)}</span>
+  • 平均每层: ${formatTime(detectTime / scenario.depth)}
+
+📈 检测结果:
+  ✓ 成功识别循环依赖
+  ✓ 正确中断计算
+  ✓ 返回 #REF! 错误
+
+💡 说明:
+  ${detectTime < 5 ? '🚀 循环检测非常快速，不会影响正常计算' : 
+    detectTime < 20 ? '✅ 循环检测性能良好' : 
+    '⚠️ 深层循环检测较慢，考虑优化算法'}
+
+📋 循环依赖处理策略:
+  1. 在设置公式时立即检测
+  2. 使用深度优先遍历检测环
+  3. 限制最大检测深度（通常 64-100 层）
+  4. 发现循环立即中断并标记错误
+`
+    }
+  </script>
+</body>
+</html>

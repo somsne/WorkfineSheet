@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>交互响应性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #fa709a; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #ec4899; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(250, 112, 154, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    .test-input { width: 300px; height: 40px; border: 2px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 1rem; margin-bottom: 16px; }
+    .test-input:focus { outline: none; border-color: #fa709a; }
+    .test-area { width: 100%; height: 200px; border: 2px solid #e5e7eb; border-radius: 8px; margin-bottom: 16px; cursor: crosshair; position: relative; background: #fafafa; overflow: hidden; }
+    .cell-grid { display: grid; width: 100%; height: 100%; }
+    .cell { border: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #666; transition: background-color 0.1s; }
+    .cell:hover { background: #fff3cd; }
+    .cell.selected { background: #d4edda; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>⌨️ 交互响应性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>交互响应性能测试</h2>
+      <p>测试用户交互的响应速度，评估数据更新延迟、批量操作响应等。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricUpdateLatency">--</div>
+          <div class="label">更新延迟</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricBatchUpdate">--</div>
+          <div class="label">批量更新/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricFormulaUpdate">--</div>
+          <div class="label">公式更新/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricStyleUpdate">--</div>
+          <div class="label">样式更新/秒</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 单元格更新延迟 -->
+    <div class="test-section">
+      <h3>⌨️ 测试 1: 单元格更新延迟</h3>
+      <p class="desc">测量从触发更新到数据写入完成的时间</p>
+      <div class="controls">
+        <button onclick="testUpdateLatency(100)">100 次更新</button>
+        <button onclick="testUpdateLatency(1000)">1,000 次更新</button>
+        <button onclick="testUpdateLatency(5000)">5,000 次更新</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 批量数据更新 -->
+    <div class="test-section">
+      <h3>📊 测试 2: 批量数据更新响应</h3>
+      <p class="desc">测试连续快速更新多个单元格的性能</p>
+      <div class="controls">
+        <button onclick="testBatchUpdate(100)">100 单元格</button>
+        <button onclick="testBatchUpdate(500)">500 单元格</button>
+        <button onclick="testBatchUpdate(1000)">1,000 单元格</button>
+        <button onclick="testBatchUpdate(5000)">5,000 单元格</button>
+      </div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 公式联动更新 -->
+    <div class="test-section">
+      <h3>📐 测试 3: 公式联动更新</h3>
+      <p class="desc">测试修改源单元格后公式重算的响应时间</p>
+      <div class="controls">
+        <button onclick="testFormulaUpdate(10)">10 个依赖公式</button>
+        <button onclick="testFormulaUpdate(50)">50 个依赖公式</button>
+        <button onclick="testFormulaUpdate(100)">100 个依赖公式</button>
+        <button onclick="testFormulaUpdate(500)">500 个依赖公式</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 样式批量更新 -->
+    <div class="test-section">
+      <h3>🎨 测试 4: 样式批量更新</h3>
+      <p class="desc">测试连续修改单元格样式的响应时间</p>
+      <div class="controls">
+        <button onclick="testStyleUpdate(100)">100 单元格</button>
+        <button onclick="testStyleUpdate(500)">500 单元格</button>
+        <button onclick="testStyleUpdate(1000)">1,000 单元格</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 选区操作性能 -->
+    <div class="test-section">
+      <h3>🖱️ 测试 5: 选区操作性能</h3>
+      <p class="desc">测试选区范围计算和数据获取的性能</p>
+      <div class="controls">
+        <button onclick="testSelectionOps('small')">小选区 (10×10)</button>
+        <button onclick="testSelectionOps('medium')">中选区 (50×50)</button>
+        <button onclick="testSelectionOps('large')">大选区 (100×100)</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+    
+    <!-- 综合交互测试 -->
+    <div class="test-section">
+      <h3>🔄 测试 6: 综合交互测试</h3>
+      <p class="desc">模拟真实用户操作场景的综合性能</p>
+      <div class="controls">
+        <button onclick="testComprehensive()">运行综合测试</button>
+      </div>
+      <div id="result6" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    
+    function formatTime(ms) {
+      if (ms < 0.001) return `${(ms * 1000000).toFixed(2)} ns`
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 单元格更新延迟
+    window.testUpdateLatency = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 创建测试环境...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const latencies = []
+      
+      resultDiv.innerHTML = '⏳ 测试单元格更新延迟...'
+      
+      for (let i = 0; i < count; i++) {
+        const start = performance.now()
+        model.setValue(Math.floor(i / 100), i % 100, `Update-${i}`)
+        latencies.push(performance.now() - start)
+      }
+      
+      const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length
+      const minLatency = Math.min(...latencies)
+      const maxLatency = Math.max(...latencies)
+      const p95Latency = latencies.sort((a, b) => a - b)[Math.floor(latencies.length * 0.95)]
+      
+      document.getElementById('metricUpdateLatency').textContent = formatTime(avgLatency)
+      
+      resultDiv.innerHTML = `
+✅ 单元格更新延迟测试完成 (真实 SheetModel)
+
+📊 测试规模: ${count} 次更新
+
+⏱️ 延迟统计:
+  • 平均延迟: <span class="badge ${getSpeedClass(avgLatency, {fast: 0.01, medium: 0.1})}">${formatTime(avgLatency)}</span>
+  • 最小延迟: ${formatTime(minLatency)}
+  • 最大延迟: ${formatTime(maxLatency)}
+  • P95 延迟: <span class="badge ${getSpeedClass(p95Latency, {fast: 0.05, medium: 0.5})}">${formatTime(p95Latency)}</span>
+
+📈 性能评估:
+  ${avgLatency < 0.01 ? '🚀 优秀 - 更新响应即时' : 
+    avgLatency < 0.1 ? '✅ 良好 - 更新响应快速' : 
+    '⚠️ 需优化 - 更新响应较慢'}
+
+💡 目标: 单次更新 < 0.1ms
+`
+    }
+    
+    // 测试 2: 批量数据更新
+    window.testBatchUpdate = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 创建测试环境...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const rows = Math.ceil(Math.sqrt(count))
+      const cols = Math.ceil(count / rows)
+      
+      // 先填充初始数据
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `Init-${r}-${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试批量更新...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 测试批量更新
+      const start = performance.now()
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `Updated-${r}-${c}`)
+        }
+      }
+      const totalTime = performance.now() - start
+      
+      const updateRate = Math.round(count / (totalTime / 1000))
+      document.getElementById('metricBatchUpdate').textContent = updateRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 批量数据更新测试完成 (真实 SheetModel)
+
+📊 测试规模: ${rows}×${cols} = ${count} 单元格
+
+⏱️ 更新性能:
+  • 总时间: <span class="badge ${getSpeedClass(totalTime, {fast: 50, medium: 200})}">${formatTime(totalTime)}</span>
+  • 平均每单元格: ${formatTime(totalTime / count)}
+  • 更新速率: <span class="badge fast">${updateRate.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${totalTime / count < 0.01 ? '🚀 优秀 - 批量更新极快' : 
+    totalTime / count < 0.1 ? '✅ 良好 - 批量更新正常' : 
+    '⚠️ 需优化 - 批量更新较慢'}
+`
+    }
+    
+    // 测试 3: 公式联动更新
+    window.testFormulaUpdate = async function(count) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 创建公式依赖网络...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 设置源单元格
+      model.setValue(0, 0, 100)
+      
+      // 创建依赖 A1 的公式
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 1
+        const c = i % 50
+        sheet.setValue(r, c, '=A1*2')
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试公式联动更新...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 测试更新源单元格触发的公式重算
+      const iterations = 10
+      const times = []
+      
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now()
+        sheet.setValue(0, 0, 100 + i)
+        
+        // 读取所有依赖公式的值（触发重算）
+        for (let j = 0; j < count; j++) {
+          const r = Math.floor(j / 50) + 1
+          const c = j % 50
+          sheet.getValue(r, c)
+        }
+        
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const updateRate = Math.round(count / (avgTime / 1000))
+      
+      document.getElementById('metricFormulaUpdate').textContent = updateRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 公式联动更新测试完成 (真实 FormulaSheet)
+
+📊 测试规模: ${count} 个依赖公式
+
+⏱️ 联动更新性能:
+  • 平均更新时间: <span class="badge ${getSpeedClass(avgTime, {fast: 50, medium: 200})}">${formatTime(avgTime)}</span>
+  • 每公式重算时间: ${formatTime(avgTime / count)}
+  • 公式更新速率: <span class="badge fast">${updateRate.toLocaleString()} 公式/秒</span>
+
+📈 性能评估:
+  ${avgTime / count < 0.1 ? '🚀 优秀 - 公式联动极快' : 
+    avgTime / count < 1 ? '✅ 良好 - 公式联动正常' : 
+    '⚠️ 需优化 - 公式联动较慢'}
+
+💡 说明:
+  • 修改 A1 触发所有依赖公式重新计算
+  • FormulaSheet 使用缓存优化重复计算
+`
+    }
+    
+    // 测试 4: 样式批量更新
+    window.testStyleUpdate = async function(count) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 创建测试环境...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const rows = Math.ceil(Math.sqrt(count))
+      const cols = Math.ceil(count / rows)
+      
+      // 先填充数据
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `Cell-${r}-${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试样式更新...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const styles = [
+        { bgColor: '#ffcccc' },
+        { bgColor: '#ccffcc' },
+        { bgColor: '#ccccff' },
+        { fontWeight: 'bold' },
+        { fontStyle: 'italic' }
+      ]
+      
+      const start = performance.now()
+      let styleIndex = 0
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setCellStyle(r, c, styles[styleIndex % styles.length])
+          styleIndex++
+        }
+      }
+      const totalTime = performance.now() - start
+      
+      const updateRate = Math.round(count / (totalTime / 1000))
+      document.getElementById('metricStyleUpdate').textContent = updateRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 样式批量更新测试完成 (真实 SheetModel)
+
+📊 测试规模: ${count} 单元格
+
+⏱️ 样式更新性能:
+  • 总时间: <span class="badge ${getSpeedClass(totalTime, {fast: 50, medium: 200})}">${formatTime(totalTime)}</span>
+  • 平均每单元格: ${formatTime(totalTime / count)}
+  • 更新速率: <span class="badge fast">${updateRate.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${totalTime / count < 0.05 ? '🚀 优秀 - 样式更新极快' : 
+    totalTime / count < 0.2 ? '✅ 良好 - 样式更新正常' : 
+    '⚠️ 需优化 - 样式更新较慢'}
+`
+    }
+    
+    // 测试 5: 选区操作性能
+    window.testSelectionOps = async function(size) {
+      const resultDiv = document.getElementById('result5')
+      const sizes = { small: 10, medium: 50, large: 100 }
+      const dim = sizes[size]
+      const cellCount = dim * dim
+      
+      resultDiv.innerHTML = '⏳ 创建测试数据...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 填充数据
+      for (let r = 0; r < dim; r++) {
+        for (let c = 0; c < dim; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试选区操作...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 测试获取选区数据
+      const iterations = 50
+      const readTimes = []
+      
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now()
+        
+        // 模拟获取选区内所有单元格数据
+        const data = []
+        for (let r = 0; r < dim; r++) {
+          const row = []
+          for (let c = 0; c < dim; c++) {
+            row.push(model.getValue(r, c))
+          }
+          data.push(row)
+        }
+        
+        readTimes.push(performance.now() - start)
+      }
+      
+      const avgReadTime = readTimes.reduce((a, b) => a + b, 0) / readTimes.length
+      const readRate = Math.round(cellCount / (avgReadTime / 1000))
+      
+      resultDiv.innerHTML = `
+✅ 选区操作性能测试完成 (真实 SheetModel)
+
+📊 选区规模: ${dim}×${dim} = ${cellCount.toLocaleString()} 单元格
+
+⏱️ 选区读取性能:
+  • 平均读取时间: <span class="badge ${getSpeedClass(avgReadTime, {fast: 10, medium: 50})}">${formatTime(avgReadTime)}</span>
+  • 每单元格读取: ${formatTime(avgReadTime / cellCount)}
+  • 读取速率: <span class="badge fast">${readRate.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${avgReadTime < 10 ? '🚀 优秀 - 选区操作极快' : 
+    avgReadTime < 50 ? '✅ 良好 - 选区操作正常' : 
+    '⚠️ 需优化 - 选区操作较慢'}
+
+💡 说明:
+  • 选区操作常用于复制、粘贴、批量设置样式
+  • 大选区读取性能影响用户体验
+`
+    }
+    
+    // 测试 6: 综合交互测试
+    window.testComprehensive = async function() {
+      const resultDiv = document.getElementById('result6')
+      resultDiv.innerHTML = '⏳ 运行综合交互测试...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      const results = {}
+      
+      // 1. 初始数据填充
+      let start = performance.now()
+      for (let r = 0; r < 100; r++) {
+        for (let c = 0; c < 50; c++) {
+          model.setValue(r, c, r * 50 + c)
+        }
+      }
+      results.fillData = performance.now() - start
+      
+      // 2. 添加公式
+      start = performance.now()
+      for (let r = 0; r < 20; r++) {
+        for (let c = 0; c < 10; c++) {
+          sheet.setValue(r + 100, c, `=SUM(A${r + 1}:J${r + 1})`)
+        }
+      }
+      results.addFormulas = performance.now() - start
+      
+      // 3. 设置样式
+      start = performance.now()
+      for (let r = 0; r < 50; r++) {
+        for (let c = 0; c < 25; c++) {
+          model.setCellStyle(r, c, { bgColor: '#f0f0f0', fontWeight: 'bold' })
+        }
+      }
+      results.setStyles = performance.now() - start
+      
+      // 4. 修改数据触发公式重算
+      start = performance.now()
+      for (let i = 0; i < 10; i++) {
+        model.setValue(i, 0, i * 100)
+        // 读取依赖的公式值
+        for (let r = 0; r < 20; r++) {
+          sheet.getValue(r + 100, 0)
+        }
+      }
+      results.updateWithRecalc = performance.now() - start
+      
+      // 5. 批量读取
+      start = performance.now()
+      for (let r = 0; r < 100; r++) {
+        for (let c = 0; c < 50; c++) {
+          model.getValue(r, c)
+          model.getCellStyle(r, c)
+        }
+      }
+      results.batchRead = performance.now() - start
+      
+      const totalTime = Object.values(results).reduce((a, b) => a + b, 0)
+      
+      resultDiv.innerHTML = `
+✅ 综合交互测试完成 (真实 SheetModel + FormulaSheet)
+
+📊 测试场景模拟真实用户操作:
+
+⏱️ 各阶段耗时:
+  • 初始数据填充 (5000 单元格): <span class="badge ${getSpeedClass(results.fillData, {fast: 50, medium: 200})}">${formatTime(results.fillData)}</span>
+  • 添加公式 (200 个): <span class="badge ${getSpeedClass(results.addFormulas, {fast: 100, medium: 500})}">${formatTime(results.addFormulas)}</span>
+  • 设置样式 (1250 单元格): <span class="badge ${getSpeedClass(results.setStyles, {fast: 50, medium: 200})}">${formatTime(results.setStyles)}</span>
+  • 数据更新+公式重算: <span class="badge ${getSpeedClass(results.updateWithRecalc, {fast: 50, medium: 200})}">${formatTime(results.updateWithRecalc)}</span>
+  • 批量读取 (5000 单元格): <span class="badge ${getSpeedClass(results.batchRead, {fast: 50, medium: 200})}">${formatTime(results.batchRead)}</span>
+
+📈 总体评估:
+  • 总耗时: <span class="badge ${getSpeedClass(totalTime, {fast: 300, medium: 1000})}">${formatTime(totalTime)}</span>
+  ${totalTime < 300 ? '🚀 优秀 - 综合性能极佳，用户体验流畅' : 
+    totalTime < 1000 ? '✅ 良好 - 综合性能正常，基本流畅' : 
+    '⚠️ 需优化 - 部分操作可能有延迟感'}
+
+💡 说明:
+  • 测试覆盖了常见的表格操作场景
+  • 包含数据读写、公式计算、样式设置等综合操作
+`
+    }
+  </script>
+</body>
+</html>

@@ -105,6 +105,20 @@
     .summary h3 {
       margin-top: 0;
     }
+    .summary table {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .summary th {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+    }
+    .summary td {
+      color: white;
+      border-bottom-color: rgba(255, 255, 255, 0.2);
+    }
+    .summary tr:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -249,15 +263,30 @@
     <div id="result6" class="result"></div>
   </div>
 
+  <div class="test-section">
+    <h2>测试 7: 渲染性能</h2>
+    <p>测试 Canvas 渲染单元格的性能（含样式、滚动场景）</p>
+    <div class="controls">
+      <button onclick="test7Basic()">基础渲染 (5000 单元格)</button>
+      <button onclick="test7Scroll()">滚动渲染 (50 次)</button>
+      <button onclick="test7Styled()">样式渲染</button>
+      <button onclick="test7All()">运行全部</button>
+    </div>
+    <div id="result7" class="result"></div>
+  </div>
+
   <div id="summary" class="summary" style="display: none;">
     <h3>📈 测试总结</h3>
     <div id="summaryContent"></div>
   </div>
 
   <script type="module">
-    import { SheetModel } from './src/lib/SheetModel.js'
-    import { FormulaSheet } from './src/lib/FormulaSheet.js'
-    import { FormulaMetadataParser } from './src/lib/FormulaMetadata.js'
+    // 使用正确的相对路径导入 TypeScript 模块
+    // 注意：这些需要在 Vite 开发服务器下运行 (npm run dev)
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    import { FormulaMetadataParser } from '../src/lib/FormulaMetadata.ts'
+    import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from '../src/components/sheet/geometry.ts'
 
     window.SheetModel = SheetModel
     window.FormulaSheet = FormulaSheet
@@ -862,6 +891,267 @@ ${insertCount >= 1000 ? '<strong>⚠️ 注意：</strong>大规模列插入是�
       displayResult('result6', resultText)
     }
 
+    // 测试 7: 渲染性能
+    // 创建一个隐藏的 canvas 用于测试
+    const testCanvas = document.createElement('canvas')
+    testCanvas.width = 1200
+    testCanvas.height = 600
+    const testCtx = testCanvas.getContext('2d')
+    
+    const geometryCfg = {
+      defaultColWidth: 80,
+      defaultRowHeight: 25,
+      frozenCols: 0,
+      frozenRows: 0,
+      colHeaderHeight: 0,
+      rowHeaderWidth: 0
+    }
+
+    function renderCells(ctx, model, viewport, sizes, totalRows, totalCols) {
+      const { startRow, endRow, startCol, endCol } = getVisibleRange(
+        ctx.canvas.width, ctx.canvas.height, viewport, sizes, geometryCfg, totalRows, totalCols
+      )
+      
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      let cellsRendered = 0
+      
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          const x = getColLeft(col, sizes, geometryCfg) - viewport.scrollLeft
+          const y = getRowTop(row, sizes, geometryCfg) - viewport.scrollTop
+          const w = getColWidth(col, sizes, geometryCfg)
+          const h = getRowHeight(row, sizes, geometryCfg)
+          
+          const style = model.getCellStyle(row, col)
+          
+          // 背景色
+          if (style?.bgColor) {
+            ctx.fillStyle = style.bgColor
+            ctx.fillRect(x, y, w, h)
+          }
+          
+          // 边框
+          ctx.strokeStyle = '#e0e0e0'
+          ctx.strokeRect(x, y, w, h)
+          
+          // 文本
+          const value = model.getValue(row, col)
+          if (value !== undefined && value !== null && value !== '') {
+            let fontStr = '12px Arial'
+            if (style?.fontWeight === 'bold') fontStr = 'bold ' + fontStr
+            if (style?.fontStyle === 'italic') fontStr = 'italic ' + fontStr
+            ctx.font = fontStr
+            ctx.fillStyle = style?.color || '#333'
+            ctx.fillText(String(value).substring(0, 10), x + 4, y + 16)
+          }
+          
+          cellsRendered++
+        }
+      }
+      
+      return cellsRendered
+    }
+
+    window.test7Basic = async function() {
+      const resultDiv = document.getElementById('result7')
+      resultDiv.innerHTML = '⏳ 基础渲染测试中...'
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const totalRows = 100, totalCols = 50
+      
+      // 填充数据
+      for (let r = 0; r < totalRows; r++) {
+        for (let c = 0; c < totalCols; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      const sizes = { colWidths: new Map(), rowHeights: new Map(), hiddenCols: new Set(), hiddenRows: new Set() }
+      const viewport = { scrollLeft: 0, scrollTop: 0 }
+      
+      const iterations = 30
+      const times = []
+      let cellsRendered = 0
+      
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now()
+        cellsRendered = renderCells(testCtx, model, viewport, sizes, totalRows, totalCols)
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const fps = 1000 / avgTime
+      const cellRate = Math.round(cellsRendered / (avgTime / 1000))
+      
+      const result = `
+✅ <strong>基础渲染测试完成</strong>
+
+<strong>测试规模：</strong>${totalRows * totalCols} 单元格 (${totalRows}x${totalCols})
+
+<strong>渲染性能：</strong>
+  - 平均帧时间: <span class="metric ${getMetricClass(avgTime, { fast: 16, medium: 33 })}">${avgTime.toFixed(2)} ms</span>
+  - 帧率: <span class="metric ${fps > 30 ? 'fast' : fps > 15 ? 'medium' : 'slow'}">${fps.toFixed(1)} FPS</span>
+  - 渲染速率: <span class="metric">${cellRate.toLocaleString()} 单元格/秒</span>
+  - 可见单元格: ${cellsRendered}
+
+<strong>性能评估：</strong>
+  ${fps > 60 ? '🚀 优秀 - 远超 60 FPS' : 
+    fps > 30 ? '✅ 良好 - 流畅渲染' : 
+    fps > 15 ? '⚠️ 一般 - 可能有轻微卡顿' : 
+    '❌ 较差 - 需要优化渲染'}
+`
+      displayResult('result7', result)
+      
+      testResults.push({
+        name: '基础渲染',
+        time: avgTime * iterations,
+        avgTime: avgTime,
+        status: fps > 30 ? 'success' : 'warning'
+      })
+      
+      return { avgTime, fps, cellsRendered }
+    }
+
+    window.test7Scroll = async function() {
+      const resultDiv = document.getElementById('result7')
+      resultDiv.innerHTML = '⏳ 滚动渲染测试中...'
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const totalRows = 500, totalCols = 100
+      
+      // 填充大量数据
+      for (let r = 0; r < totalRows; r++) {
+        for (let c = 0; c < totalCols; c++) {
+          model.setValue(r, c, (Math.random() * 1000).toFixed(2))
+        }
+      }
+      
+      const sizes = { colWidths: new Map(), rowHeights: new Map(), hiddenCols: new Set(), hiddenRows: new Set() }
+      
+      // 生成随机滚动位置
+      const scrollPositions = []
+      for (let i = 0; i < 50; i++) {
+        scrollPositions.push({
+          scrollLeft: Math.random() * 5000,
+          scrollTop: Math.random() * 10000
+        })
+      }
+      
+      const times = []
+      
+      for (const viewport of scrollPositions) {
+        const start = performance.now()
+        renderCells(testCtx, model, viewport, sizes, totalRows, totalCols)
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const fps = 1000 / avgTime
+      
+      const result = `
+✅ <strong>滚动渲染测试完成</strong>
+
+<strong>测试规模：</strong>${totalRows * totalCols} 单元格数据, 50 次随机滚动
+
+<strong>渲染性能：</strong>
+  - 平均帧时间: <span class="metric ${getMetricClass(avgTime, { fast: 16, medium: 33 })}">${avgTime.toFixed(2)} ms</span>
+  - 帧率: <span class="metric ${fps > 30 ? 'fast' : fps > 15 ? 'medium' : 'slow'}">${fps.toFixed(1)} FPS</span>
+
+<strong>性能评估：</strong>
+  ${fps > 60 ? '🚀 优秀 - 滚动极其流畅' : 
+    fps > 30 ? '✅ 良好 - 滚动流畅' : 
+    fps > 15 ? '⚠️ 一般 - 滚动可能卡顿' : 
+    '❌ 较差 - 滚动明显卡顿'}
+`
+      displayResult('result7', result)
+      
+      testResults.push({
+        name: '滚动渲染',
+        time: times.reduce((a, b) => a + b, 0),
+        avgTime: avgTime,
+        status: fps > 30 ? 'success' : 'warning'
+      })
+      
+      return { avgTime, fps }
+    }
+
+    window.test7Styled = async function() {
+      const resultDiv = document.getElementById('result7')
+      resultDiv.innerHTML = '⏳ 样式渲染测试中...'
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      const totalRows = 50, totalCols = 30
+      
+      const styles = [
+        { bgColor: '#ffcccc' },
+        { bgColor: '#ccffcc' },
+        { bgColor: '#ccccff' },
+        { fontWeight: 'bold' },
+        { fontStyle: 'italic' },
+        { bgColor: '#fff3cd', fontWeight: 'bold' }
+      ]
+      
+      // 填充数据和样式
+      for (let r = 0; r < totalRows; r++) {
+        for (let c = 0; c < totalCols; c++) {
+          model.setValue(r, c, `${r}-${c}`)
+          model.setCellStyle(r, c, styles[Math.floor(Math.random() * styles.length)])
+        }
+      }
+      
+      const sizes = { colWidths: new Map(), rowHeights: new Map(), hiddenCols: new Set(), hiddenRows: new Set() }
+      const viewport = { scrollLeft: 0, scrollTop: 0 }
+      
+      const iterations = 30
+      const times = []
+      
+      for (let i = 0; i < iterations; i++) {
+        const start = performance.now()
+        renderCells(testCtx, model, viewport, sizes, totalRows, totalCols)
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const fps = 1000 / avgTime
+      
+      const result = `
+✅ <strong>样式渲染测试完成</strong>
+
+<strong>测试规模：</strong>${totalRows * totalCols} 单元格 (含背景色、字体样式)
+
+<strong>渲染性能：</strong>
+  - 平均帧时间: <span class="metric ${getMetricClass(avgTime, { fast: 16, medium: 33 })}">${avgTime.toFixed(2)} ms</span>
+  - 帧率: <span class="metric ${fps > 30 ? 'fast' : fps > 15 ? 'medium' : 'slow'}">${fps.toFixed(1)} FPS</span>
+
+<strong>性能评估：</strong>
+  ${fps > 60 ? '🚀 优秀 - 样式渲染无压力' : 
+    fps > 30 ? '✅ 良好 - 样式渲染流畅' : 
+    fps > 15 ? '⚠️ 一般 - 复杂样式可能影响性能' : 
+    '❌ 较差 - 样式渲染需要优化'}
+`
+      displayResult('result7', result)
+      
+      testResults.push({
+        name: '样式渲染',
+        time: times.reduce((a, b) => a + b, 0),
+        avgTime: avgTime,
+        status: fps > 30 ? 'success' : 'warning'
+      })
+      
+      return { avgTime, fps }
+    }
+
+    window.test7All = async function() {
+      await test7Basic()
+      await new Promise(r => setTimeout(r, 200))
+      await test7Scroll()
+      await new Promise(r => setTimeout(r, 200))
+      await test7Styled()
+    }
+
     // 运行所有测试
     window.runAllTests = async function() {
       testResults.length = 0
@@ -873,7 +1163,8 @@ ${insertCount >= 1000 ? '<strong>⚠️ 注意：</strong>大规模列插入是�
         () => test3(20, 20),
         () => test4(500),
         () => test5(),
-        () => test6()
+        () => test6(),
+        () => test7Basic()
       ]
 
       for (let i = 0; i < tests.length; i++) {
@@ -914,9 +1205,11 @@ ${insertCount >= 1000 ? '<strong>⚠️ 注意：</strong>大规模列插入是�
     }
 
     window.clearResults = function() {
-      for (let i = 1; i <= 6; i++) {
-        document.getElementById(`result${i}`).innerHTML = ''
+      for (let i = 1; i <= 7; i++) {
+        const el = document.getElementById(`result${i}`)
+        if (el) el.innerHTML = ''
       }
+      document.getElementById('result2b').innerHTML = ''
       document.getElementById('summary').style.display = 'none'
       document.getElementById('globalProgressBar').style.width = '0%'
       testResults.length = 0

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>异步操作性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #a18cd1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #8b5cf6; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(161, 140, 209, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    .timeline { display: flex; height: 30px; margin: 16px 0; border-radius: 4px; overflow: hidden; }
+    .timeline-segment { display: flex; align-items: center; justify-content: center; color: white; font-size: 0.7rem; font-weight: 600; }
+    .timeline-segment.work { background: #a18cd1; }
+    .timeline-segment.idle { background: #e5e7eb; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>⚡ 异步操作性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>异步操作性能测试</h2>
+      <p>测试大数据操作的分片执行、主线程占用、批处理效率等异步相关性能。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricChunkTime">--</div>
+          <div class="label">分片耗时</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricBatchSize">--</div>
+          <div class="label">批处理大小</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricThroughput">--</div>
+          <div class="label">吞吐量/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricBlockTime">--</div>
+          <div class="label">主线程阻塞</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 分片数据加载 -->
+    <div class="test-section">
+      <h3>📦 测试 1: 分片数据加载</h3>
+      <p class="desc">测试大数据分片加载，避免阻塞主线程</p>
+      <div class="controls">
+        <button onclick="testChunkedLoad(10000)">10,000 单元格</button>
+        <button onclick="testChunkedLoad(50000)">50,000 单元格</button>
+        <button onclick="testChunkedLoad(100000)">100,000 单元格</button>
+      </div>
+      <div class="timeline" id="loadTimeline"></div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 批处理效率 -->
+    <div class="test-section">
+      <h3>📊 测试 2: 批处理效率对比</h3>
+      <p class="desc">对比不同批处理大小的性能差异</p>
+      <div class="controls">
+        <button onclick="testBatchEfficiency()">运行批处理对比</button>
+      </div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 主线程阻塞检测 -->
+    <div class="test-section">
+      <h3>⏱️ 测试 3: 主线程阻塞检测</h3>
+      <p class="desc">检测大量操作对主线程的影响</p>
+      <div class="controls">
+        <button onclick="testMainThreadBlock(5000)">5,000 操作</button>
+        <button onclick="testMainThreadBlock(20000)">20,000 操作</button>
+        <button onclick="testMainThreadBlock(50000)">50,000 操作</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 任务分片执行 -->
+    <div class="test-section">
+      <h3>✂️ 测试 4: 任务分片执行对比</h3>
+      <p class="desc">对比同步执行与分片执行的用户体验</p>
+      <div class="controls">
+        <button onclick="testTaskSlicing('sync')">同步执行</button>
+        <button onclick="testTaskSlicing('chunked')">分片执行</button>
+        <button onclick="testTaskSlicing('compare')">对比测试</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 公式批量计算 -->
+    <div class="test-section">
+      <h3>📐 测试 5: 公式批量计算</h3>
+      <p class="desc">测试大量公式的批量计算性能</p>
+      <div class="controls">
+        <button onclick="testFormulasBatch(100)">100 公式</button>
+        <button onclick="testFormulasBatch(500)">500 公式</button>
+        <button onclick="testFormulasBatch(1000)">1,000 公式</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
+    
+    function formatTime(ms) {
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 分片数据加载
+    window.testChunkedLoad = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      const timeline = document.getElementById('loadTimeline')
+      
+      resultDiv.innerHTML = '⏳ 测试分片加载...'
+      timeline.innerHTML = ''
+      
+      const model = new SheetModel()
+      const chunkSize = 1000
+      const chunks = Math.ceil(count / chunkSize)
+      
+      const chunkTimes = []
+      const startTime = performance.now()
+      
+      for (let chunk = 0; chunk < chunks; chunk++) {
+        const chunkStart = performance.now()
+        
+        const startIdx = chunk * chunkSize
+        const endIdx = Math.min(startIdx + chunkSize, count)
+        
+        for (let i = startIdx; i < endIdx; i++) {
+          model.setValue(Math.floor(i / 100), i % 100, `V-${i}`)
+        }
+        
+        chunkTimes.push(performance.now() - chunkStart)
+        
+        // 让出主线程
+        await new Promise(r => setTimeout(r, 0))
+      }
+      
+      const totalTime = performance.now() - startTime
+      const avgChunkTime = chunkTimes.reduce((a, b) => a + b, 0) / chunkTimes.length
+      const throughput = Math.round(count / (totalTime / 1000))
+      
+      document.getElementById('metricChunkTime').textContent = formatTime(avgChunkTime)
+      document.getElementById('metricBatchSize').textContent = chunkSize
+      document.getElementById('metricThroughput').textContent = throughput.toLocaleString()
+      
+      // 更新时间线
+      const maxChunkTime = Math.max(...chunkTimes)
+      timeline.innerHTML = chunkTimes.slice(0, 20).map((t, i) => {
+        const width = Math.max(2, (t / maxChunkTime) * 100 / 20)
+        return `<div class="timeline-segment work" style="width: ${width}%" title="分片 ${i + 1}: ${formatTime(t)}"></div>`
+      }).join('')
+      
+      resultDiv.innerHTML = `
+✅ 分片数据加载测试完成 (真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 单元格
+📊 分片大小: ${chunkSize} 单元格/分片
+📊 分片数量: ${chunks}
+
+⏱️ 性能数据:
+  • 总加载时间: <span class="badge ${getSpeedClass(totalTime, {fast: 500, medium: 2000})}">${formatTime(totalTime)}</span>
+  • 平均分片耗时: <span class="badge ${getSpeedClass(avgChunkTime, {fast: 10, medium: 50})}">${formatTime(avgChunkTime)}</span>
+  • 吞吐量: <span class="badge fast">${throughput.toLocaleString()} 单元格/秒</span>
+
+📈 性能评估:
+  ${avgChunkTime < 16 ? '🚀 优秀 - 每个分片都在单帧内完成' : 
+    avgChunkTime < 50 ? '✅ 良好 - 分片执行流畅' : 
+    '⚠️ 需优化 - 分片过大，考虑减小分片大小'}
+
+💡 说明:
+  • 分片加载避免长时间阻塞主线程
+  • 每个分片后让出执行权，保持 UI 响应
+`
+    }
+    
+    // 测试 2: 批处理效率对比
+    window.testBatchEfficiency = async function() {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 运行批处理效率对比...'
+      
+      const totalCount = 20000
+      const batchSizes = [100, 500, 1000, 2000, 5000]
+      const results = {}
+      
+      for (const batchSize of batchSizes) {
+        const model = new SheetModel()
+        const batches = Math.ceil(totalCount / batchSize)
+        
+        const start = performance.now()
+        
+        for (let batch = 0; batch < batches; batch++) {
+          const startIdx = batch * batchSize
+          const endIdx = Math.min(startIdx + batchSize, totalCount)
+          
+          for (let i = startIdx; i < endIdx; i++) {
+            model.setValue(Math.floor(i / 100), i % 100, `B-${i}`)
+          }
+          
+          await new Promise(r => setTimeout(r, 0))
+        }
+        
+        results[batchSize] = performance.now() - start
+      }
+      
+      const bestBatchSize = Object.entries(results).reduce((best, [size, time]) => 
+        time < best[1] ? [size, time] : best, ['0', Infinity])[0]
+      
+      resultDiv.innerHTML = `
+✅ 批处理效率对比完成 (真实 SheetModel)
+
+📊 测试规模: ${totalCount.toLocaleString()} 单元格
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">批大小</th><th>总耗时</th><th>吞吐量</th><th>评价</th></tr>
+${batchSizes.map(size => {
+  const time = results[size]
+  const throughput = Math.round(totalCount / (time / 1000))
+  const isBest = size == bestBatchSize
+  return `<tr>
+  <td style="padding: 10px;">${size.toLocaleString()}</td>
+  <td><span class="badge ${getSpeedClass(time, {fast: 500, medium: 1000})}">${formatTime(time)}</span></td>
+  <td>${throughput.toLocaleString()}/秒</td>
+  <td>${isBest ? '⭐ 最佳' : ''}</td>
+</tr>`
+}).join('')}
+</table>
+
+📈 分析:
+  • 最佳批大小: ${bestBatchSize} 单元格
+  • 批大小过小会增加调度开销
+  • 批大小过大会阻塞主线程
+  • 推荐批大小: 500-2000 单元格
+`
+    }
+    
+    // 测试 3: 主线程阻塞检测
+    window.testMainThreadBlock = async function(count) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 检测主线程阻塞...'
+      
+      // 启动帧率监控
+      let frameCount = 0
+      let monitoring = true
+      const startTime = performance.now()
+      
+      const countFrames = () => {
+        if (!monitoring) return
+        frameCount++
+        requestAnimationFrame(countFrames)
+      }
+      requestAnimationFrame(countFrames)
+      
+      await new Promise(r => setTimeout(r, 50))
+      
+      const model = new SheetModel()
+      
+      // 执行阻塞操作
+      const blockStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.setValue(Math.floor(i / 100), i % 100, `Block-${i}`)
+      }
+      const blockTime = performance.now() - blockStart
+      
+      await new Promise(r => setTimeout(r, 50))
+      monitoring = false
+      
+      const totalTime = performance.now() - startTime
+      const expectedFrames = Math.round(totalTime / 16.67)
+      const droppedFrames = Math.max(0, expectedFrames - frameCount)
+      
+      document.getElementById('metricBlockTime').textContent = formatTime(blockTime)
+      
+      resultDiv.innerHTML = `
+✅ 主线程阻塞检测完成 (真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次操作
+
+⏱️ 阻塞数据:
+  • 操作总时间: <span class="badge ${getSpeedClass(blockTime, {fast: 50, medium: 200})}">${formatTime(blockTime)}</span>
+  • 监控时长: ${formatTime(totalTime)}
+
+📈 帧率影响:
+  • 实际帧数: ${frameCount}
+  • 预期帧数: ${expectedFrames}
+  • 丢帧数: <span class="badge ${droppedFrames < 3 ? 'fast' : droppedFrames < 10 ? 'medium' : 'slow'}">${droppedFrames}</span>
+
+⚠️ 阻塞影响:
+  ${blockTime < 16 ? '✅ 无感知 - 操作在单帧内完成' :
+    blockTime < 50 ? '✅ 轻微 - 可能有轻微卡顿' :
+    blockTime < 200 ? '⚠️ 中等 - 用户可感知到延迟' :
+    '❌ 严重 - 明显卡顿，建议分片执行'}
+
+💡 建议:
+  ${blockTime > 50 ? '• 操作超过 50ms，建议使用分片加载' : '• 当前操作量主线程可以流畅处理'}
+`
+    }
+    
+    // 测试 4: 任务分片执行对比
+    window.testTaskSlicing = async function(mode) {
+      const resultDiv = document.getElementById('result4')
+      const count = 30000
+      
+      if (mode === 'compare') {
+        resultDiv.innerHTML = '⏳ 对比测试中...'
+        
+        const results = {}
+        
+        // 同步执行
+        let syncFrameDrops = 0
+        let syncLastFrame = performance.now()
+        let syncMonitoring = true
+        
+        const syncMonitor = () => {
+          if (!syncMonitoring) return
+          const now = performance.now()
+          if (now - syncLastFrame > 20) syncFrameDrops++
+          syncLastFrame = now
+          requestAnimationFrame(syncMonitor)
+        }
+        requestAnimationFrame(syncMonitor)
+        
+        const syncModel = new SheetModel()
+        const syncStart = performance.now()
+        for (let i = 0; i < count; i++) {
+          syncModel.setValue(Math.floor(i / 100), i % 100, `S-${i}`)
+        }
+        results.sync = { time: performance.now() - syncStart }
+        
+        await new Promise(r => setTimeout(r, 100))
+        syncMonitoring = false
+        results.sync.frameDrops = syncFrameDrops
+        
+        // 分片执行
+        let chunkFrameDrops = 0
+        let chunkLastFrame = performance.now()
+        let chunkMonitoring = true
+        
+        const chunkMonitor = () => {
+          if (!chunkMonitoring) return
+          const now = performance.now()
+          if (now - chunkLastFrame > 20) chunkFrameDrops++
+          chunkLastFrame = now
+          requestAnimationFrame(chunkMonitor)
+        }
+        requestAnimationFrame(chunkMonitor)
+        
+        const chunkModel = new SheetModel()
+        const chunkSize = 1000
+        const chunkStart = performance.now()
+        
+        for (let i = 0; i < count; i += chunkSize) {
+          const end = Math.min(i + chunkSize, count)
+          for (let j = i; j < end; j++) {
+            chunkModel.setValue(Math.floor(j / 100), j % 100, `C-${j}`)
+          }
+          await new Promise(r => setTimeout(r, 0))
+        }
+        
+        results.chunked = { time: performance.now() - chunkStart }
+        
+        await new Promise(r => setTimeout(r, 100))
+        chunkMonitoring = false
+        results.chunked.frameDrops = chunkFrameDrops
+        
+        resultDiv.innerHTML = `
+✅ 任务分片执行对比完成 (真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 单元格
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">执行方式</th><th>总耗时</th><th>丢帧数</th><th>用户体验</th></tr>
+<tr>
+  <td style="padding: 10px;">同步执行</td>
+  <td><span class="badge fast">${formatTime(results.sync.time)}</span></td>
+  <td><span class="badge ${results.sync.frameDrops < 3 ? 'fast' : 'slow'}">${results.sync.frameDrops}</span></td>
+  <td>${results.sync.frameDrops > 3 ? '⚠️ 可能卡顿' : '✅ 流畅'}</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">分片执行 (1000/片)</td>
+  <td><span class="badge medium">${formatTime(results.chunked.time)}</span></td>
+  <td><span class="badge fast">${results.chunked.frameDrops}</span></td>
+  <td>✅ 流畅</td>
+</tr>
+</table>
+
+📈 分析:
+  • 同步执行更快，但可能导致 UI 卡顿
+  • 分片执行稍慢，但保持 UI 响应
+  • 时间差异: ${formatTime(results.chunked.time - results.sync.time)}
+
+💡 建议:
+  • 小数据量 (<5000) 可同步执行
+  • 大数据量建议分片执行
+`
+      } else {
+        const model = new SheetModel()
+        const isSync = mode === 'sync'
+        
+        resultDiv.innerHTML = `⏳ 测试 ${isSync ? '同步' : '分片'} 执行...`
+        
+        const start = performance.now()
+        
+        if (isSync) {
+          for (let i = 0; i < count; i++) {
+            model.setValue(Math.floor(i / 100), i % 100, `${mode}-${i}`)
+          }
+        } else {
+          const chunkSize = 1000
+          for (let i = 0; i < count; i += chunkSize) {
+            const end = Math.min(i + chunkSize, count)
+            for (let j = i; j < end; j++) {
+              model.setValue(Math.floor(j / 100), j % 100, `${mode}-${j}`)
+            }
+            await new Promise(r => setTimeout(r, 0))
+          }
+        }
+        
+        const time = performance.now() - start
+        
+        resultDiv.innerHTML = `
+✅ ${isSync ? '同步' : '分片'}执行测试完成
+
+📊 执行时间: <span class="badge">${formatTime(time)}</span>
+  • 吞吐量: ${Math.round(count / (time / 1000)).toLocaleString()} 单元格/秒
+`
+      }
+    }
+    
+    // 测试 5: 公式批量计算
+    window.testFormulasBatch = async function(count) {
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 创建公式...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const sheet = new FormulaSheet(model)
+      
+      // 填充基础数据
+      for (let r = 0; r < 100; r++) {
+        for (let c = 0; c < 10; c++) {
+          model.setValue(r, c, r * 10 + c + 1)
+        }
+      }
+      
+      // 创建公式
+      const formulas = [
+        '=SUM(A1:J1)',
+        '=AVERAGE(A1:E1)',
+        '=A1+B1+C1',
+        '=MAX(A1:J1)',
+      ]
+      
+      for (let i = 0; i < count; i++) {
+        const r = Math.floor(i / 50) + 100
+        const c = i % 50
+        sheet.setValue(r, c, formulas[i % formulas.length])
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试批量计算...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 测试批量获取值（触发计算）
+      const iterations = 5
+      const times = []
+      
+      for (let iter = 0; iter < iterations; iter++) {
+        const start = performance.now()
+        
+        for (let i = 0; i < count; i++) {
+          const r = Math.floor(i / 50) + 100
+          const c = i % 50
+          sheet.getValue(r, c)
+        }
+        
+        times.push(performance.now() - start)
+      }
+      
+      const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+      const calcRate = Math.round(count / (avgTime / 1000))
+      
+      resultDiv.innerHTML = `
+✅ 公式批量计算测试完成 (真实 FormulaSheet)
+
+📊 测试规模: ${count} 个公式
+
+⏱️ 计算性能:
+  • 平均批量计算时间: <span class="badge ${getSpeedClass(avgTime, {fast: 50, medium: 200})}">${formatTime(avgTime)}</span>
+  • 每公式平均耗时: ${formatTime(avgTime / count)}
+  • 计算速率: <span class="badge fast">${calcRate.toLocaleString()} 公式/秒</span>
+
+📈 性能评估:
+  ${avgTime / count < 0.1 ? '🚀 优秀 - 公式计算极快' : 
+    avgTime / count < 1 ? '✅ 良好 - 公式计算正常' : 
+    '⚠️ 需优化 - 公式计算较慢'}
+
+💡 说明:
+  • FormulaSheet 内置公式缓存机制
+  • 第一次计算后结果会被缓存
+  • 源数据变化时缓存自动失效
+`
+    }
+  </script>
+</body>
+</html>

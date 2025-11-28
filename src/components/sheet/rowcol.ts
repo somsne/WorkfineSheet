@@ -3,6 +3,8 @@
  * 负责行列的插入、删除和尺寸设置
  */
 
+import type { CellStyle, CellBorder } from './types'
+
 /**
  * 公式表接口（适配器模式）
  */
@@ -12,6 +14,16 @@ export interface FormulaSheetAdapter {
     forEach(callback: (row: number, col: number, cell: any) => void): void
     getCell(row: number, col: number): any
     setValue(row: number, col: number, value: string): void
+    // 样式相关
+    getCellStyle(row: number, col: number): CellStyle
+    setCellStyle(row: number, col: number, style: Partial<CellStyle>): void
+    hasCellStyle(row: number, col: number): boolean
+    clearCellStyle(row: number, col: number): void
+    // 边框相关
+    getCellBorder(row: number, col: number): CellBorder | undefined
+    setCellBorder(row: number, col: number, border: Partial<CellBorder>): void
+    hasCellBorder(row: number, col: number): boolean
+    clearCellBorder(row: number, col: number): void
   }
 }
 
@@ -81,7 +93,37 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
     model.setValue(r + 1, c, value)  // 设置到新位置
   })
   
-  // 步骤4: 移动自定义行高
+  // 步骤4: 移动样式 - 收集所有需要移动的样式
+  const stylesToMove: Array<{ row: number; col: number; style: CellStyle }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = sizeConfig.totalRows - 1; r >= row; r--) {
+      if (model.hasCellStyle(r, c)) {
+        stylesToMove.push({ row: r, col: c, style: model.getCellStyle(r, c) })
+        model.clearCellStyle(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  stylesToMove.forEach(({ row: r, col: c, style }) => {
+    model.setCellStyle(r + 1, c, style)
+  })
+  
+  // 步骤5: 移动边框 - 收集所有需要移动的边框
+  const bordersToMove: Array<{ row: number; col: number; border: CellBorder }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = sizeConfig.totalRows - 1; r >= row; r--) {
+      if (model.hasCellBorder(r, c)) {
+        bordersToMove.push({ row: r, col: c, border: model.getCellBorder(r, c)! })
+        model.clearCellBorder(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  bordersToMove.forEach(({ row: r, col: c, border }) => {
+    model.setCellBorder(r + 1, c, border)
+  })
+  
+  // 步骤6: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   sizeConfig.rowHeights.forEach((height: number, r: number) => {
     if (r >= row) {
@@ -148,7 +190,45 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
     model.setValue(r - 1, c, value)  // 设置到新位置
   })
   
-  // 步骤5: 移动自定义行高
+  // 步骤5: 移动样式
+  // 先清除被删除行的样式
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    model.clearCellStyle(row, c)
+  }
+  // 收集并移动需要上移的样式
+  const stylesToMove: Array<{ row: number; col: number; style: CellStyle }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = row + 1; r < sizeConfig.totalRows; r++) {
+      if (model.hasCellStyle(r, c)) {
+        stylesToMove.push({ row: r, col: c, style: model.getCellStyle(r, c) })
+        model.clearCellStyle(r, c)
+      }
+    }
+  }
+  stylesToMove.forEach(({ row: r, col: c, style }) => {
+    model.setCellStyle(r - 1, c, style)
+  })
+  
+  // 步骤6: 移动边框
+  // 先清除被删除行的边框
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    model.clearCellBorder(row, c)
+  }
+  // 收集并移动需要上移的边框
+  const bordersToMove: Array<{ row: number; col: number; border: CellBorder }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = row + 1; r < sizeConfig.totalRows; r++) {
+      if (model.hasCellBorder(r, c)) {
+        bordersToMove.push({ row: r, col: c, border: model.getCellBorder(r, c)! })
+        model.clearCellBorder(r, c)
+      }
+    }
+  }
+  bordersToMove.forEach(({ row: r, col: c, border }) => {
+    model.setCellBorder(r - 1, c, border)
+  })
+  
+  // 步骤7: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   sizeConfig.rowHeights.forEach((height: number, r: number) => {
     if (r < row) {
@@ -159,7 +239,7 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
   })
   sizeConfig.rowHeights = newRowHeights
   
-  // 步骤6: 调整选择范围
+  // 步骤8: 调整选择范围
   if (selected.row === row) {
     selected.row = Math.max(0, row - 1)
   } else if (selected.row > row) {
@@ -205,7 +285,37 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
     model.setValue(r, c + 1, value)  // 设置到新位置
   })
   
-  // 步骤4: 移动自定义列宽
+  // 步骤4: 移动样式 - 收集所有需要移动的样式
+  const stylesToMove: Array<{ row: number; col: number; style: CellStyle }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
+      if (model.hasCellStyle(r, c)) {
+        stylesToMove.push({ row: r, col: c, style: model.getCellStyle(r, c) })
+        model.clearCellStyle(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  stylesToMove.forEach(({ row: r, col: c, style }) => {
+    model.setCellStyle(r, c + 1, style)
+  })
+  
+  // 步骤5: 移动边框 - 收集所有需要移动的边框
+  const bordersToMove: Array<{ row: number; col: number; border: CellBorder }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
+      if (model.hasCellBorder(r, c)) {
+        bordersToMove.push({ row: r, col: c, border: model.getCellBorder(r, c)! })
+        model.clearCellBorder(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  bordersToMove.forEach(({ row: r, col: c, border }) => {
+    model.setCellBorder(r, c + 1, border)
+  })
+  
+  // 步骤6: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   sizeConfig.colWidths.forEach((width: number, c: number) => {
     if (c >= col) {
@@ -272,7 +382,45 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
     model.setValue(r, c - 1, value)  // 设置到新位置
   })
   
-  // 步骤5: 移动自定义列宽
+  // 步骤5: 移动样式
+  // 先清除被删除列的样式
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    model.clearCellStyle(r, col)
+  }
+  // 收集并移动需要左移的样式
+  const stylesToMove: Array<{ row: number; col: number; style: CellStyle }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = col + 1; c < sizeConfig.totalCols; c++) {
+      if (model.hasCellStyle(r, c)) {
+        stylesToMove.push({ row: r, col: c, style: model.getCellStyle(r, c) })
+        model.clearCellStyle(r, c)
+      }
+    }
+  }
+  stylesToMove.forEach(({ row: r, col: c, style }) => {
+    model.setCellStyle(r, c - 1, style)
+  })
+  
+  // 步骤6: 移动边框
+  // 先清除被删除列的边框
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    model.clearCellBorder(r, col)
+  }
+  // 收集并移动需要左移的边框
+  const bordersToMove: Array<{ row: number; col: number; border: CellBorder }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = col + 1; c < sizeConfig.totalCols; c++) {
+      if (model.hasCellBorder(r, c)) {
+        bordersToMove.push({ row: r, col: c, border: model.getCellBorder(r, c)! })
+        model.clearCellBorder(r, c)
+      }
+    }
+  }
+  bordersToMove.forEach(({ row: r, col: c, border }) => {
+    model.setCellBorder(r, c - 1, border)
+  })
+  
+  // 步骤7: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   sizeConfig.colWidths.forEach((width: number, c: number) => {
     if (c < col) {
@@ -283,7 +431,7 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
   })
   sizeConfig.colWidths = newColWidths
   
-  // 步骤6: 调整选择范围
+  // 步骤8: 调整选择范围
   if (selected.col === col) {
     selected.col = Math.max(0, col - 1)
   } else if (selected.col > col) {
