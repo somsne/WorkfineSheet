@@ -1,6 +1,6 @@
 import type { FormulaMetadata } from './FormulaMetadata'
-import type { CellStyle, CellBorder, BorderEdge } from '../components/sheet/types'
-import { DEFAULT_CELL_STYLE } from '../components/sheet/types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat } from '../components/sheet/types'
+import { DEFAULT_CELL_STYLE, DEFAULT_CELL_FORMAT } from '../components/sheet/types'
 
 export type CellKey = string
 
@@ -23,6 +23,9 @@ export class SheetModel {
   
   // 边框存储
   private cellBorders: Map<CellKey, CellBorder> = new Map()
+  
+  // 格式存储（独立于样式，用于数据显示格式）
+  private cellFormats: Map<CellKey, CellFormat> = new Map()
 
   getCell(r: number, c: number): Cell | null {
     const k = keyFor(r, c)
@@ -280,5 +283,96 @@ export class SheetModel {
    */
   getBorderedCellCount(): number {
     return this.cellBorders.size
+  }
+
+  // ==================== 格式管理方法 ====================
+
+  /**
+   * 设置单元格格式
+   * @param r 行号
+   * @param c 列号
+   * @param format 要设置的格式
+   */
+  setCellFormat(r: number, c: number, format: CellFormat): void {
+    const k = keyFor(r, c)
+    this.cellFormats.set(k, { ...format })
+  }
+
+  /**
+   * 获取单元格格式
+   * 如果单元格没有设置格式，返回默认格式
+   * @param r 行号
+   * @param c 列号
+   * @returns 单元格格式
+   */
+  getCellFormat(r: number, c: number): CellFormat {
+    const k = keyFor(r, c)
+    return this.cellFormats.get(k) || { ...DEFAULT_CELL_FORMAT }
+  }
+
+  /**
+   * 清除单元格格式
+   * @param r 行号
+   * @param c 列号
+   */
+  clearCellFormat(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cellFormats.delete(k)
+  }
+
+  /**
+   * 批量设置格式（选区）
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @param format 要设置的格式
+   */
+  setRangeFormat(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    format: CellFormat
+  ): void {
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        this.setCellFormat(r, c, format)
+      }
+    }
+  }
+
+  /**
+   * 检查单元格是否有自定义格式
+   * @param r 行号
+   * @param c 列号
+   * @returns 是否有自定义格式
+   */
+  hasCellFormat(r: number, c: number): boolean {
+    const k = keyFor(r, c)
+    return this.cellFormats.has(k)
+  }
+
+  /**
+   * 获取所有有格式的单元格数量
+   * @returns 格式单元格数量
+   */
+  getFormattedCellCount(): number {
+    return this.cellFormats.size
+  }
+
+  /**
+   * 遍历所有有格式的单元格
+   * @param fn 回调函数
+   */
+  forEachFormat(fn: (r: number, c: number, format: CellFormat) => void): void {
+    for (const [k, format] of this.cellFormats.entries()) {
+      const parts = k.split(',')
+      const rs = parts[0]
+      const cs = parts[1]
+      if (rs && cs) {
+        fn(parseInt(rs, 10), parseInt(cs, 10), format)
+      }
+    }
   }
 }

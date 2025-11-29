@@ -191,13 +191,146 @@
     >
       ⊞
     </button>
+
+    <div class="separator"></div>
+
+    <!-- 单元格格式 -->
+    <div class="format-dropdown">
+      <button 
+        @click="toggleFormatMenu" 
+        class="style-btn format-btn" 
+        title="单元格格式"
+      >
+        <span class="format-icon">123</span>
+      </button>
+      <div v-if="showFormatMenu" class="format-menu">
+        <!-- 常规 -->
+        <div class="format-menu-item" @click="applyFormat('general')">
+          <span class="format-type-icon">Aa</span>
+          <span>常规</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('text')">
+          <span class="format-type-icon">T</span>
+          <span>文本</span>
+        </div>
+        <div class="format-menu-divider"></div>
+        
+        <!-- 数字格式 -->
+        <div class="format-menu-section">数字格式</div>
+        <div class="format-menu-item" @click="applyFormat('number')">
+          <span class="format-type-icon">1</span>
+          <span>数字</span>
+          <span class="format-example">1234</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('decimal2')">
+          <span class="format-type-icon">.0</span>
+          <span>两位小数</span>
+          <span class="format-example">1234.50</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('thousands')">
+          <span class="format-type-icon">,</span>
+          <span>千分位</span>
+          <span class="format-example">1,234.56</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('percent')">
+          <span class="format-type-icon">%</span>
+          <span>百分比</span>
+          <span class="format-example">85.60%</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('permille')">
+          <span class="format-type-icon">‰</span>
+          <span>千分率</span>
+          <span class="format-example">35.60‰</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('currencyCNY')">
+          <span class="format-type-icon">¥</span>
+          <span>人民币</span>
+          <span class="format-example">¥1,234.56</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('currencyUSD')">
+          <span class="format-type-icon">$</span>
+          <span>美元</span>
+          <span class="format-example">$1,234.56</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('scientific')">
+          <span class="format-type-icon">E</span>
+          <span>科学计数</span>
+          <span class="format-example">1.23e+7</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('fraction')">
+          <span class="format-type-icon">½</span>
+          <span>分数</span>
+          <span class="format-example">3/4</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('negativeRed')">
+          <span class="format-type-icon" style="color: #dc2626;">-</span>
+          <span>负数红色</span>
+          <span class="format-example" style="color: #dc2626;">-1,234</span>
+        </div>
+        <div class="format-menu-divider"></div>
+        
+        <!-- 日期格式 -->
+        <div class="format-menu-section">日期格式</div>
+        <div class="format-menu-item" @click="applyFormat('date-ymd-pad')">
+          <span class="format-type-icon">📅</span>
+          <span>年-月-日</span>
+          <span class="format-example">2024-03-15</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('date-ymd-cn')">
+          <span class="format-type-icon">日</span>
+          <span>中文日期</span>
+          <span class="format-example">2024年3月15日</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('time-hms')">
+          <span class="format-type-icon">⏰</span>
+          <span>时间</span>
+          <span class="format-example">14:30:45</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('datetime-pad')">
+          <span class="format-type-icon">🕐</span>
+          <span>日期时间</span>
+          <span class="format-example">2024-03-15 14:30</span>
+        </div>
+        <div class="format-menu-divider"></div>
+        
+        <!-- 文本验证 -->
+        <div class="format-menu-section">文本验证</div>
+        <div class="format-menu-item" @click="applyFormat('idCard')">
+          <span class="format-type-icon">🪪</span>
+          <span>身份证</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('phone')">
+          <span class="format-type-icon">📱</span>
+          <span>手机号</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('telephone')">
+          <span class="format-type-icon">☎️</span>
+          <span>固定电话</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('email')">
+          <span class="format-type-icon">✉️</span>
+          <span>邮箱</span>
+        </div>
+        <div class="format-menu-item" @click="applyFormat('hyperlink')">
+          <span class="format-type-icon">🔗</span>
+          <span>超链接</span>
+        </div>
+        <div class="format-menu-divider"></div>
+        
+        <!-- 清除格式 -->
+        <div class="format-menu-item format-clear" @click="clearFormat">
+          <span class="format-type-icon">✕</span>
+          <span>清除格式</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { SheetAPI } from './sheet/api'
-import type { CellStyle, BorderStyle } from './sheet/types'
+import type { CellStyle, BorderStyle, CellFormatType } from './sheet/types'
 
 const props = defineProps<{
   api: SheetAPI
@@ -226,11 +359,14 @@ const borderColor = ref('#000000')
 // 网格线状态
 const showGridLines = ref(true)
 
-// 点击外部关闭边框菜单
+// 点击外部关闭菜单
 const handleClickOutside = (e: MouseEvent) => {
   const target = e.target as HTMLElement
   if (!target.closest('.border-dropdown')) {
     showBorderMenu.value = false
+  }
+  if (!target.closest('.format-dropdown')) {
+    showFormatMenu.value = false
   }
 }
 
@@ -468,6 +604,43 @@ function clearBorders() {
 function toggleGridLines() {
   showGridLines.value = !showGridLines.value
   props.api.setShowGridLines(showGridLines.value)
+}
+
+// 单元格格式功能
+const showFormatMenu = ref(false)
+
+function toggleFormatMenu() {
+  showFormatMenu.value = !showFormatMenu.value
+  // 关闭其他菜单
+  showBorderMenu.value = false
+}
+
+function applyFormat(formatType: CellFormatType) {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  // 应用格式到选区
+  props.api.setRangeFormat(
+    range.startRow,
+    range.startCol,
+    range.endRow,
+    range.endCol,
+    { type: formatType }
+  )
+  showFormatMenu.value = false
+}
+
+function clearFormat() {
+  const range = getSelectionRange()
+  if (range.startRow < 0 || range.startCol < 0) return
+  
+  // 清除选区内所有单元格的格式
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      props.api.clearCellFormat(row, col)
+    }
+  }
+  showFormatMenu.value = false
 }
 
 // 初始化网格线状态
@@ -715,6 +888,85 @@ onMounted(() => {
   cursor: pointer;
 }
 
+/* 格式下拉菜单 */
+.format-dropdown {
+  position: relative;
+}
+
+.format-btn {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.format-icon {
+  font-size: 11px;
+  letter-spacing: -1px;
+}
+
+.format-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--menu-bg, white);
+  border: 1px solid var(--menu-border, #d0d0d0);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 240px;
+  max-height: 450px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.format-menu-section {
+  padding: 8px 12px 4px 12px;
+  font-size: 11px;
+  color: var(--label-text, #888);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.format-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  color: var(--menu-text, #333);
+  user-select: none;
+}
+
+.format-menu-item:hover {
+  background: var(--menu-hover, #f0f0f0);
+}
+
+.format-menu-item.format-clear {
+  color: var(--error-color, #dc2626);
+}
+
+.format-type-icon {
+  font-size: 14px;
+  width: 24px;
+  text-align: center;
+  color: var(--icon-color, #666);
+}
+
+.format-example {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--hint-color, #999);
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+}
+
+.format-menu-divider {
+  height: 1px;
+  background: var(--menu-border, #e0e0e0);
+  margin: 6px 0;
+}
+
 /* 夜间模式 */
 @media (prefers-color-scheme: dark) {
   .style-toolbar {
@@ -739,6 +991,17 @@ onMounted(() => {
     --menu-hover: #3a3a3a;
     --icon-color: #b0b0b0;
     --label-text: #b0b0b0;
+  }
+
+  .format-menu {
+    --menu-bg: #2d2d2d;
+    --menu-border: #505050;
+    --menu-text: #e0e0e0;
+    --menu-hover: #3a3a3a;
+    --icon-color: #b0b0b0;
+    --label-text: #b0b0b0;
+    --hint-color: #888;
+    --error-color: #ef4444;
   }
 }
 </style>

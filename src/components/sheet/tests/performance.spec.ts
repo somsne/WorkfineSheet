@@ -4,6 +4,12 @@ import { drawCells } from '../renderCells'
 import type { CellsRenderConfig } from '../renderCells'
 import type { CellStyle } from '../types'
 
+// 检测 CI 环境
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true'
+
+// CI 环境使用更宽松的阈值（性能不稳定）
+const PERF_MULTIPLIER = isCI ? 5 : 1
+
 // Mock Canvas context for performance testing
 function createMockContext() {
   return {
@@ -57,7 +63,7 @@ describe('样式功能性能测试', () => {
       
       const elapsed = performance.now() - start
       
-      expect(elapsed).toBeLessThan(50)
+      expect(elapsed).toBeLessThan(50 * PERF_MULTIPLIER)
       expect(model.getStyledCellCount()).toBe(1024)
     })
 
@@ -97,7 +103,7 @@ describe('样式功能性能测试', () => {
       }
       
       const elapsed = performance.now() - start
-      expect(elapsed).toBeLessThan(50) // 放宽到 50ms，CI 环境性能波动较大
+      expect(elapsed).toBeLessThan(50 * PERF_MULTIPLIER)
     })
 
     it('混合查询（有样式和无样式）应该快速', () => {
@@ -113,7 +119,7 @@ describe('样式功能性能测试', () => {
       }
       
       const elapsed = performance.now() - start
-      expect(elapsed).toBeLessThan(10)
+      expect(elapsed).toBeLessThan(10 * PERF_MULTIPLIER)
     })
   })
 
@@ -171,7 +177,7 @@ describe('样式功能性能测试', () => {
       drawCells(ctx, config)
       const elapsed = performance.now() - start
 
-      expect(elapsed).toBeLessThan(100)
+      expect(elapsed).toBeLessThan(100 * PERF_MULTIPLIER)
     })
 
     it('只渲染可见区域应该更快', () => {
@@ -245,7 +251,7 @@ describe('样式功能性能测试', () => {
       
       const count2 = model.getStyledCellCount()
       expect(count2).toBe(0)
-      expect(elapsed).toBeLessThan(20)
+      expect(elapsed).toBeLessThan(20 * PERF_MULTIPLIER)
     })
 
     it('重复设置相同样式不应该导致性能下降', () => {
@@ -278,7 +284,7 @@ describe('样式功能性能测试', () => {
       
       const elapsed = performance.now() - start
       
-      expect(elapsed).toBeLessThan(200) // 10000 个单元格应该在 200ms 内
+      expect(elapsed).toBeLessThan(200 * PERF_MULTIPLIER)
       expect(model.getStyledCellCount()).toBe(10000)
     })
 
@@ -308,7 +314,7 @@ describe('样式功能性能测试', () => {
       
       const elapsed = performance.now() - start
       
-      expect(elapsed).toBeLessThan(100)
+      expect(elapsed).toBeLessThan(100 * PERF_MULTIPLIER)
     })
 
     it('稀疏样式分布查询性能', () => {
@@ -330,7 +336,7 @@ describe('样式功能性能测试', () => {
       
       const elapsed = performance.now() - start
       
-      expect(elapsed).toBeLessThan(10)
+      expect(elapsed).toBeLessThan(10 * PERF_MULTIPLIER)
     })
   })
 
@@ -355,8 +361,8 @@ describe('样式功能性能测试', () => {
       // 计算平均时间
       const avgTime = timings.reduce((a, b) => a + b, 0) / timings.length
       
-      // 每次操作应该在 1ms 内
-      expect(avgTime).toBeLessThan(1)
+      // 每次操作应该在 1ms 内（CI 环境放宽）
+      expect(avgTime).toBeLessThan(1 * PERF_MULTIPLIER)
       
       // 时间应该保持稳定（最后 10 次不应该比前 10 次慢太多）
       const first10Avg = timings.slice(0, 10).reduce((a, b) => a + b, 0) / 10

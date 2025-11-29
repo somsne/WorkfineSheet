@@ -210,3 +210,210 @@ export const DEFAULT_BORDER_EDGE: Required<BorderEdge> = {
   color: '#000000',
   width: 1
 }
+
+// ==================== 单元格格式 ====================
+
+/**
+ * 格式类型枚举
+ * 
+ * 文本类 (text)
+ * - general: 常规（默认）
+ * - text: 文本（保留前导零）
+ * - idCard: 身份证（中国18位校验）
+ * - email: 邮箱
+ * - phone: 手机号码（中国格式，支持+86）
+ * - telephone: 电话号码（中国本土格式化：区号-号码）
+ * - hyperlink: 超链接
+ * 
+ * 数值类 (number)
+ * - number: 整数 1234
+ * - decimal2: 两位小数 1234.12
+ * - percent: 百分比 12.34%
+ * - permille: 千分比 12.34‰
+ * - currencyCNY: 人民币 ¥1,234.12
+ * - currencyUSD: 美元 $1,234.12
+ * - thousands: 千分位 1,234.12
+ * - scientific: 科学计数法 1.23E+03
+ * - fraction: 分数 1/2
+ * - negativeRed: 负数红色显示
+ * 
+ * 日期时间类 (date) - 32种格式
+ * 
+ * 自定义 (custom)
+ * - Excel 格式字符串，如 "#,##0.00"
+ */
+export type CellFormatType =
+  // 文本类
+  | 'general'      // 常规（默认）
+  | 'text'         // 文本
+  | 'idCard'       // 身份证
+  | 'email'        // 邮箱
+  | 'phone'        // 手机号码
+  | 'telephone'    // 电话号码
+  | 'hyperlink'    // 超链接
+  // 数值类
+  | 'number'       // 整数
+  | 'decimal2'     // 两位小数
+  | 'percent'      // 百分比
+  | 'permille'     // 千分比
+  | 'currencyCNY'  // 人民币
+  | 'currencyUSD'  // 美元
+  | 'thousands'    // 千分位
+  | 'scientific'   // 科学计数法
+  | 'fraction'     // 分数
+  | 'negativeRed'  // 负数红色
+  // 日期时间类 - 年份
+  | 'date-y'           // 2019
+  | 'date-y-cn'        // 2019年
+  // 日期时间类 - 年月
+  | 'date-ym'          // 2019-1
+  | 'date-ym-pad'      // 2019-01
+  | 'date-ym-slash'    // 2019/1
+  | 'date-ym-slash-pad'// 2019/01
+  | 'date-ym-cn'       // 2019年1月
+  | 'date-ym-cn-pad'   // 2019年01月
+  | 'date-m-cn'        // 1月
+  // 日期时间类 - 年月日
+  | 'date-ymd'         // 2019-1-1
+  | 'date-ymd-pad'     // 2019-01-01
+  | 'date-ymd-slash'   // 2019/1/1
+  | 'date-ymd-slash-pad' // 2019/01/01
+  | 'date-ymd-cn'      // 2019年1月1日
+  | 'date-ymd-cn-pad'  // 2019年01月01日
+  | 'date-md'          // 1-1
+  | 'date-md-pad'      // 01-01
+  | 'date-md-slash'    // 1/1
+  | 'date-md-slash-pad'// 01/01
+  | 'date-md-cn'       // 1月1日
+  | 'date-md-cn-pad'   // 01月01日
+  // 日期时间类 - 完整日期时间
+  | 'datetime'         // 2019-1-1 1:01:01
+  | 'datetime-pad'     // 2019-01-01 1:01:01
+  | 'datetime-slash'   // 2019/1/1 1:01:01
+  | 'datetime-slash-pad' // 2019/01/01 1:01:01
+  | 'datetime-cn'      // 2019年1月1日 1时01分01秒
+  | 'datetime-cn-pad'  // 2019年01月01日 1时01分01秒
+  // 日期时间类 - 时间
+  | 'time-hm'          // 1:01
+  | 'time-hm-cn'       // 1时01分
+  | 'time-hms'         // 1:01:01
+  | 'time-hms-cn'      // 1时01分01秒
+  // 自定义
+  | 'custom'           // Excel 格式字符串
+
+/**
+ * 单元格格式接口
+ */
+export interface CellFormat {
+  /** 格式类型 */
+  type: CellFormatType
+  /** 自定义格式字符串（仅当 type 为 'custom' 时使用） */
+  pattern?: string
+  /** 小数位数（用于数值类型，覆盖默认值） */
+  decimalPlaces?: number
+  /** 负数颜色（用于 negativeRed 等格式） */
+  negativeColor?: string
+}
+
+/**
+ * 默认单元格格式
+ */
+export const DEFAULT_CELL_FORMAT: CellFormat = {
+  type: 'general'
+}
+
+/**
+ * 格式类型到分类的映射
+ */
+export const FORMAT_CATEGORIES = {
+  text: ['general', 'text', 'idCard', 'email', 'phone', 'telephone', 'hyperlink'] as CellFormatType[],
+  number: ['number', 'decimal2', 'percent', 'permille', 'currencyCNY', 'currencyUSD', 'thousands', 'scientific', 'fraction', 'negativeRed'] as CellFormatType[],
+  date: [
+    'date-y', 'date-y-cn',
+    'date-ym', 'date-ym-pad', 'date-ym-slash', 'date-ym-slash-pad', 'date-ym-cn', 'date-ym-cn-pad', 'date-m-cn',
+    'date-ymd', 'date-ymd-pad', 'date-ymd-slash', 'date-ymd-slash-pad', 'date-ymd-cn', 'date-ymd-cn-pad',
+    'date-md', 'date-md-pad', 'date-md-slash', 'date-md-slash-pad', 'date-md-cn', 'date-md-cn-pad',
+    'datetime', 'datetime-pad', 'datetime-slash', 'datetime-slash-pad', 'datetime-cn', 'datetime-cn-pad',
+    'time-hm', 'time-hm-cn', 'time-hms', 'time-hms-cn'
+  ] as CellFormatType[],
+  custom: ['custom'] as CellFormatType[]
+}
+
+/**
+ * 格式选项（用于 UI 下拉菜单）
+ */
+export const FORMAT_OPTIONS = [
+  {
+    label: '文本',
+    value: 'text-group',
+    children: [
+      { label: '常规', value: 'general' },
+      { label: '文本', value: 'text' },
+      { label: '身份证', value: 'idCard' },
+      { label: '邮箱', value: 'email' },
+      { label: '手机号码', value: 'phone' },
+      { label: '电话号码', value: 'telephone' },
+      { label: '超链接', value: 'hyperlink' }
+    ]
+  },
+  {
+    label: '数值',
+    value: 'number-group',
+    children: [
+      { label: '1234', value: 'number' },
+      { label: '1234.12', value: 'decimal2' },
+      { label: '1234.12%', value: 'percent' },
+      { label: '1234.12‰', value: 'permille' },
+      { label: '1,234.12', value: 'thousands' },
+      { label: '¥1,234.12', value: 'currencyCNY' },
+      { label: '$1,234.12', value: 'currencyUSD' },
+      { label: '1.23E+03', value: 'scientific' },
+      { label: '1/2', value: 'fraction' },
+      { label: '-1234 (红色)', value: 'negativeRed' }
+    ]
+  },
+  {
+    label: '日期',
+    value: 'date-group',
+    children: [
+      { label: '2019', value: 'date-y' },
+      { label: '2019年', value: 'date-y-cn' },
+      { label: '2019-1', value: 'date-ym' },
+      { label: '2019-01', value: 'date-ym-pad' },
+      { label: '2019/1', value: 'date-ym-slash' },
+      { label: '2019/01', value: 'date-ym-slash-pad' },
+      { label: '2019年1月', value: 'date-ym-cn' },
+      { label: '2019年01月', value: 'date-ym-cn-pad' },
+      { label: '1月', value: 'date-m-cn' },
+      { label: '2019-1-1', value: 'date-ymd' },
+      { label: '2019-01-01', value: 'date-ymd-pad' },
+      { label: '2019/1/1', value: 'date-ymd-slash' },
+      { label: '2019/01/01', value: 'date-ymd-slash-pad' },
+      { label: '2019年1月1日', value: 'date-ymd-cn' },
+      { label: '2019年01月01日', value: 'date-ymd-cn-pad' },
+      { label: '1-1', value: 'date-md' },
+      { label: '01-01', value: 'date-md-pad' },
+      { label: '1/1', value: 'date-md-slash' },
+      { label: '01/01', value: 'date-md-slash-pad' },
+      { label: '1月1日', value: 'date-md-cn' },
+      { label: '01月01日', value: 'date-md-cn-pad' },
+      { label: '2019-1-1 1:01:01', value: 'datetime' },
+      { label: '2019-01-01 1:01:01', value: 'datetime-pad' },
+      { label: '2019/1/1 1:01:01', value: 'datetime-slash' },
+      { label: '2019/01/01 1:01:01', value: 'datetime-slash-pad' },
+      { label: '2019年1月1日 1时01分01秒', value: 'datetime-cn' },
+      { label: '2019年01月01日 1时01分01秒', value: 'datetime-cn-pad' },
+      { label: '1:01', value: 'time-hm' },
+      { label: '1时01分', value: 'time-hm-cn' },
+      { label: '1:01:01', value: 'time-hms' },
+      { label: '1时01分01秒', value: 'time-hms-cn' }
+    ]
+  },
+  {
+    label: '自定义',
+    value: 'custom-group',
+    children: [
+      { label: '自定义格式...', value: 'custom' }
+    ]
+  }
+]

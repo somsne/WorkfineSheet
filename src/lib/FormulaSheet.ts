@@ -3,12 +3,15 @@
  * 包装 SheetModel 并提供公式计算功能
  * 
  * v2.0: 支持异步计算队列，避免阻塞 UI
+ * v2.1: 支持单元格格式化
  */
 
 import { SheetModel } from './SheetModel'
 import { FormulaEngine } from './FormulaEngine'
 import { FormulaMetadataParser } from './FormulaMetadata'
 import { FormulaCalculationQueue, type QueueStats } from './FormulaCalculationQueue'
+import { formatValue as formatCellValue, type FormatResult } from './formatValue'
+import type { CellFormat } from '../components/sheet/types'
 
 // 单元格计算状态
 export type CellCalculationState = 'idle' | 'pending' | 'calculating' | 'completed' | 'error'
@@ -175,6 +178,134 @@ export class FormulaSheet {
   }
 
   /**
+   * 获取格式化后的单元格显示值
+   * 先计算值，再应用单元格格式
+   * @param row 行号
+   * @param col 列号
+   * @returns 格式化后的字符串
+   */
+  getFormattedValue(row: number, col: number): string {
+    const value = this.getValue(row, col)
+    
+    // 如果值是计算中标记或错误，直接返回
+    if (value === '···' || (typeof value === 'string' && value.startsWith('#'))) {
+      return String(value)
+    }
+    
+    // 获取单元格格式
+    const format = this.model.getCellFormat(row, col)
+    
+    // 应用格式化
+    const result = formatCellValue(value, format)
+    return result.text
+  }
+
+  /**
+   * 获取格式化结果（包含验证信息）
+   * @param row 行号
+   * @param col 列号
+   * @returns 完整的格式化结果
+   */
+  getFormattedResult(row: number, col: number): FormatResult {
+    const value = this.getValue(row, col)
+    
+    // 如果值是计算中标记或错误，返回原值
+    if (value === '···' || (typeof value === 'string' && value.startsWith('#'))) {
+      return {
+        text: String(value),
+        valid: false
+      }
+    }
+    
+    // 获取单元格格式
+    const format = this.model.getCellFormat(row, col)
+    
+    // 应用格式化
+    return formatCellValue(value, format)
+  }
+
+  /**
+   * 检查格式是否为日期时间类型
+   */
+  private isDateTimeFormat(format: CellFormat): boolean {
+    return format.type.startsWith('date-') || 
+           format.type.startsWith('time-') || 
+           format.type.startsWith('datetime')
+  }
+
+  /**
+   * 转换单元格值（如果需要）
+   * 当设置日期格式且值是纯数字时，将其转换为标准日期字符串
+   */
+  private convertValueIfNeeded(row: number, col: number, format: CellFormat): void {
+    if (!this.isDateTimeFormat(format)) return
+    
+    const rawValue = this.getRawValue(row, col)
+    if (rawValue === null || rawValue === undefined || rawValue === '') return
+    
+    const stringValue = String(rawValue)
+    // 检查是否为纯数字
+    if (!/^\d+(\.\d+)?$/.test(stringValue.trim())) return
+    
+    // 执行格式转换
+    const result = formatCellValue(stringValue, format)
+    if (result.rawValue) {
+      this.model.setValue(row, col, result.rawValue)
+    }
+  }
+
+  /**
+   * 设置单元格格式
+   * 如果设置的是日期格式且当前值是数值，会自动转换为标准日期字符串
+   * @param row 行号
+   * @param col 列号
+   * @param format 格式
+   */
+  setCellFormat(row: number, col: number, format: CellFormat): void {
+    this.model.setCellFormat(row, col, format)
+    // 设置格式后，检查是否需要转换值
+    this.convertValueIfNeeded(row, col, format)
+  }
+
+  /**
+   * 获取单元格格式
+   * @param row 行号
+   * @param col 列号
+   * @returns 格式
+   */
+  getCellFormat(row: number, col: number): CellFormat {
+    return this.model.getCellFormat(row, col)
+  }
+
+  /**
+   * 批量设置单元格格式
+   * 如果设置的是日期格式且单元格值是数值，会自动转换为标准日期字符串
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @param format 格式
+   */
+  setRangeFormat(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    format: CellFormat
+  ): void {
+    this.model.setRangeFormat(startRow, startCol, endRow, endCol, format)
+    
+    // 设置格式后，检查范围内的单元格是否需要转换值
+    if (this.isDateTimeFormat(format)) {
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          this.convertValueIfNeeded(r, c, format)
+        }
+      }
+    }
+  }
+
+  /**
    * 异步获取单元格值
    */
   async getValueAsync(
@@ -289,14 +420,20 @@ export class FormulaSheet {
 
   /**
    * 获取原始值（用于编辑框显示）
+   * 始终返回字符串类型
    */
   getDisplayValue(row: number, col: number): string {
-    return this.getRawValue(row, col)
+    const rawValue = this.getRawValue(row, col)
+    if (rawValue === null || rawValue === undefined) {
+      return ''
+    }
+    return String(rawValue)
   }
 
   /**
    * 设置单元格值
    * 如果值是公式，自动解析并存储元数据，并触发高优先级异步计算
+   * 如果单元格是日期格式且输入是 Excel 序列号，会将值转换为标准日期字符串
    */
   setValue(row: number, col: number, value: string): void {
     const cellKey = `${row}_${col}`
@@ -325,7 +462,13 @@ export class FormulaSheet {
         this.model.setValue(row, col, value)
       }
     } else {
-      this.model.setValue(row, col, value)
+      // 检查是否需要进行日期格式转换（Excel 行为）
+      const format = this.model.getCellFormat(row, col)
+      const result = formatCellValue(value, format)
+      
+      // 如果有 rawValue，说明输入的是 Excel 序列号，需要转换为标准日期格式
+      const actualValue = result.rawValue ?? value
+      this.model.setValue(row, col, actualValue)
     }
     
     // 清空缓存（影响依赖的单元格）

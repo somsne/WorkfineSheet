@@ -97,7 +97,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive, watch, computed, nextTick } from 'vue'
 import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft, getRowAtY as geomGetRowAtY, getColAtX as geomGetColAtX, getVisibleRange as geomGetVisibleRange, ensureVisible as geomEnsureVisible } from './sheet/geometry'
-import type { GeometryConfig, SizeAccess } from './sheet/types'
+import type { GeometryConfig, SizeAccess, CellFormat } from './sheet/types'
 import { setCanvasSize, createRedrawScheduler } from './sheet/renderCore'
 import { drawGrid as renderGrid } from './sheet/renderGrid'
 import type { GridRenderConfig } from './sheet/renderGrid'
@@ -182,8 +182,8 @@ const ROW_HEIGHT = 26
 const COL_WIDTH = 100
 const ROW_HEADER_WIDTH = 40
 const COL_HEADER_HEIGHT = 26
-const DEFAULT_ROWS = 50
-const DEFAULT_COLS = 30
+const DEFAULT_ROWS = 200
+const DEFAULT_COLS = 50
 const RESIZE_HANDLE_SIZE = 4 // 拖动调整的检测区域（分隔线两侧各2px）
 
 const container = ref<HTMLElement | null>(null)
@@ -721,7 +721,7 @@ function drawCells(w: number, h: number) {
     formulaReferences: formulaReferences.value,
     sizes,
     geometryConfig: cfg,
-    getCellValue: (r, c) => formulaSheet.getValue(r, c),
+    getCellValue: (r, c) => formulaSheet.getFormattedValue(r, c),
     getCellStyle: (r, c) => model.getCellStyle(r, c),
     model: model, // 提供边框访问
     getSelectionRangeText,
@@ -1605,8 +1605,17 @@ function onOverlaySave(val: string) {
   const col = overlay.col
   const oldValue = formulaSheet.getDisplayValue(row, col)
   
-  // Only create undo action if value actually changed
-  if (oldValue !== val) {
+  // 检查是否需要进行日期格式转换
+  // 即使 oldValue === val，如果输入的是纯数字且格式是日期类型，也需要调用 setValue 进行转换
+  const format = formulaSheet.getCellFormat(row, col)
+  const isDateFormat = format.type.startsWith('date-') || 
+                       format.type.startsWith('time-') || 
+                       format.type.startsWith('datetime')
+  const isNumericInput = /^\d+(\.\d+)?$/.test(val.trim())
+  const needsConversion = isDateFormat && isNumericInput
+  
+  // Only create undo action if value actually changed or needs conversion
+  if (oldValue !== val || needsConversion) {
     undoRedo.execute({
       name: `Edit cell (${row}, ${col})`,
       undo: () => {
@@ -2194,7 +2203,72 @@ const api = createSheetAPI({
     showGridLines.value = show
     draw()
   },
-  getShowGridLinesFn: () => showGridLines.value
+  getShowGridLinesFn: () => showGridLines.value,
+  
+  // 格式相关（支持撤销/重做）
+  getCellFormatFn: (row: number, col: number) => formulaSheet.getCellFormat(row, col),
+  setCellFormatFn: (row: number, col: number, format) => {
+    const oldFormat = model.getCellFormat(row, col)
+    undoRedo.execute({
+      name: `设置单元格格式 (${row}, ${col})`,
+      undo: () => {
+        if (oldFormat) {
+          model.setCellFormat(row, col, oldFormat)
+        } else {
+          model.clearCellFormat(row, col)
+        }
+        draw()
+      },
+      redo: () => {
+        formulaSheet.setCellFormat(row, col, format)
+        draw()
+      }
+    })
+  },
+  clearCellFormatFn: (row: number, col: number) => {
+    const oldFormat = model.getCellFormat(row, col)
+    if (oldFormat) {
+      undoRedo.execute({
+        name: `清除单元格格式 (${row}, ${col})`,
+        undo: () => {
+          model.setCellFormat(row, col, oldFormat)
+          draw()
+        },
+        redo: () => {
+          model.clearCellFormat(row, col)
+          draw()
+        }
+      })
+    }
+  },
+  setRangeFormatFn: (startRow: number, startCol: number, endRow: number, endCol: number, format) => {
+    // 保存旧格式
+    const oldFormats: Array<{ row: number; col: number; format: CellFormat | undefined }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        oldFormats.push({ row: r, col: c, format: model.getCellFormat(r, c) })
+      }
+    }
+    
+    undoRedo.execute({
+      name: `设置区域格式 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        for (const { row, col, format: oldFormat } of oldFormats) {
+          if (oldFormat) {
+            model.setCellFormat(row, col, oldFormat)
+          } else {
+            model.clearCellFormat(row, col)
+          }
+        }
+        draw()
+      },
+      redo: () => {
+        formulaSheet.setRangeFormat(startRow, startCol, endRow, endCol, format)
+        draw()
+      }
+    })
+  },
+  getFormattedValueFn: (row: number, col: number) => formulaSheet.getFormattedValue(row, col)
 })
 
 defineExpose(api)

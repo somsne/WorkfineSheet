@@ -4,7 +4,7 @@
  */
 
 import type { SelectedCell } from './rowcol'
-import type { CellStyle, CellBorder, BorderEdge } from './types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat } from './types'
 
 /**
  * 行列尺寸 API
@@ -327,9 +327,45 @@ export interface BorderAPI {
 }
 
 /**
+ * 格式 API
+ */
+export interface FormatAPI {
+  /**
+   * 获取单元格格式
+   */
+  getCellFormat(row: number, col: number): CellFormat
+  
+  /**
+   * 设置单元格格式
+   */
+  setCellFormat(row: number, col: number, format: CellFormat): void
+  
+  /**
+   * 清除单元格格式
+   */
+  clearCellFormat(row: number, col: number): void
+  
+  /**
+   * 批量设置范围格式
+   */
+  setRangeFormat(
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number,
+    format: CellFormat
+  ): void
+  
+  /**
+   * 获取格式化后的显示值
+   */
+  getFormattedValue(row: number, col: number): string
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI {
   /**
    * 刷新绘制
    */
@@ -404,6 +440,13 @@ export function createSheetAPI(context: {
   // 冻结（预留，当前可能未实现）
   frozenRows?: number
   frozenCols?: number
+  
+  // 格式相关
+  getCellFormatFn: (row: number, col: number) => CellFormat
+  setCellFormatFn: (row: number, col: number, format: CellFormat) => void
+  clearCellFormatFn: (row: number, col: number) => void
+  setRangeFormatFn: (startRow: number, startCol: number, endRow: number, endCol: number, format: CellFormat) => void
+  getFormattedValueFn: (row: number, col: number) => string
 }): SheetAPI {
   return {
     // 行高列宽
@@ -666,6 +709,29 @@ export function createSheetAPI(context: {
     ): void {
       context.clearRangeBorderFn(startRow, startCol, endRow, endCol)
       context.draw()
-    }
+    },
+    
+    // ==================== 格式 API ====================
+    
+    getCellFormat: context.getCellFormatFn,
+    setCellFormat(row: number, col: number, format: CellFormat): void {
+      context.setCellFormatFn(row, col, format)
+      context.draw()
+    },
+    clearCellFormat(row: number, col: number): void {
+      context.clearCellFormatFn(row, col)
+      context.draw()
+    },
+    setRangeFormat(
+      startRow: number,
+      startCol: number,
+      endRow: number,
+      endCol: number,
+      format: CellFormat
+    ): void {
+      context.setRangeFormatFn(startRow, startCol, endRow, endCol, format)
+      context.draw()
+    },
+    getFormattedValue: context.getFormattedValueFn
   }
 }

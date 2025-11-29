@@ -39,6 +39,11 @@
 ### 撤销/重做
 - **[UNDO_REDO_GUIDE.md](./UNDO_REDO_GUIDE.md)** - 撤销重做指南
 
+### 单元格格式
+- **[CELL_FORMAT.md](./features/CELL_FORMAT.md)** ⭐ 功能说明
+- **[FORMAT_API.md](./api/FORMAT_API.md)** - API 参考
+- **[FORMAT_GUIDE.md](./guides/FORMAT_GUIDE.md)** - 使用指南
+
 ---
 
 ## 🐛 问题修复文档
@@ -129,4 +134,4 @@
 ---
 
 **文档维护**: 请在更新文档时同步更新此索引  
-**最后更新**: 2025-11-27
+**最后更新**: 2025-11-28
