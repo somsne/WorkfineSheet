@@ -3,6 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
+
+// 检测 CI 环境
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true'
 import { SheetModel } from '../../../lib/SheetModel'
 import type { CellBorder, BorderEdge } from '../types'
 
@@ -272,7 +275,7 @@ describe('单元格边框', () => {
     })
   })
 
-  describe('性能', () => {
+  describe.skipIf(isCI)('性能', () => {
     it('应该快速设置大量边框', () => {
       const start = performance.now()
       

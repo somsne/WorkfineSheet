@@ -38,7 +38,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     selected, selectionRange, dragState,
     overlay,
     resizeState, hoverState,
-    rowHeights, colWidths,
+    rowHeights, colWidths, manualRowHeights,
     formulaReferences,
     contextMenu, inputDialog
   } = state
@@ -420,6 +420,10 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     // 结束调整大小
     if (resizeState.isResizing) {
+      // 如果是调整行高，记录为用户手动设置
+      if (resizeState.type === 'row') {
+        manualRowHeights.value.add(resizeState.index)
+      }
       resizeState.isResizing = false
       resizeState.type = ''
       resizeState.index = -1

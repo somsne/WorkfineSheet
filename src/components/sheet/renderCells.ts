@@ -138,7 +138,7 @@ function drawStrikethrough(
  * @param cellWidth Cell width
  * @param textWidth Text width (from measureText)
  * @param textAlign Horizontal alignment: 'left' | 'center' | 'right'
- * @param padding Horizontal padding (default: 6px)
+ * @param padding Horizontal padding (default: 2px, similar to Excel)
  * @returns Calculated X position for fillText
  */
 function calculateTextX(
@@ -146,7 +146,7 @@ function calculateTextX(
   cellWidth: number,
   textWidth: number,
   textAlign: 'left' | 'center' | 'right' = 'left',
-  padding: number = 6
+  padding: number = 2
 ): number {
   switch (textAlign) {
     case 'left':
@@ -166,7 +166,7 @@ function calculateTextX(
  * @param cellHeight Cell height
  * @param fontSize Font size
  * @param verticalAlign Vertical alignment: 'top' | 'middle' | 'bottom'
- * @param padding Vertical padding (default: 4px)
+ * @param padding Vertical padding (default: 2px, similar to Excel)
  * @returns Object with textY position and appropriate textBaseline setting
  */
 function calculateTextY(
@@ -174,7 +174,7 @@ function calculateTextY(
   cellHeight: number,
   _fontSize: number,
   verticalAlign: 'top' | 'middle' | 'bottom' = 'middle',
-  padding: number = 4
+  padding: number = 2
 ): { textY: number; textBaseline: CanvasTextBaseline } {
   switch (verticalAlign) {
     case 'top':
@@ -205,14 +205,14 @@ function calculateTextY(
  * @param ctx Canvas context (needed for measureText)
  * @param text Text to wrap
  * @param maxWidth Maximum width in pixels
- * @param padding Horizontal padding to subtract from maxWidth
+ * @param padding Horizontal padding to subtract from maxWidth (default: 4px, 2px each side)
  * @returns Array of text lines
  */
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
-  padding: number = 12
+  padding: number = 4
 ): string[] {
   const availableWidth = maxWidth - padding
   const lines: string[] = []
@@ -430,7 +430,7 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       const { textY, textBaseline } = calculateTextY(
         cellY,
         rowHeight,
-        style.fontSize || 13,
+        style.fontSize || 12,
         style.verticalAlign || 'middle'
       )
       ctx.textBaseline = textBaseline
@@ -458,16 +458,16 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       
       // Draw underline if enabled
       if (style.underline) {
-        drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, textBaseline)
+        drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 12, style.underline, textBaseline)
       }
       
       // Draw strikethrough if enabled
       if (style.strikethrough) {
-        drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, textBaseline)
+        drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 12, textBaseline)
       }
     } else {
       // Multi-line: render each line
-      const lineHeight = (style.fontSize || 13) * 1.2
+      const lineHeight = (style.fontSize || 12) * 1.2
       const totalHeight = lines.length * lineHeight
       
       // Calculate starting Y position based on vertical alignment
@@ -496,12 +496,12 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
         
         // Draw underline for each line
         if (style.underline) {
-          drawUnderline(ctx, lineX, lineY, lineWidth, style.fontSize || 13, style.underline, 'middle')
+          drawUnderline(ctx, lineX, lineY, lineWidth, style.fontSize || 12, style.underline, 'middle')
         }
         
         // Draw strikethrough for each line
         if (style.strikethrough) {
-          drawStrikethrough(ctx, lineX, lineY, lineWidth, style.fontSize || 13, 'middle')
+          drawStrikethrough(ctx, lineX, lineY, lineWidth, style.fontSize || 12, 'middle')
         }
       })
     }

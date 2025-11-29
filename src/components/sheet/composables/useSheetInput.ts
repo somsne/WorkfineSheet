@@ -22,7 +22,8 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     viewport,
     selected, selectionRange,
     overlay, imeState,
-    formulaReferences, updateFormulaReferences
+    formulaReferences, updateFormulaReferences,
+    rowHeights, manualRowHeights, model
   } = state
   
   const { createSizeAccess, createGeometryConfig, getRowHeight, getColWidth, getRowTop, getColLeft } = geometry
@@ -69,6 +70,21 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
       })
     }
     
+    // 自动调整行高（仅当设置了自动换行且用户未手动设置行高时）
+    const cellStyle = model.getCellStyle(row, col)
+    const isWrapText = cellStyle.wrapText ?? false
+    const isManualRowHeight = manualRowHeights.value.has(row)  // 用户是否手动设置了行高
+    
+    if (isWrapText && !isManualRowHeight && val) {
+      const colWidth = getColWidth(col)
+      const requiredHeight = calculateRequiredRowHeight(val, colWidth, cellStyle)
+      const currentHeight = getRowHeight(row)
+      
+      if (requiredHeight > currentHeight) {
+        rowHeights.value.set(row, requiredHeight)
+      }
+    }
+    
     // 关闭覆盖层
     Object.assign(overlay, closeOverlay())
     formulaReferences.value = []
@@ -85,6 +101,41 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     
     // 编辑完成后，聚焦 IME 代理以便继续输入
     focusImeProxy()
+  }
+  
+  /**
+   * 计算文本所需的行高（用于自动换行单元格）
+   * 注意：lineHeight 必须与 renderCells.ts 中保持一致（1.2）
+   * padding 必须与 renderCells.ts 中的 wrapText 一致（4px）
+   */
+  function calculateRequiredRowHeight(
+    text: string,
+    containerWidth: number,
+    cellStyle: { fontFamily?: string; fontSize?: number; bold?: boolean; italic?: boolean }
+  ): number {
+    // 创建临时测量元素
+    // padding = 4 与 renderCells.ts wrapText 函数一致
+    const measureSpan = document.createElement('span')
+    measureSpan.style.cssText = `
+      position: absolute;
+      visibility: hidden;
+      white-space: pre-wrap;
+      word-break: break-all;
+      width: ${containerWidth - 4}px;
+      font-family: ${cellStyle.fontFamily || 'Arial, sans-serif'};
+      font-size: ${cellStyle.fontSize || 12}px;
+      font-weight: ${cellStyle.bold ? 'bold' : 'normal'};
+      font-style: ${cellStyle.italic ? 'italic' : 'normal'};
+      line-height: ${(cellStyle.fontSize || 12) * 1.2}px;
+      display: block;
+    `
+    document.body.appendChild(measureSpan)
+    measureSpan.textContent = text || ' '
+    const height = measureSpan.offsetHeight
+    document.body.removeChild(measureSpan)
+    
+    // 添加一些 padding
+    return height + 4
   }
   
   /**

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自动行高性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #667eea; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; margin: 24px 0; }
+    button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .results { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .results h3 { color: #1f2937; margin-bottom: 16px; }
+    .result-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+    .result-item:last-child { border-bottom: none; }
+    .result-name { font-weight: 500; color: #374151; }
+    .result-value { font-family: monospace; color: #059669; font-weight: 600; }
+    .result-value.slow { color: #dc2626; }
+    .result-value.normal { color: #d97706; }
+    .test-area { margin: 24px 0; }
+    .test-canvas { border: 1px solid #e5e7eb; background: white; }
+    .log { background: #1f2937; color: #10b981; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 0.9rem; max-height: 300px; overflow-y: auto; margin-top: 24px; }
+    .log-entry { margin: 4px 0; }
+    .log-entry.info { color: #60a5fa; }
+    .log-entry.warn { color: #fbbf24; }
+    .log-entry.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>📏 自动行高性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>自动行高功能测试</h2>
+      <p>测试自动换行单元格保存时的行高计算性能，包括文本测量、高度计算、批量处理等场景。</p>
+    </div>
+    
+    <div class="controls">
+      <button onclick="runAllTests()">🚀 运行全部测试</button>
+      <button onclick="runTextMeasure()">📐 文本测量</button>
+      <button onclick="runHeightCalc()">📊 高度计算</button>
+      <button onclick="runBatchCalc()">⚡ 批量计算</button>
+      <button onclick="runEdgeCases()">🔬 边界情况</button>
+    </div>
+    
+    <div class="results">
+      <h3>📈 测试结果</h3>
+      <div id="resultList">
+        <div class="result-item">
+          <span class="result-name">等待测试...</span>
+          <span class="result-value">--</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="log" id="logArea">
+      <div class="log-entry info">准备就绪，点击按钮开始测试</div>
+    </div>
+  </div>
+
+  <script type="module">
+    // 日志函数
+    function log(message, type = 'info') {
+      const logArea = document.getElementById('logArea')
+      const entry = document.createElement('div')
+      entry.className = `log-entry ${type}`
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`
+      logArea.appendChild(entry)
+      logArea.scrollTop = logArea.scrollHeight
+    }
+    
+    // 清空日志
+    function clearLog() {
+      document.getElementById('logArea').innerHTML = ''
+    }
+    
+    // 更新结果
+    const results = {}
+    function updateResults() {
+      const list = document.getElementById('resultList')
+      list.innerHTML = ''
+      
+      for (const [name, data] of Object.entries(results)) {
+        const item = document.createElement('div')
+        item.className = 'result-item'
+        
+        let valueClass = 'result-value'
+        if (data.time > 500) valueClass += ' slow'
+        else if (data.time > 200) valueClass += ' normal'
+        
+        item.innerHTML = `
+          <span class="result-name">${name}</span>
+          <span class="${valueClass}">${data.time.toFixed(2)} ms (${data.count} 次, ${(data.count / data.time * 1000).toFixed(0)}/秒)</span>
+        `
+        list.appendChild(item)
+      }
+      
+      if (Object.keys(results).length === 0) {
+        list.innerHTML = '<div class="result-item"><span class="result-name">等待测试...</span><span class="result-value">--</span></div>'
+      }
+    }
+    
+    // 创建测量元素
+    function createMeasureElement(style = {}) {
+      const el = document.createElement('span')
+      el.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ${style.fontFamily || 'sans-serif'};
+        font-size: ${style.fontSize || 13}px;
+        font-weight: ${style.bold ? 'bold' : 'normal'};
+        font-style: ${style.italic ? 'italic' : 'normal'};
+        line-height: ${(style.fontSize || 13) * 1.4}px;
+        display: block;
+      `
+      document.body.appendChild(el)
+      return el
+    }
+    
+    // 测量文本宽度
+    function measureTextWidth(text, style = {}) {
+      const el = createMeasureElement({ ...style, whiteSpace: 'pre' })
+      el.style.whiteSpace = 'pre'
+      el.style.display = 'inline'
+      el.textContent = text || ' '
+      const width = el.offsetWidth
+      document.body.removeChild(el)
+      return width
+    }
+    
+    // 计算换行后高度
+    function calculateWrappedHeight(text, containerWidth, style = {}) {
+      const el = createMeasureElement(style)
+      el.style.width = `${containerWidth}px`
+      el.textContent = text || ' '
+      const height = el.offsetHeight
+      document.body.removeChild(el)
+      return height
+    }
+    
+    // 生成测试文本
+    function generateTestText(length, hasNewlines = false) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789中文测试 '
+      let text = ''
+      for (let i = 0; i < length; i++) {
+        if (hasNewlines && i > 0 && i % 50 === 0) {
+          text += '\n'
+        } else {
+          text += chars[Math.floor(Math.random() * chars.length)]
+        }
+      }
+      return text
+    }
+    
+    // 测试 1: 文本宽度测量
+    window.runTextMeasure = async function() {
+      clearLog()
+      log('开始文本宽度测量测试...')
+      
+      const testCases = [
+        { name: '短文本 (10字符)', length: 10, count: 10000 },
+        { name: '中等文本 (50字符)', length: 50, count: 5000 },
+        { name: '长文本 (200字符)', length: 200, count: 2000 },
+        { name: '超长文本 (1000字符)', length: 1000, count: 500 }
+      ]
+      
+      for (const tc of testCases) {
+        const texts = Array.from({ length: tc.count }, () => generateTestText(tc.length))
+        
+        const start = performance.now()
+        for (const text of texts) {
+          measureTextWidth(text, { fontSize: 13, fontFamily: 'sans-serif' })
+        }
+        const elapsed = performance.now() - start
+        
+        results[`文本测量 - ${tc.name}`] = { time: elapsed, count: tc.count }
+        log(`${tc.name}: ${elapsed.toFixed(2)}ms (${tc.count} 次)`)
+      }
+      
+      updateResults()
+      log('文本宽度测量测试完成', 'info')
+    }
+    
+    // 测试 2: 换行高度计算
+    window.runHeightCalc = async function() {
+      clearLog()
+      log('开始换行高度计算测试...')
+      
+      const widths = [100, 200, 300]
+      const testCases = [
+        { name: '短文本', length: 20, count: 5000 },
+        { name: '中等文本', length: 100, count: 2000 },
+        { name: '长文本 (需换行)', length: 500, count: 1000 },
+        { name: '超长文本 (多行)', length: 2000, count: 200 }
+      ]
+      
+      for (const tc of testCases) {
+        const texts = Array.from({ length: tc.count }, () => generateTestText(tc.length, true))
+        
+        const start = performance.now()
+        for (let i = 0; i < texts.length; i++) {
+          const width = widths[i % widths.length]
+          calculateWrappedHeight(texts[i], width, { fontSize: 13 })
+        }
+        const elapsed = performance.now() - start
+        
+        results[`高度计算 - ${tc.name}`] = { time: elapsed, count: tc.count }
+        log(`${tc.name}: ${elapsed.toFixed(2)}ms (${tc.count} 次)`)
+      }
+      
+      updateResults()
+      log('换行高度计算测试完成', 'info')
+    }
+    
+    // 测试 3: 批量计算 (模拟保存多个自动换行单元格)
+    window.runBatchCalc = async function() {
+      clearLog()
+      log('开始批量计算测试 (模拟保存操作)...')
+      
+      const testCases = [
+        { name: '100个单元格', count: 100, textLen: 100 },
+        { name: '500个单元格', count: 500, textLen: 100 },
+        { name: '1000个单元格', count: 1000, textLen: 100 },
+        { name: '2000个单元格 (大批量)', count: 2000, textLen: 50 }
+      ]
+      
+      for (const tc of testCases) {
+        const cellData = Array.from({ length: tc.count }, () => ({
+          text: generateTestText(tc.textLen, true),
+          width: 80 + Math.random() * 120  // 80-200 宽度
+        }))
+        
+        const start = performance.now()
+        
+        // 模拟计算每个单元格需要的行高
+        const heights = []
+        for (const cell of cellData) {
+          const height = calculateWrappedHeight(cell.text, cell.width, { fontSize: 13 })
+          heights.push(Math.max(25, height + 4))  // 最小高度 25
+        }
+        
+        const elapsed = performance.now() - start
+        
+        results[`批量计算 - ${tc.name}`] = { time: elapsed, count: tc.count }
+        log(`${tc.name}: ${elapsed.toFixed(2)}ms`)
+      }
+      
+      updateResults()
+      log('批量计算测试完成', 'info')
+    }
+    
+    // 测试 4: 边界情况
+    window.runEdgeCases = async function() {
+      clearLog()
+      log('开始边界情况测试...')
+      
+      const edgeCases = [
+        { name: '空字符串', text: '', count: 1000 },
+        { name: '纯空格', text: '          ', count: 1000 },
+        { name: '纯换行', text: '\n\n\n\n\n', count: 1000 },
+        { name: 'Unicode字符', text: '🎉🎊🎁🎈🎀✨💫⭐🌟✨' + '中文测试'.repeat(10), count: 1000 },
+        { name: '极宽列 (500px)', text: generateTestText(200), count: 500, width: 500 },
+        { name: '极窄列 (30px)', text: generateTestText(200), count: 500, width: 30 },
+        { name: '单字符 x 1000', text: 'A', count: 10000 }
+      ]
+      
+      for (const tc of edgeCases) {
+        const width = tc.width || 100
+        
+        const start = performance.now()
+        for (let i = 0; i < tc.count; i++) {
+          calculateWrappedHeight(tc.text, width, { fontSize: 13 })
+        }
+        const elapsed = performance.now() - start
+        
+        results[`边界 - ${tc.name}`] = { time: elapsed, count: tc.count }
+        log(`${tc.name}: ${elapsed.toFixed(2)}ms (${tc.count} 次)`)
+      }
+      
+      updateResults()
+      log('边界情况测试完成', 'info')
+    }
+    
+    // 运行全部测试
+    window.runAllTests = async function() {
+      clearLog()
+      results.length = 0  // 清空结果
+      Object.keys(results).forEach(k => delete results[k])
+      
+      log('=== 开始全部测试 ===', 'info')
+      
+      await runTextMeasure()
+      await new Promise(r => setTimeout(r, 100))
+      
+      await runHeightCalc()
+      await new Promise(r => setTimeout(r, 100))
+      
+      await runBatchCalc()
+      await new Promise(r => setTimeout(r, 100))
+      
+      await runEdgeCases()
+      
+      log('=== 全部测试完成 ===', 'info')
+      
+      // 计算总结
+      let totalTime = 0
+      let totalCount = 0
+      for (const data of Object.values(results)) {
+        totalTime += data.time
+        totalCount += data.count
+      }
+      
+      log(`总计: ${totalTime.toFixed(2)}ms, ${totalCount} 次操作, 平均 ${(totalCount / totalTime * 1000).toFixed(0)} 次/秒`, 'info')
+    }
+  </script>
+</body>
+</html>

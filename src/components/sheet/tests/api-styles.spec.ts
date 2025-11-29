@@ -18,6 +18,7 @@ describe('样式 API', () => {
       getColWidth: vi.fn(() => 100),
       rowHeights: new Map(),
       colWidths: new Map(),
+      manualRowHeights: new Set(),
       
       // 行列操作
       insertRowAbove: vi.fn(),

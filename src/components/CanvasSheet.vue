@@ -33,6 +33,7 @@
         :is-formula="state.overlay.value.startsWith('=')"
         :cell-style="state.model.getCellStyle(state.overlay.row, state.overlay.col)"
         :formula-references="state.richTextFormulaReferences.value"
+        :viewport-width="state.container.value?.clientWidth ?? 800"
         @save="input.onOverlaySave"
         @cancel="input.onOverlayCancel"
         @input-change="state.updateFormulaReferences"
@@ -317,6 +318,7 @@ const api = createSheetAPI({
   getColWidth: geometry.getColWidth,
   rowHeights: state.rowHeights.value,
   colWidths: state.colWidths.value,
+  manualRowHeights: state.manualRowHeights.value,
   
   // 行列操作
   insertRowAbove: rowColOps.insertRowAbove,
@@ -686,6 +688,7 @@ defineExpose(api)
   flex-direction: column;
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 .sheet-container {

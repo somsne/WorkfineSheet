@@ -23,6 +23,9 @@ interface CellStyle {
   backgroundColor?: string
   underline?: boolean | 'single' | 'double'  // 统一类型：boolean | 'single' | 'double'
   strikethrough?: boolean
+  wrapText?: boolean  // 自动换行
+  textAlign?: 'left' | 'center' | 'right'  // 水平对齐
+  verticalAlign?: 'top' | 'middle' | 'bottom'  // 垂直对齐
 }
 
 const props = defineProps<{
@@ -38,6 +41,7 @@ const props = defineProps<{
   isFormula?: boolean
   cellStyle?: CellStyle
   formulaReferences?: FormulaReference[]
+  viewportWidth?: number  // 可视区域宽度，用于计算右边界
 }>()
 
 const emit = defineEmits<{
@@ -594,39 +598,136 @@ function handleClick() {
 
 // ==================== 尺寸调整 ====================
 
+// 测量元素缓存（避免重复创建）
+let measureElement: HTMLSpanElement | null = null
+
+/**
+ * 获取测量元素（懒加载）
+ */
+function getMeasureElement(): HTMLSpanElement {
+  if (!measureElement) {
+    measureElement = document.createElement('span')
+    measureElement.style.cssText = `
+      position: absolute;
+      visibility: hidden;
+      white-space: pre;
+      pointer-events: none;
+    `
+    document.body.appendChild(measureElement)
+  }
+  return measureElement
+}
+
+/**
+ * 测量文本宽度
+ */
+function measureTextWidth(text: string): number {
+  const span = getMeasureElement()
+  span.style.fontFamily = props.cellStyle?.fontFamily || 'Arial, sans-serif'
+  span.style.fontSize = `${props.cellStyle?.fontSize || 12}px`
+  span.style.fontWeight = props.cellStyle?.bold ? 'bold' : 'normal'
+  span.style.fontStyle = props.cellStyle?.italic ? 'italic' : 'normal'
+  span.textContent = text || ' '  // 空字符串用空格占位
+  return span.offsetWidth
+}
+
+/**
+ * 计算换行后的高度
+ */
+function calculateWrappedHeight(text: string, containerWidth: number): number {
+  const span = getMeasureElement()
+  span.style.fontFamily = props.cellStyle?.fontFamily || 'Arial, sans-serif'
+  span.style.fontSize = `${props.cellStyle?.fontSize || 12}px`
+  span.style.fontWeight = props.cellStyle?.bold ? 'bold' : 'normal'
+  span.style.fontStyle = props.cellStyle?.italic ? 'italic' : 'normal'
+  span.style.whiteSpace = 'pre-wrap'
+  span.style.wordBreak = 'break-all'
+  span.style.lineHeight = `${(props.cellStyle?.fontSize || 12) * 1.2}px`
+  span.style.width = `${containerWidth}px`
+  span.style.display = 'block'
+  span.textContent = text || ' '
+  const height = span.offsetHeight
+  // 恢复默认状态
+  span.style.whiteSpace = 'pre'
+  span.style.width = 'auto'
+  span.style.display = 'inline'
+  span.style.lineHeight = ''
+  return height
+}
+
 /**
  * 根据内容自动调整大小
+ * 
+ * 规则：
+ * 1. 设置了自动换行 (wrapText=true)：宽度固定为单元格宽度，高度根据内容扩展
+ * 2. 未设置自动换行 + 未靠近右边界：向右扩展
+ * 3. 未设置自动换行 + 靠近右边界：停止扩展，内容换行
  */
 function adjustSize() {
   if (!editorRef) return
   
   const text = internal.value || ''
-  // 移除尾部换行符，因为空内容时 contenteditable 可能返回 "\n"
-  const trimmedText = text.replace(/\n+$/, '')
-  const lines = trimmedText ? trimmedText.split('\n') : ['']
-  const lineCount = lines.length
-  
-  // 计算高度
+  const wrapText = props.cellStyle?.wrapText ?? false
+  const fontSize = props.cellStyle?.fontSize || 12
+  const lineHeight = fontSize * 1.2
+  // box-sizing: content-box, padding: 0px 2px
+  // 内容宽度 = width, 文本可用宽度 = width - padding(4px)
+  // 与 renderCells.ts 中的 wrapText padding (4px) 完全一致
+  const paddingHorizontal = 4
+  const paddingVertical = 0
+  const minWidth = props.width
   const minHeight = props.height
-  let newHeight = minHeight
   
-  if (lineCount > 1) {
-    const lineHeight = 18
-    const paddingVertical = 4
-    const borderVertical = 4
-    newHeight = Math.max(minHeight, lineCount * lineHeight + paddingVertical + borderVertical)
+  // 情况 1: 设置了自动换行 - 宽度固定为单元格宽度
+  if (wrapText) {
+    // box-sizing: content-box，所以 content width = 单元格宽度 - padding
+    // 这样 content + padding = 单元格宽度
+    autoWidth.value = minWidth - paddingHorizontal
+    // 计算换行后的高度
+    const contentWidth = minWidth - paddingHorizontal
+    const wrappedHeight = calculateWrappedHeight(text, contentWidth)
+    autoHeight.value = Math.max(minHeight, wrappedHeight + paddingVertical)
+    return
   }
   
-  // 计算宽度
-  const maxLineLength = Math.max(...lines.map(line => line.length), 10)
-  const charWidth = 7.8
-  const minWidth = props.width
-  const paddingHorizontal = 8
-  const borderHorizontal = 4
-  const newWidth = Math.max(minWidth, maxLineLength * charWidth + paddingHorizontal + borderHorizontal)
+  // 情况 2 和 3: 未设置自动换行
+  // 按行分割（Alt+Enter 手动换行）
+  const trimmedText = text.replace(/\n+$/, '')
+  const lines = trimmedText ? trimmedText.split('\n') : ['']
   
-  autoWidth.value = newWidth
-  autoHeight.value = newHeight
+  // 测量每行宽度，取最大值
+  let maxLineWidth = 0
+  for (const line of lines) {
+    const lineWidth = measureTextWidth(line)
+    maxLineWidth = Math.max(maxLineWidth, lineWidth)
+  }
+  
+  // requiredWidth 是需要的总宽度（content + padding）
+  const requiredWidth = maxLineWidth + paddingHorizontal
+  
+  // 计算右边界限制
+  const viewportRight = props.viewportWidth ?? Infinity
+  const maxAllowedWidth = viewportRight - props.left
+  
+  // 情况 2a: 宽度未超过右边界 - 向右扩展
+  if (requiredWidth <= maxAllowedWidth) {
+    // box-sizing: content-box，autoWidth 是 content 宽度
+    // 总宽度 = content + padding，所以 content = 总宽度 - padding
+    const totalWidth = Math.max(minWidth, requiredWidth)
+    autoWidth.value = totalWidth - paddingHorizontal
+    // 高度根据行数计算
+    autoHeight.value = Math.max(minHeight, lines.length * lineHeight + paddingVertical)
+  } 
+  // 情况 2b: 宽度超过右边界 - 限制宽度，内容换行
+  else {
+    const constrainedWidth = Math.max(minWidth, maxAllowedWidth)
+    // content 宽度 = 总宽度 - padding
+    autoWidth.value = constrainedWidth - paddingHorizontal
+    // 计算换行后的高度
+    const contentWidth = constrainedWidth - paddingHorizontal
+    const wrappedHeight = calculateWrappedHeight(text, contentWidth)
+    autoHeight.value = Math.max(minHeight, wrappedHeight + paddingVertical)
+  }
 }
 
 // ==================== 样式 ====================
@@ -638,16 +739,17 @@ const editorStyle = computed(() => {
   const style: Record<string, string> = {
     width: `${autoWidth.value}px`,
     height: `${autoHeight.value}px`,
-    boxSizing: 'border-box',
-    padding: '2px 4px',
-    fontSize: `${props.cellStyle?.fontSize || 13}px`,
-    fontFamily: props.cellStyle?.fontFamily || 'sans-serif',
-    lineHeight: `${(props.cellStyle?.fontSize || 13) * 1.4}px`,
+    boxSizing: 'content-box',
+    padding: '0px 2px',
+    fontSize: `${props.cellStyle?.fontSize || 12}px`,
+    fontFamily: props.cellStyle?.fontFamily || 'Arial, sans-serif',
+    lineHeight: `${(props.cellStyle?.fontSize || 12) * 1.2}px`,
     border: isInSelectableState.value 
       ? '2px solid #10b981'
       : formulaMode.value 
         ? '2px solid #ef4444'
         : '2px solid #3b82f6',
+    margin: '-2px',  // 补偿 border 向外扩展
     outline: 'none',
     backgroundColor: formulaMode.value 
       ? '#fef2f2' 
@@ -655,8 +757,18 @@ const editorStyle = computed(() => {
     color: props.cellStyle?.color || '#000000',
     overflow: 'hidden',
     whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+    wordBreak: 'break-all',
     caretColor: '#000000',
+    // 水平对齐
+    textAlign: props.cellStyle?.textAlign || 'left',
+    // 垂直对齐：使用 flexbox 实现
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: props.cellStyle?.verticalAlign === 'top' 
+      ? 'flex-start' 
+      : props.cellStyle?.verticalAlign === 'bottom' 
+        ? 'flex-end' 
+        : 'center',  // middle 是默认值
   }
   
   // 应用粗体和斜体（公式模式除外）

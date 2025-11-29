@@ -710,6 +710,7 @@ export function showSetRowHeightDialog(
   row: number,
   currentHeight: number,
   rowHeights: Map<number, number>,
+  manualRowHeights: Set<number>,
   dialogState: InputDialogState,
   onRedraw: () => void
 ): void {
@@ -720,6 +721,8 @@ export function showSetRowHeightDialog(
     const height = parseInt(value, 10)
     if (!isNaN(height) && height > 0) {
       rowHeights.set(row, height)
+      // 记录为用户手动设置的行高
+      manualRowHeights.add(row)
       onRedraw()
     }
   }

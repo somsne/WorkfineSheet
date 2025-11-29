@@ -232,6 +232,18 @@
           <div class="benchmark-status" id="status-fillFormula">等待测试</div>
         </div>
       </div>
+      
+      <div class="benchmark-item" data-benchmark="autoRowHeight">
+        <div class="benchmark-icon render">📏</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">自动行高计算</div>
+          <div class="benchmark-desc">计算 2,000 个自动换行单元格行高</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-autoRowHeight"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-autoRowHeight">等待测试</div>
+        </div>
+      </div>
     </div>
     
     <div class="summary" id="summary" style="display: none;">
@@ -277,7 +289,8 @@
       renderScroll: { excellent: 16, good: 33, average: 50, count: 50, isFps: true },
       fillPattern: { excellent: 50, good: 150, average: 300, count: 10000 },
       fillGenerate: { excellent: 100, good: 300, average: 600, count: 10000 },
-      fillFormula: { excellent: 50, good: 150, average: 300, count: 10000 }
+      fillFormula: { excellent: 50, good: 150, average: 300, count: 10000 },
+      autoRowHeight: { excellent: 100, good: 300, average: 600, count: 2000 }
     }
     
     // 渲染配置
@@ -796,6 +809,70 @@
       return time
     }
     
+    // 自动行高计算测试
+    async function benchmarkAutoRowHeight() {
+      updateStatus('autoRowHeight', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.autoRowHeight.count
+      
+      // 创建测量元素 (复用)
+      const measureEl = document.createElement('span')
+      measureEl.style.cssText = `
+        position: absolute;
+        visibility: hidden;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: sans-serif;
+        font-size: 13px;
+        line-height: 18.2px;
+        display: block;
+      `
+      document.body.appendChild(measureEl)
+      
+      // 生成测试文本 (各种长度和复杂度)
+      const testTexts = []
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789中文测试 '
+      for (let i = 0; i < count; i++) {
+        const length = 20 + Math.floor(Math.random() * 200)  // 20-220 字符
+        let text = ''
+        for (let j = 0; j < length; j++) {
+          if (j > 0 && j % 50 === 0 && Math.random() > 0.5) {
+            text += '\n'  // 随机插入换行
+          } else {
+            text += chars[Math.floor(Math.random() * chars.length)]
+          }
+        }
+        testTexts.push(text)
+      }
+      
+      // 生成测试宽度 (模拟不同列宽)
+      const cellWidths = [80, 100, 120, 150, 200]
+      
+      const start = performance.now()
+      
+      // 测量每个文本的高度
+      for (let i = 0; i < count; i++) {
+        const text = testTexts[i]
+        const width = cellWidths[i % cellWidths.length]
+        
+        measureEl.style.width = `${width}px`
+        measureEl.textContent = text || ' '
+        const height = measureEl.offsetHeight
+        
+        // 模拟行高计算 (最小高度 25)
+        const rowHeight = Math.max(25, height + 4)
+      }
+      
+      const time = performance.now() - start
+      
+      // 清理
+      document.body.removeChild(measureEl)
+      
+      updateStatus('autoRowHeight', 'done', time)
+      return time
+    }
+    
     // 运行所有测试
     window.runAllBenchmarks = async function() {
       const btn = document.getElementById('runBtn')
@@ -829,6 +906,7 @@
       await benchmarkFillPattern()
       await benchmarkFillGenerate()
       await benchmarkFillFormula()
+      await benchmarkAutoRowHeight()
       
       const totalTime = performance.now() - startTime
       

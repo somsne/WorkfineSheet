@@ -471,6 +471,55 @@ export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAP
 }
 
 /**
+ * 计算自动换行文本所需的行高
+ * 注意：lineHeight 必须与 renderCells.ts 保持一致（1.2）
+ * padding 必须与 renderCells.ts 中的 wrapText 一致（4px）
+ */
+function calculateRowHeightForWrapText(
+  text: string,
+  containerWidth: number,
+  cellStyle: CellStyle
+): number {
+  // 在浏览器环境下使用 DOM 测量
+  if (typeof document === 'undefined') {
+    // 非浏览器环境的简单估算
+    const fontSize = cellStyle.fontSize || 12
+    const lineHeight = fontSize * 1.2
+    const avgCharWidth = fontSize * 0.6
+    const contentWidth = containerWidth - 4
+    const lines = text.split('\n').reduce((total, line) => {
+      const lineWidth = line.length * avgCharWidth
+      return total + Math.ceil(lineWidth / contentWidth)
+    }, 0)
+    return Math.max(lineHeight, lines * lineHeight) + 4
+  }
+  
+  // 创建临时测量元素
+  // padding = 4 与 renderCells.ts wrapText 函数一致
+  const measureSpan = document.createElement('span')
+  measureSpan.style.cssText = `
+    position: absolute;
+    visibility: hidden;
+    white-space: pre-wrap;
+    word-break: break-all;
+    width: ${containerWidth - 4}px;
+    font-family: ${cellStyle.fontFamily || 'Arial, sans-serif'};
+    font-size: ${cellStyle.fontSize || 12}px;
+    font-weight: ${cellStyle.bold ? 'bold' : 'normal'};
+    font-style: ${cellStyle.italic ? 'italic' : 'normal'};
+    line-height: ${(cellStyle.fontSize || 12) * 1.2}px;
+    display: block;
+  `
+  document.body.appendChild(measureSpan)
+  measureSpan.textContent = text || ' '
+  const height = measureSpan.offsetHeight
+  document.body.removeChild(measureSpan)
+  
+  // 添加 padding
+  return height + 4
+}
+
+/**
  * 创建 API 实现
  */
 export function createSheetAPI(context: {
@@ -479,6 +528,8 @@ export function createSheetAPI(context: {
   getColWidth: (col: number) => number
   rowHeights: Map<number, number>
   colWidths: Map<number, number>
+  // 用户手动设置的行高（区分于自动换行调整的行高）
+  manualRowHeights: Set<number>
   
   // 行列操作
   insertRowAbove: (row: number) => Promise<void>
@@ -557,6 +608,8 @@ export function createSheetAPI(context: {
     getColWidth: context.getColWidth,
     setRowHeight(row: number, height: number): void {
       context.rowHeights.set(row, height)
+      // 记录为用户手动设置的行高
+      context.manualRowHeights.add(row)
       context.draw()
     },
     setColWidth(col: number, width: number): void {
@@ -666,6 +719,21 @@ export function createSheetAPI(context: {
     getCellStyle: context.getCellStyleFn,
     setCellStyle(row: number, col: number, style: Partial<CellStyle>): void {
       context.setCellStyleFn(row, col, style)
+      
+      // 如果设置了 wrapText: true 且行高未被用户手动设置过，自动计算行高
+      if (style.wrapText === true && !context.manualRowHeights.has(row)) {
+        const value = context.getCellValue(row, col)
+        if (value) {
+          const colWidth = context.getColWidth(col)
+          const cellStyle = context.getCellStyleFn(row, col)
+          const requiredHeight = calculateRowHeightForWrapText(value, colWidth, cellStyle)
+          const currentHeight = context.getRowHeight(row)
+          if (requiredHeight > currentHeight) {
+            context.rowHeights.set(row, requiredHeight)
+          }
+        }
+      }
+      
       context.draw()
     },
     clearCellStyle(row: number, col: number): void {
@@ -674,6 +742,34 @@ export function createSheetAPI(context: {
     },
     setRangeStyle(startRow: number, startCol: number, endRow: number, endCol: number, style: Partial<CellStyle>): void {
       context.setRangeStyleFn(startRow, startCol, endRow, endCol, style)
+      
+      // 如果设置了 wrapText: true，为每一行计算所需的高度
+      if (style.wrapText === true) {
+        for (let r = startRow; r <= endRow; r++) {
+          // 跳过用户手动设置行高的行
+          if (context.manualRowHeights.has(r)) continue
+          
+          // 找出这一行中需要最大高度的单元格
+          let maxRequiredHeight = context.getRowHeight(r)
+          for (let c = startCol; c <= endCol; c++) {
+            const value = context.getCellValue(r, c)
+            if (value) {
+              const colWidth = context.getColWidth(c)
+              const cellStyle = context.getCellStyleFn(r, c)
+              const requiredHeight = calculateRowHeightForWrapText(value, colWidth, cellStyle)
+              if (requiredHeight > maxRequiredHeight) {
+                maxRequiredHeight = requiredHeight
+              }
+            }
+          }
+          
+          // 如果需要更大的高度，设置行高
+          if (maxRequiredHeight > context.getRowHeight(r)) {
+            context.rowHeights.set(r, maxRequiredHeight)
+          }
+        }
+      }
+      
       context.draw()
     },
     
@@ -728,6 +824,21 @@ export function createSheetAPI(context: {
     // 快捷方法 - 其他
     setWrapText(row: number, col: number, wrap: boolean): void {
       context.setCellStyleFn(row, col, { wrapText: wrap })
+      
+      // 如果启用换行且行高未被用户手动设置过，则自动计算行高
+      if (wrap && !context.manualRowHeights.has(row)) {
+        const value = context.getCellValue(row, col)
+        if (value) {
+          const colWidth = context.getColWidth(col)
+          const cellStyle = context.getCellStyleFn(row, col)
+          const requiredHeight = calculateRowHeightForWrapText(value, colWidth, cellStyle)
+          const currentHeight = context.getRowHeight(row)
+          if (requiredHeight > currentHeight) {
+            context.rowHeights.set(row, requiredHeight)
+          }
+        }
+      }
+      
       context.draw()
     },
     setTextRotation(row: number, col: number, rotation: number): void {

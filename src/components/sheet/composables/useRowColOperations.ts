@@ -27,7 +27,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   const {
     constants,
     model, formulaSheet, undoRedo,
-    rowHeights, colWidths,
+    rowHeights, colWidths, manualRowHeights,
     selected,
     inputDialog,
     saveRowHeightsSnapshot, restoreRowHeights,
@@ -161,7 +161,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
    */
   function showSetRowHeightDialog(row: number) {
     const currentHeight = getRowHeight(row)
-    showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, inputDialog as any, onDraw)
+    showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, manualRowHeights.value, inputDialog as any, onDraw)
   }
   
   // ==================== 列操作 ====================

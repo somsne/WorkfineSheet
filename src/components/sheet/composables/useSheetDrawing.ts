@@ -160,7 +160,7 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     ctx.fillRect(cellX, cellY, cellWidth, cellHeight)
     
     // 构建字体样式
-    const fontSize = cellStyle.fontSize || 13
+    const fontSize = cellStyle.fontSize || 12
     const fontFamily = cellStyle.fontFamily || 'Arial, sans-serif'
     const fontWeight = cellStyle.bold ? 'bold' : 'normal'
     const fontStyle = cellStyle.italic ? 'italic' : 'normal'

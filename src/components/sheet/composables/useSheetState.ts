@@ -124,7 +124,9 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
   // ==================== 自定义行高和列宽 ====================
   const rowHeights = ref<Map<number, number>>(new Map())
   const colWidths = ref<Map<number, number>>(new Map())
-  
+  // 用户手动设置的行高（区分于自动换行调整的行高）
+  const manualRowHeights = ref<Set<number>>(new Set())
+
   // ==================== 隐藏行列状态 ====================
   const hiddenRows = ref<Set<number>>(new Set())
   const hiddenCols = ref<Set<number>>(new Set())
@@ -364,6 +366,7 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     // 行高列宽
     rowHeights,
     colWidths,
+    manualRowHeights,
     hiddenRows,
     hiddenCols,
     showGridLines,
