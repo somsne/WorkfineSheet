@@ -942,7 +942,7 @@ div[contenteditable]:empty::before {
   color: var(--placeholder-color, #999);
 }
 
-/* 暗黑模式支持 */
+/* 暗黑模式支持 - 系统偏好 */
 @media (prefers-color-scheme: dark) {
   div[contenteditable] {
     --caret-color: #fff;
@@ -956,5 +956,19 @@ div[contenteditable]:empty::before {
   div[contenteditable]:empty::before {
     --placeholder-color: #666;
   }
+}
+
+/* 暗黑模式支持 - 手动切换 */
+:global(html.dark) div[contenteditable] {
+  --caret-color: #fff;
+}
+
+:global(html.dark) div[contenteditable]::selection,
+:global(html.dark) div[contenteditable] span::selection {
+  --selection-bg: rgba(100, 180, 255, 0.4);
+}
+
+:global(html.dark) div[contenteditable]:empty::before {
+  --placeholder-color: #666;
 }
 </style>

@@ -1,5 +1,28 @@
 <template>
   <div class="style-toolbar">
+    <!-- 撤销还原 -->
+    <button 
+      @click="doUndo" 
+      class="style-btn undo-btn" 
+      :class="{ disabled: !canUndo }"
+      :disabled="!canUndo"
+      :title="undoTitle"
+    >
+      <span class="undo-icon">↩</span>
+    </button>
+    
+    <button 
+      @click="doRedo" 
+      class="style-btn redo-btn" 
+      :class="{ disabled: !canRedo }"
+      :disabled="!canRedo"
+      :title="redoTitle"
+    >
+      <span class="redo-icon">↪</span>
+    </button>
+
+    <div class="separator"></div>
+
     <!-- 字体选择 -->
     <select v-model="fontFamily" @change="applyFontFamily" class="font-select">
       <!-- macOS 系统字体 -->
@@ -194,6 +217,29 @@
 
     <div class="separator"></div>
 
+    <!-- 合并单元格 -->
+    <div class="merge-dropdown">
+      <button 
+        @click="toggleMergeMenu" 
+        class="style-btn merge-btn" 
+        title="合并单元格"
+      >
+        <span class="merge-icon">⬚</span>
+      </button>
+      <div v-if="showMergeMenu" class="merge-menu">
+        <div class="merge-menu-item" @click="doMergeCells">
+          <span class="merge-type-icon">⬚</span>
+          <span>合并单元格</span>
+        </div>
+        <div class="merge-menu-item" @click="doUnmergeCells">
+          <span class="merge-type-icon">⊞</span>
+          <span>取消合并</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="separator"></div>
+
     <!-- 单元格格式 -->
     <div class="format-dropdown">
       <button 
@@ -328,7 +374,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { SheetAPI } from './sheet/api'
 import type { CellStyle, BorderStyle, CellFormatType } from './sheet/types'
 
@@ -337,6 +383,40 @@ const props = defineProps<{
   currentSelection: { row: number; col: number }
   selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
 }>()
+
+// 检测是否为 macOS
+const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+const modKey = isMac ? '⌘' : 'Ctrl'
+
+// 撤销还原状态
+const canUndo = ref(false)
+const canRedo = ref(false)
+
+// 计算撤销还原按钮的提示文字
+const undoTitle = computed(() => `撤销 (${modKey}+Z)`)
+const redoTitle = computed(() => isMac ? `还原 (${modKey}+Shift+Z)` : `还原 (${modKey}+Y)`)
+
+// 更新撤销还原状态
+function updateUndoRedoState() {
+  canUndo.value = props.api.canUndo()
+  canRedo.value = props.api.canRedo()
+}
+
+// 撤销操作
+function doUndo() {
+  if (props.api.canUndo()) {
+    props.api.undo()
+    updateUndoRedoState()
+  }
+}
+
+// 还原操作
+function doRedo() {
+  if (props.api.canRedo()) {
+    props.api.redo()
+    updateUndoRedoState()
+  }
+}
 
 // 当前样式状态
 const fontFamily = ref('Arial, sans-serif')
@@ -368,19 +448,34 @@ const handleClickOutside = (e: MouseEvent) => {
   if (!target.closest('.format-dropdown')) {
     showFormatMenu.value = false
   }
+  if (!target.closest('.merge-dropdown')) {
+    showMergeMenu.value = false
+  }
 }
+
+// 定时器 ID，用于更新撤销还原状态
+let undoRedoTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  // 初始化撤销还原状态
+  updateUndoRedoState()
+  // 定期更新撤销还原状态（因为操作可能来自快捷键）
+  undoRedoTimer = setInterval(updateUndoRedoState, 200)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  if (undoRedoTimer) {
+    clearInterval(undoRedoTimer)
+    undoRedoTimer = null
+  }
 })
 
 // 监听选区变化，更新工具栏状态
 watch(() => [props.currentSelection.row, props.currentSelection.col], () => {
   updateToolbarState()
+  updateUndoRedoState()
 }, { immediate: true })
 
 // 辅助函数：应用样式到选区或单个单元格
@@ -613,6 +708,31 @@ function toggleFormatMenu() {
   showFormatMenu.value = !showFormatMenu.value
   // 关闭其他菜单
   showBorderMenu.value = false
+  showMergeMenu.value = false
+}
+
+// 合并单元格功能
+const showMergeMenu = ref(false)
+
+function toggleMergeMenu() {
+  showMergeMenu.value = !showMergeMenu.value
+  // 关闭其他菜单
+  showBorderMenu.value = false
+  showFormatMenu.value = false
+}
+
+function doMergeCells() {
+  const result = props.api.mergeSelection()
+  if (!result) {
+    // 合并失败，可能是因为只选择了一个单元格或与现有合并冲突
+    console.warn('无法合并单元格：请选择多个单元格或检查是否与现有合并区域冲突')
+  }
+  showMergeMenu.value = false
+}
+
+function doUnmergeCells() {
+  props.api.unmergeSelection()
+  showMergeMenu.value = false
 }
 
 function applyFormat(formatType: CellFormatType) {
@@ -757,6 +877,27 @@ onMounted(() => {
 .style-btn.active:hover {
   background: #2563eb;
   border-color: #1d4ed8;
+}
+
+.style-btn.disabled,
+.style-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.style-btn.disabled:hover,
+.style-btn:disabled:hover {
+  background: var(--btn-bg, white);
+  border-color: var(--btn-border, #d0d0d0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transform: none;
+}
+
+.undo-icon,
+.redo-icon {
+  font-size: 16px;
+  font-weight: bold;
 }
 
 .color-picker {
@@ -967,7 +1108,57 @@ onMounted(() => {
   margin: 6px 0;
 }
 
-/* 夜间模式 */
+/* 合并单元格下拉菜单 */
+.merge-dropdown {
+  position: relative;
+}
+
+.merge-btn {
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.merge-icon {
+  font-size: 14px;
+}
+
+.merge-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--menu-bg, white);
+  border: 1px solid var(--menu-border, #d0d0d0);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 160px;
+  z-index: 1000;
+}
+
+.merge-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  color: var(--menu-text, #333);
+  user-select: none;
+}
+
+.merge-menu-item:hover {
+  background: var(--menu-hover, #f0f0f0);
+}
+
+.merge-type-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
+  color: var(--icon-color, #666);
+}
+
+/* 夜间模式 - 系统偏好 */
 @media (prefers-color-scheme: dark) {
   .style-toolbar {
     --toolbar-bg: linear-gradient(to bottom, #2a2a2a 0%, #1e1e1e 100%);
@@ -1003,5 +1194,57 @@ onMounted(() => {
     --hint-color: #888;
     --error-color: #ef4444;
   }
+
+  .merge-menu {
+    --menu-bg: #2d2d2d;
+    --menu-border: #505050;
+    --menu-text: #e0e0e0;
+    --menu-hover: #3a3a3a;
+    --icon-color: #b0b0b0;
+  }
+}
+
+/* 夜间模式 - 手动切换 */
+:global(html.dark) .style-toolbar {
+  --toolbar-bg: linear-gradient(to bottom, #2a2a2a 0%, #1e1e1e 100%);
+  --toolbar-border: #404040;
+  --select-bg: #2d2d2d;
+  --select-text: #e0e0e0;
+  --select-border: #505050;
+  --select-border-hover: #707070;
+  --separator-color: #505050;
+  --btn-bg: #2d2d2d;
+  --btn-text: #e0e0e0;
+  --btn-border: #505050;
+  --btn-border-hover: #707070;
+  --btn-bg-hover: #3a3a3a;
+}
+
+:global(html.dark) .border-menu {
+  --menu-bg: #2d2d2d;
+  --menu-border: #505050;
+  --menu-text: #e0e0e0;
+  --menu-hover: #3a3a3a;
+  --icon-color: #b0b0b0;
+  --label-text: #b0b0b0;
+}
+
+:global(html.dark) .format-menu {
+  --menu-bg: #2d2d2d;
+  --menu-border: #505050;
+  --menu-text: #e0e0e0;
+  --menu-hover: #3a3a3a;
+  --icon-color: #b0b0b0;
+  --label-text: #b0b0b0;
+  --hint-color: #888;
+  --error-color: #ef4444;
+}
+
+:global(html.dark) .merge-menu {
+  --menu-bg: #2d2d2d;
+  --menu-border: #505050;
+  --menu-text: #e0e0e0;
+  --menu-hover: #3a3a3a;
+  --icon-color: #b0b0b0;
 }
 </style>

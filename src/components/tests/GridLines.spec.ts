@@ -17,7 +17,12 @@ describe('网格线功能测试', () => {
       getShowGridLines: vi.fn(() => gridLinesState),
       setShowGridLines: vi.fn((show: boolean) => {
         gridLinesState = show
-      })
+      }),
+      // 撤销还原相关
+      undo: vi.fn(() => false),
+      redo: vi.fn(() => false),
+      canUndo: vi.fn(() => false),
+      canRedo: vi.fn(() => false)
     } as unknown as SheetAPI
   })
 

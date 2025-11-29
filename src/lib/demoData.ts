@@ -9,7 +9,7 @@ import type { CellFormat } from '../components/sheet/types'
  * Initialize the sheet with demo data showcasing various cell styles
  */
 export function initializeDemoData(model: SheetModel): void {
-  // ===== 标题行 =====
+  // ===== 标题行 (合并单元格 A1:E1) =====
   model.setValue(0, 0, '样式功能演示')
   model.setCellStyle(0, 0, {
     fontSize: 20,
@@ -19,6 +19,11 @@ export function initializeDemoData(model: SheetModel): void {
     textAlign: 'center',
     verticalAlign: 'middle'
   })
+  // 合并标题单元格 A1:E1
+  model.mergeCells(0, 0, 0, 4)
+
+  // ===== P3～T12：合并单元格演示区域 =====
+  initializeMergeCellsDemo(model)
 
   // ===== G3～J20：边框样式演示区域 =====
   // 标题
@@ -1043,4 +1048,184 @@ function initializeExtendedFormatExamples(model: SheetModel): void {
   model.setValue(rightRow, rightCol + 2, dateTimeStr)
   model.setCellFormat(rightRow, rightCol + 2, { type: 'datetime-cn' } as CellFormat)
   model.setValue(rightRow, rightCol + 3, '2024年12月25日 9时5分')
+}
+
+/**
+ * Initialize merge cells demo section in P3-T12 area
+ */
+function initializeMergeCellsDemo(model: SheetModel): void {
+  const startRow = 2  // 第3行 (0-indexed = 2)
+  const startCol = 15 // P列 (0-indexed = 15)
+
+  // ===== 标题 (合并 P3:T3) =====
+  model.setValue(startRow, startCol, '合并单元格演示')
+  model.setCellStyle(startRow, startCol, {
+    bold: true,
+    fontSize: 16,
+    color: '#ffffff',
+    backgroundColor: '#7c3aed',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow, startCol, startRow, startCol + 4)
+
+  // ===== 水平合并示例 =====
+  // 标签
+  model.setValue(startRow + 2, startCol, '水平合并')
+  model.setCellStyle(startRow + 2, startCol, {
+    bold: true,
+    backgroundColor: '#f3f4f6',
+    textAlign: 'right',
+    verticalAlign: 'middle'
+  })
+  
+  // 水平合并 2x1 (Q5:R5)
+  model.setValue(startRow + 2, startCol + 1, '2列合并')
+  model.setCellStyle(startRow + 2, startCol + 1, {
+    backgroundColor: '#dbeafe',
+    color: '#1e40af',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow + 2, startCol + 1, startRow + 2, startCol + 2)
+  
+  // 水平合并 3x1 (S5:U5)
+  model.setValue(startRow + 2, startCol + 3, '3列合并')
+  model.setCellStyle(startRow + 2, startCol + 3, {
+    backgroundColor: '#dcfce7',
+    color: '#166534',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow + 2, startCol + 3, startRow + 2, startCol + 5)
+
+  // ===== 垂直合并示例 =====
+  // 标签
+  model.setValue(startRow + 4, startCol, '垂直合并')
+  model.setCellStyle(startRow + 4, startCol, {
+    bold: true,
+    backgroundColor: '#f3f4f6',
+    textAlign: 'right',
+    verticalAlign: 'middle'
+  })
+  
+  // 垂直合并 1x2 (Q7:Q8)
+  model.setValue(startRow + 4, startCol + 1, '2行合并')
+  model.setCellStyle(startRow + 4, startCol + 1, {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow + 4, startCol + 1, startRow + 5, startCol + 1)
+  
+  // 垂直合并 1x3 (R7:R9)
+  model.setValue(startRow + 4, startCol + 2, '3行合并')
+  model.setCellStyle(startRow + 4, startCol + 2, {
+    backgroundColor: '#fee2e2',
+    color: '#991b1b',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow + 4, startCol + 2, startRow + 6, startCol + 2)
+
+  // ===== 矩形合并示例 =====
+  // 标签
+  model.setValue(startRow + 8, startCol, '矩形合并')
+  model.setCellStyle(startRow + 8, startCol, {
+    bold: true,
+    backgroundColor: '#f3f4f6',
+    textAlign: 'right',
+    verticalAlign: 'middle'
+  })
+  
+  // 2x2 合并 (Q11:R12)
+  model.setValue(startRow + 8, startCol + 1, '2x2合并')
+  model.setCellStyle(startRow + 8, startCol + 1, {
+    backgroundColor: '#e0e7ff',
+    color: '#3730a3',
+    textAlign: 'center',
+    verticalAlign: 'middle',
+    bold: true
+  })
+  model.mergeCells(startRow + 8, startCol + 1, startRow + 9, startCol + 2)
+  
+  // 2x3 合并 (S11:U12)
+  model.setValue(startRow + 8, startCol + 3, '2x3合并')
+  model.setCellStyle(startRow + 8, startCol + 3, {
+    backgroundColor: '#fae8ff',
+    color: '#86198f',
+    textAlign: 'center',
+    verticalAlign: 'middle',
+    bold: true
+  })
+  model.mergeCells(startRow + 8, startCol + 3, startRow + 9, startCol + 5)
+
+  // ===== 表格样式合并（模拟表头） =====
+  // 标题行
+  model.setValue(startRow + 11, startCol, '表格合并示例')
+  model.setCellStyle(startRow + 11, startCol, {
+    bold: true,
+    backgroundColor: '#f3f4f6',
+    textAlign: 'right',
+    verticalAlign: 'middle'
+  })
+  
+  // 模拟表格 - 表头
+  model.setValue(startRow + 11, startCol + 1, '姓名')
+  model.setCellStyle(startRow + 11, startCol + 1, {
+    backgroundColor: '#3b82f6',
+    color: '#ffffff',
+    bold: true,
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  // 联系方式表头（合并2列）
+  model.setValue(startRow + 11, startCol + 2, '联系方式')
+  model.setCellStyle(startRow + 11, startCol + 2, {
+    backgroundColor: '#3b82f6',
+    color: '#ffffff',
+    bold: true,
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow + 11, startCol + 2, startRow + 11, startCol + 3)
+  
+  // 子表头
+  model.setValue(startRow + 12, startCol + 1, '')
+  model.setValue(startRow + 12, startCol + 2, '电话')
+  model.setValue(startRow + 12, startCol + 3, '邮箱')
+  model.setCellStyle(startRow + 12, startCol + 2, {
+    backgroundColor: '#60a5fa',
+    color: '#ffffff',
+    textAlign: 'center'
+  })
+  model.setCellStyle(startRow + 12, startCol + 3, {
+    backgroundColor: '#60a5fa',
+    color: '#ffffff',
+    textAlign: 'center'
+  })
+  
+  // 姓名列合并两行（对应表头和子表头）
+  model.mergeCells(startRow + 11, startCol + 1, startRow + 12, startCol + 1)
+  
+  // 数据行
+  model.setValue(startRow + 13, startCol + 1, '张三')
+  model.setValue(startRow + 13, startCol + 2, '13800138000')
+  model.setValue(startRow + 13, startCol + 3, 'zhang@test.com')
+  model.setCellStyle(startRow + 13, startCol + 1, { textAlign: 'center' })
+  model.setCellStyle(startRow + 13, startCol + 2, { textAlign: 'center' })
+  model.setCellStyle(startRow + 13, startCol + 3, { textAlign: 'center' })
+  
+  // 添加边框让表格更清晰
+  for (let r = startRow + 11; r <= startRow + 13; r++) {
+    for (let c = startCol + 1; c <= startCol + 3; c++) {
+      model.setCellBorder(r, c, {
+        top: { style: 'thin', color: '#94a3b8' },
+        right: { style: 'thin', color: '#94a3b8' },
+        bottom: { style: 'thin', color: '#94a3b8' },
+        left: { style: 'thin', color: '#94a3b8' }
+      })
+    }
+  }
 }

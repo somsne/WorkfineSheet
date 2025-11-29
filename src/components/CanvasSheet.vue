@@ -97,7 +97,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive, watch, computed, nextTick } from 'vue'
 import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft, getRowAtY as geomGetRowAtY, getColAtX as geomGetColAtX, getVisibleRange as geomGetVisibleRange, ensureVisible as geomEnsureVisible } from './sheet/geometry'
-import type { GeometryConfig, SizeAccess, CellFormat } from './sheet/types'
+import type { GeometryConfig, SizeAccess, CellFormat, CellStyle, CellBorder } from './sheet/types'
 import { setCanvasSize, createRedrawScheduler } from './sheet/renderCore'
 import { drawGrid as renderGrid } from './sheet/renderGrid'
 import type { GridRenderConfig } from './sheet/renderGrid'
@@ -691,7 +691,8 @@ function drawGrid(w: number, h: number) {
     totalRows: DEFAULT_ROWS,
     totalCols: DEFAULT_COLS,
     sizes,
-    geometryConfig: cfg
+    geometryConfig: cfg,
+    mergedRegions: model.getAllMergedRegions()
   }
   
   renderGrid(ctx, gridConfig)
@@ -725,6 +726,9 @@ function drawCells(w: number, h: number) {
     getCellStyle: (r, c) => model.getCellStyle(r, c),
     model: model, // 提供边框访问
     getSelectionRangeText,
+    getMergedCellInfo: (r, c) => model.getMergedCellInfo(r, c),
+    getMergedRegion: (r, c) => model.getMergedRegion(r, c),
+    mergedRegions: model.getAllMergedRegions(),
     startRow,
     endRow,
     startCol,
@@ -826,7 +830,8 @@ function onMouseDown(e: MouseEvent) {
       sizes,
       defaultRows: DEFAULT_ROWS,
       defaultCols: DEFAULT_COLS,
-      state: selectionState
+      state: selectionState,
+      getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
     draw()
     return
@@ -877,7 +882,8 @@ function onMouseDown(e: MouseEvent) {
       sizes,
       defaultRows: DEFAULT_ROWS,
       defaultCols: DEFAULT_COLS,
-      state: selectionState
+      state: selectionState,
+      getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
     draw()
     return
@@ -940,7 +946,8 @@ function onMouseDown(e: MouseEvent) {
     sizes,
     defaultRows: DEFAULT_ROWS,
     defaultCols: DEFAULT_COLS,
-    state: selectionState
+    state: selectionState,
+    getMergedRegion: (r, c) => model.getMergedRegion(r, c)
   })
 }
 
@@ -975,8 +982,15 @@ function onDoubleClick(e: MouseEvent) {
   if (!shouldOpen) return
 
   // Account for scroll offset - 使用动态计算
-  const col = getColAtX(x)
-  const row = getRowAtY(y)
+  let col = getColAtX(x)
+  let row = getRowAtY(y)
+  
+  // 如果双击的是合并单元格，定位到主单元格
+  const mergedRegion = model.getMergedRegion(row, col)
+  if (mergedRegion) {
+    row = mergedRegion.startRow
+    col = mergedRegion.startCol
+  }
 
   // Open edit mode
   selected.row = row
@@ -1358,7 +1372,8 @@ function onMouseMove(e: MouseEvent) {
     sizes,
     defaultRows: DEFAULT_ROWS,
     defaultCols: DEFAULT_COLS,
-    state: selectionState
+    state: selectionState,
+    getMergedRegion: (r, c) => model.getMergedRegion(r, c)
   })
 
   if (changed) {
@@ -1437,10 +1452,37 @@ function onMouseUp(): void {
     }
     
     // In formula mode and selectable state: insert cell reference or range
-    if (dragState.startRow !== dragState.currentRow || dragState.startCol !== dragState.currentCol) {
+    // 检查起始位置是否是合并单元格
+    const startRegion = model.getMergedRegion(dragState.startRow, dragState.startCol)
+    
+    // 判断是否真正进行了拖拽选择：
+    // 1. 如果起始位置是合并单元格，且 current 在合并区域内，则算作单击
+    // 2. 否则，如果 start 和 current 不同，则算作拖拽
+    let isActualDrag = false
+    if (startRegion) {
+      // 检查 current 是否超出了合并区域的边界
+      isActualDrag = (
+        dragState.currentRow < startRegion.startRow ||
+        dragState.currentRow > startRegion.endRow ||
+        dragState.currentCol < startRegion.startCol ||
+        dragState.currentCol > startRegion.endCol
+      )
+    } else {
+      isActualDrag = (
+        dragState.startRow !== dragState.currentRow ||
+        dragState.startCol !== dragState.currentCol
+      )
+    }
+    
+    if (isActualDrag) {
       // Dragged: insert range reference
       const startAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
       const endAddr = formulaSheet.getCellAddress(dragState.currentRow, dragState.currentCol)
+      ;(overlayInput.value as any).insertRangeReference(startAddr, endAddr)
+    } else if (startRegion && (startRegion.endRow > startRegion.startRow || startRegion.endCol > startRegion.startCol)) {
+      // Single click on merged cell: insert range reference (e.g., A1:B2)
+      const startAddr = formulaSheet.getCellAddress(startRegion.startRow, startRegion.startCol)
+      const endAddr = formulaSheet.getCellAddress(startRegion.endRow, startRegion.endCol)
       ;(overlayInput.value as any).insertRangeReference(startAddr, endAddr)
     } else {
       // Single cell click: insert single reference
@@ -1478,7 +1520,7 @@ function onMouseUp(): void {
     dragState
   }
   
-  const needsRedraw = endDragSelection(selectionState, DEFAULT_COLS)
+  const needsRedraw = endDragSelection(selectionState, DEFAULT_COLS, (r, c) => model.getMergedRegion(r, c), DEFAULT_ROWS)
   if (needsRedraw) {
     draw()
     // 拖拽选择结束后，聚焦 IME 代理
@@ -1966,8 +2008,39 @@ function onContextMenu(e: MouseEvent) {
   handleContextMenu(e, rect, menuConfig, contextMenu)
 }
 
-// 行操作
+// 保存行高快照
+function saveRowHeightsSnapshot(): Map<number, number> {
+  return new Map(rowHeights.value)
+}
+
+// 恢复行高
+function restoreRowHeights(snapshot: Map<number, number>) {
+  rowHeights.value.clear()
+  snapshot.forEach((height, row) => {
+    rowHeights.value.set(row, height)
+  })
+}
+
+// 保存列宽快照
+function saveColWidthsSnapshot(): Map<number, number> {
+  return new Map(colWidths.value)
+}
+
+// 恢复列宽
+function restoreColWidths(snapshot: Map<number, number>) {
+  colWidths.value.clear()
+  snapshot.forEach((width, col) => {
+    colWidths.value.set(col, width)
+  })
+}
+
+// 行操作（支持撤销/重做）
 async function insertRowAbove(row: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const rowHeightsSnapshot = saveRowHeightsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -1982,9 +2055,38 @@ async function insertRowAbove(row: number) {
     onRedraw: draw
   }
   await insertRowAboveHelper(row, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newRowHeightsSnapshot = saveRowHeightsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `在第 ${row + 1} 行上方插入行`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreRowHeights(rowHeightsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreRowHeights(newRowHeightsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 async function insertRowBelow(row: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const rowHeightsSnapshot = saveRowHeightsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -1999,9 +2101,38 @@ async function insertRowBelow(row: number) {
     onRedraw: draw
   }
   await insertRowBelowHelper(row, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newRowHeightsSnapshot = saveRowHeightsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `在第 ${row + 1} 行下方插入行`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreRowHeights(rowHeightsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreRowHeights(newRowHeightsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 async function deleteRow(row: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const rowHeightsSnapshot = saveRowHeightsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -2016,6 +2147,30 @@ async function deleteRow(row: number) {
     onRedraw: draw
   }
   await deleteRowHelper(row, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newRowHeightsSnapshot = saveRowHeightsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `删除第 ${row + 1} 行`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreRowHeights(rowHeightsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreRowHeights(newRowHeightsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 function showSetRowHeightDialog(row: number) {
@@ -2023,8 +2178,13 @@ function showSetRowHeightDialog(row: number) {
   showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, inputDialog as any, draw)
 }
 
-// 列操作
+// 列操作（支持撤销/重做）
 async function insertColLeft(col: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const colWidthsSnapshot = saveColWidthsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -2039,9 +2199,38 @@ async function insertColLeft(col: number) {
     onRedraw: draw
   }
   await insertColLeftHelper(col, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newColWidthsSnapshot = saveColWidthsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `在第 ${col + 1} 列左侧插入列`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreColWidths(colWidthsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreColWidths(newColWidthsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 async function insertColRight(col: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const colWidthsSnapshot = saveColWidthsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -2056,9 +2245,38 @@ async function insertColRight(col: number) {
     onRedraw: draw
   }
   await insertColRightHelper(col, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newColWidthsSnapshot = saveColWidthsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `在第 ${col + 1} 列右侧插入列`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreColWidths(colWidthsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreColWidths(newColWidthsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 async function deleteCol(col: number) {
+  // 保存快照
+  const modelSnapshot = model.createSnapshot()
+  const colWidthsSnapshot = saveColWidthsSnapshot()
+  const oldSelected = { row: selected.row, col: selected.col }
+  
   const rowColConfig: RowColConfig = {
     formulaSheet,
     sizeConfig: {
@@ -2073,6 +2291,30 @@ async function deleteCol(col: number) {
     onRedraw: draw
   }
   await deleteColHelper(col, rowColConfig)
+  
+  // 保存操作后的状态
+  const newModelSnapshot = model.createSnapshot()
+  const newColWidthsSnapshot = saveColWidthsSnapshot()
+  const newSelected = { row: selected.row, col: selected.col }
+  
+  // 注册撤销命令
+  undoRedo.record({
+    name: `删除第 ${col + 1} 列`,
+    undo: () => {
+      model.restoreFromSnapshot(modelSnapshot)
+      restoreColWidths(colWidthsSnapshot)
+      selected.row = oldSelected.row
+      selected.col = oldSelected.col
+      draw()
+    },
+    redo: () => {
+      model.restoreFromSnapshot(newModelSnapshot)
+      restoreColWidths(newColWidthsSnapshot)
+      selected.row = newSelected.row
+      selected.col = newSelected.col
+      draw()
+    }
+  })
 }
 
 function showSetColWidthDialog(col: number) {
@@ -2113,6 +2355,21 @@ onMounted(() => {
     }
     eventManager.register(container.value, handlers)
   })
+  
+  // 监听主题切换（通过 html class 变化）
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        // 主题发生变化，重新绘制
+        draw()
+        break
+      }
+    }
+  })
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  
+  // 保存 observer 到 ref 以便清理
+  ;(window as any).__sheetThemeObserver = observer
 })
 
 onBeforeUnmount(() => {
@@ -2121,6 +2378,13 @@ onBeforeUnmount(() => {
   
   // 移除所有事件
   eventManager.unregister()
+  
+  // 清理主题监听器
+  const observer = (window as any).__sheetThemeObserver
+  if (observer) {
+    observer.disconnect()
+    delete (window as any).__sheetThemeObserver
+  }
 })
 
 function onVThumbMouseDown(e: MouseEvent) {
@@ -2174,23 +2438,186 @@ const api = createSheetAPI({
     draw()
   },
   
-  // 样式相关
+  // 样式相关（支持撤销/重做）
   getCellStyleFn: (row: number, col: number) => model.getCellStyle(row, col),
-  setCellStyleFn: (row: number, col: number, style) => model.setCellStyle(row, col, style),
-  clearCellStyleFn: (row: number, col: number) => model.clearCellStyle(row, col),
-  setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => 
-    model.setRangeStyle(startRow, startCol, endRow, endCol, style),
+  setCellStyleFn: (row: number, col: number, style) => {
+    const oldStyle = { ...model.getCellStyle(row, col) }
+    undoRedo.execute({
+      name: `设置单元格样式 (${row}, ${col})`,
+      undo: () => {
+        // 清除当前样式，恢复旧样式
+        model.clearCellStyle(row, col)
+        if (Object.keys(oldStyle).length > 0) {
+          model.setCellStyle(row, col, oldStyle)
+        }
+        draw()
+      },
+      redo: () => {
+        model.setCellStyle(row, col, style)
+        draw()
+      }
+    })
+  },
+  clearCellStyleFn: (row: number, col: number) => {
+    const oldStyle = { ...model.getCellStyle(row, col) }
+    if (Object.keys(oldStyle).length > 0) {
+      undoRedo.execute({
+        name: `清除单元格样式 (${row}, ${col})`,
+        undo: () => {
+          model.setCellStyle(row, col, oldStyle)
+          draw()
+        },
+        redo: () => {
+          model.clearCellStyle(row, col)
+          draw()
+        }
+      })
+    }
+  },
+  setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => {
+    // 保存旧样式
+    const oldStyles: Array<{ row: number; col: number; style: CellStyle }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        oldStyles.push({ row: r, col: c, style: { ...model.getCellStyle(r, c) } })
+      }
+    }
+    
+    undoRedo.execute({
+      name: `设置区域样式 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        for (const { row, col, style: oldStyle } of oldStyles) {
+          model.clearCellStyle(row, col)
+          if (Object.keys(oldStyle).length > 0) {
+            model.setCellStyle(row, col, oldStyle)
+          }
+        }
+        draw()
+      },
+      redo: () => {
+        model.setRangeStyle(startRow, startCol, endRow, endCol, style)
+        draw()
+      }
+    })
+  },
   
-  // 边框相关
+  // 边框相关（支持撤销/重做）
   getCellBorderFn: (row: number, col: number) => model.getCellBorder(row, col),
-  setCellBorderFn: (row: number, col: number, border) => model.setCellBorder(row, col, border),
-  clearCellBorderFn: (row: number, col: number) => model.clearCellBorder(row, col),
-  setRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, border) =>
-    model.setRangeBorder(startRow, startCol, endRow, endCol, border),
-  setRangeOuterBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, edge) =>
-    model.setRangeOuterBorder(startRow, startCol, endRow, endCol, edge),
-  clearRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number) =>
-    model.clearRangeBorder(startRow, startCol, endRow, endCol),
+  setCellBorderFn: (row: number, col: number, border) => {
+    const oldBorder = model.getCellBorder(row, col)
+    undoRedo.execute({
+      name: `设置单元格边框 (${row}, ${col})`,
+      undo: () => {
+        model.clearCellBorder(row, col)
+        if (oldBorder) {
+          model.setCellBorder(row, col, oldBorder)
+        }
+        draw()
+      },
+      redo: () => {
+        model.setCellBorder(row, col, border)
+        draw()
+      }
+    })
+  },
+  clearCellBorderFn: (row: number, col: number) => {
+    const oldBorder = model.getCellBorder(row, col)
+    if (oldBorder) {
+      undoRedo.execute({
+        name: `清除单元格边框 (${row}, ${col})`,
+        undo: () => {
+          model.setCellBorder(row, col, oldBorder)
+          draw()
+        },
+        redo: () => {
+          model.clearCellBorder(row, col)
+          draw()
+        }
+      })
+    }
+  },
+  setRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, border) => {
+    // 保存旧边框
+    const oldBorders: Array<{ row: number; col: number; border: CellBorder | undefined }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        oldBorders.push({ row: r, col: c, border: model.getCellBorder(r, c) })
+      }
+    }
+    
+    undoRedo.execute({
+      name: `设置区域边框 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        for (const { row, col, border: oldBorder } of oldBorders) {
+          model.clearCellBorder(row, col)
+          if (oldBorder) {
+            model.setCellBorder(row, col, oldBorder)
+          }
+        }
+        draw()
+      },
+      redo: () => {
+        model.setRangeBorder(startRow, startCol, endRow, endCol, border)
+        draw()
+      }
+    })
+  },
+  setRangeOuterBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number, edge) => {
+    // 保存旧边框
+    const oldBorders: Array<{ row: number; col: number; border: CellBorder | undefined }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        oldBorders.push({ row: r, col: c, border: model.getCellBorder(r, c) })
+      }
+    }
+    
+    undoRedo.execute({
+      name: `设置区域外边框 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        for (const { row, col, border: oldBorder } of oldBorders) {
+          model.clearCellBorder(row, col)
+          if (oldBorder) {
+            model.setCellBorder(row, col, oldBorder)
+          }
+        }
+        draw()
+      },
+      redo: () => {
+        model.setRangeOuterBorder(startRow, startCol, endRow, endCol, edge)
+        draw()
+      }
+    })
+  },
+  clearRangeBorderFn: (startRow: number, startCol: number, endRow: number, endCol: number) => {
+    // 保存旧边框
+    const oldBorders: Array<{ row: number; col: number; border: CellBorder | undefined }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const border = model.getCellBorder(r, c)
+        if (border) {
+          oldBorders.push({ row: r, col: c, border })
+        }
+      }
+    }
+    
+    if (oldBorders.length > 0) {
+      undoRedo.execute({
+        name: `清除区域边框 (${startRow},${startCol})-(${endRow},${endCol})`,
+        undo: () => {
+          for (const { row, col, border } of oldBorders) {
+            if (border) {
+              model.setCellBorder(row, col, border)
+            }
+          }
+          draw()
+        },
+        redo: () => {
+          model.clearRangeBorder(startRow, startCol, endRow, endCol)
+          draw()
+        }
+      })
+    }
+  },
   
   // 绘制
   draw,
@@ -2268,7 +2695,107 @@ const api = createSheetAPI({
       }
     })
   },
-  getFormattedValueFn: (row: number, col: number) => formulaSheet.getFormattedValue(row, col)
+  getFormattedValueFn: (row: number, col: number) => formulaSheet.getFormattedValue(row, col),
+  
+  // 合并单元格相关（支持撤销/重做）
+  mergeCellsFn: (startRow: number, startCol: number, endRow: number, endCol: number) => {
+    if (!model.canMerge(startRow, startCol, endRow, endCol)) {
+      return false
+    }
+    // 保存合并前的状态（用于撤销）
+    const cellValues: Array<{ row: number; col: number; value: string }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const value = model.getValue(r, c)
+        if (value) {
+          cellValues.push({ row: r, col: c, value })
+        }
+      }
+    }
+    
+    // 先执行合并操作
+    const mergeResult = model.mergeCells(startRow, startCol, endRow, endCol)
+    if (!mergeResult) {
+      return false
+    }
+    
+    // 清除公式缓存，让依赖被清除单元格的公式重新计算
+    formulaSheet.clearFormulaCache()
+    
+    // 注册撤销/重做（不立即执行，因为我们已经手动执行了）
+    undoRedo.record({
+      name: `合并单元格 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        model.unmergeCells(startRow, startCol)
+        // 恢复原来的值
+        for (const { row, col, value } of cellValues) {
+          model.setValue(row, col, value)
+        }
+        // 清除公式缓存
+        formulaSheet.clearFormulaCache()
+        draw()
+      },
+      redo: () => {
+        model.mergeCells(startRow, startCol, endRow, endCol)
+        // 清除公式缓存
+        formulaSheet.clearFormulaCache()
+        draw()
+      }
+    })
+    
+    draw()
+    return true
+  },
+  unmergeCellsFn: (row: number, col: number) => {
+    const region = model.getMergedRegion(row, col)
+    if (!region) {
+      return null
+    }
+    // 保存主单元格的值（用于撤销恢复）
+    const masterValue = model.getValue(region.startRow, region.startCol)
+    
+    // 先执行取消合并操作
+    model.unmergeCells(row, col)
+    
+    // 清除公式缓存（虽然取消合并通常不改变值，但为保险起见）
+    formulaSheet.clearFormulaCache()
+    
+    // 注册撤销/重做
+    undoRedo.record({
+      name: `取消合并 (${region.startRow},${region.startCol})-(${region.endRow},${region.endCol})`,
+      undo: () => {
+        model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+        if (masterValue) {
+          model.setValue(region.startRow, region.startCol, masterValue)
+        }
+        // 清除公式缓存
+        formulaSheet.clearFormulaCache()
+        draw()
+      },
+      redo: () => {
+        model.unmergeCells(region.startRow, region.startCol)
+        // 清除公式缓存
+        formulaSheet.clearFormulaCache()
+        draw()
+      }
+    })
+    
+    draw()
+    return region
+  },
+  canMergeFn: (startRow: number, startCol: number, endRow: number, endCol: number) => 
+    model.canMerge(startRow, startCol, endRow, endCol),
+  getMergedCellInfoFn: (row: number, col: number) => model.getMergedCellInfo(row, col),
+  getMergedRegionFn: (row: number, col: number) => model.getMergedRegion(row, col),
+  getAllMergedRegionsFn: () => model.getAllMergedRegions(),
+  hasDataToLoseFn: (startRow: number, startCol: number, endRow: number, endCol: number) => 
+    model.hasDataToLose(startRow, startCol, endRow, endCol),
+  
+  // 撤销还原相关
+  undoFn: () => undoRedo.undo(),
+  redoFn: () => undoRedo.redo(),
+  canUndoFn: () => undoRedo.canUndo(),
+  canRedoFn: () => undoRedo.canRedo()
 })
 
 defineExpose(api)
@@ -2413,7 +2940,7 @@ defineExpose(api)
   font-size: 12px;
 }
 
-/* 暗黑模式支持 */
+/* 暗黑模式支持 - 系统偏好 */
 @media (prefers-color-scheme: dark) {
   .sheet-container {
     /* 数据区域保持白色背景 */
@@ -2431,5 +2958,22 @@ defineExpose(api)
     --progress-text: #e0e0e0;
     --progress-detail: #b0b0b0;
   }
+}
+
+/* 暗黑模式支持 - 手动切换 */
+:global(html.dark) .sheet-container {
+  --sheet-border: #404040;
+}
+
+:global(html.dark) .v-scrollbar-thumb,
+:global(html.dark) .h-scrollbar-thumb {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.25);
+}
+
+:global(html.dark) .calculation-progress {
+  --progress-bg: rgba(30, 30, 30, 0.95);
+  --progress-border: #404040;
+  --progress-text: #e0e0e0;
+  --progress-detail: #b0b0b0;
 }
 </style>

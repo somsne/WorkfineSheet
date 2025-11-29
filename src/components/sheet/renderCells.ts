@@ -3,7 +3,7 @@
  * Depends on geometry module for positions and the FormulaSheet for values.
  */
 
-import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge } from './types'
+import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge, MergedCellInfo, MergedRegion } from './types'
 import { BORDER_PRESETS } from './types'
 import { getRowHeight, getColWidth, getRowTop, getColLeft } from './geometry'
 
@@ -290,6 +290,11 @@ export interface CellsRenderConfig {
   }
   // Helper for selection range text
   getSelectionRangeText?: (startRow: number, startCol: number, endRow: number, endCol: number) => string
+  // Merge cell providers
+  getMergedCellInfo?: (row: number, col: number) => MergedCellInfo
+  getMergedRegion?: (row: number, col: number) => MergedRegion | null
+  // All merged regions for rendering merged cells that start outside visible area
+  mergedRegions?: MergedRegion[]
   // Visible range
   startRow: number
   endRow: number
@@ -314,6 +319,9 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     getCellValue,
     getCellStyle,
     getSelectionRangeText,
+    getMergedCellInfo,
+    getMergedRegion,
+    mergedRegions = [],
     startRow,
     endRow,
     startCol,
@@ -332,186 +340,281 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
   ctx.textBaseline = 'middle'
 
+  // 辅助函数：计算合并单元格的总宽度
+  const getMergedWidth = (startC: number, endC: number): number => {
+    let width = 0
+    for (let c = startC; c <= endC; c++) {
+      width += getColWidth(c, sizes, geometryConfig)
+    }
+    return width
+  }
+
+  // 辅助函数：计算合并单元格的总高度
+  const getMergedHeight = (startR: number, endR: number): number => {
+    let height = 0
+    for (let r = startR; r <= endR; r++) {
+      height += getRowHeight(r, sizes, geometryConfig)
+    }
+    return height
+  }
+
+  // 辅助函数：渲染单元格内容
+  const renderCellContent = (
+    r: number, 
+    c: number, 
+    cellX: number, 
+    cellY: number, 
+    colWidth: number, 
+    rowHeight: number
+  ) => {
+    const displayValue = getCellValue(r, c)
+    if (displayValue === null || displayValue === undefined) return
+    
+    // Get cell style
+    const style: CellStyle = getCellStyle ? getCellStyle(r, c) : {
+      fontFamily: 'sans-serif',
+      fontSize: 13,
+      bold: false,
+      italic: false,
+      underline: false,
+      strikethrough: false,
+      color: '#000000',
+      backgroundColor: '#FFFFFF',
+      textAlign: 'left' as const,
+      verticalAlign: 'middle' as const,
+      wrapText: false,
+      textRotation: 0
+    }
+    
+    // Save current drawing state
+    ctx.save()
+    
+    // Create clipping region limited to current cell (or merged cell area)
+    ctx.beginPath()
+    ctx.rect(Math.max(cellX, rowHeaderWidth), Math.max(cellY, colHeaderHeight), colWidth, rowHeight)
+    ctx.clip()
+    
+    // Draw background color if specified (留出1px的网格线空间)
+    if (style.backgroundColor && style.backgroundColor !== '#FFFFFF') {
+      ctx.fillStyle = style.backgroundColor
+      ctx.fillRect(cellX + 0.5, cellY + 0.5, colWidth - 1, rowHeight - 1)
+    }
+    
+    // Apply cell style
+    ctx.font = buildFontString(style)
+    ctx.fillStyle = style.color || '#000'
+    
+    // Handle newlines and wrapping
+    const text = String(displayValue)
+    let lines: string[]
+    
+    if (style.wrapText) {
+      // Auto-wrap: split by newlines first, then wrap each line
+      const rawLines = text.split('\n')
+      lines = []
+      for (const rawLine of rawLines) {
+        const wrappedLines = wrapText(ctx, rawLine, colWidth)
+        lines.push(...wrappedLines)
+      }
+    } else {
+      // No wrapping: just split by newlines
+      lines = text.split('\n')
+    }
+    
+    if (lines.length === 1) {
+      // Single line: apply alignment
+      const textMetrics = ctx.measureText(text)
+      const textWidth = textMetrics.width
+      
+      // Calculate vertical alignment
+      const { textY, textBaseline } = calculateTextY(
+        cellY,
+        rowHeight,
+        style.fontSize || 13,
+        style.verticalAlign || 'middle'
+      )
+      ctx.textBaseline = textBaseline
+      
+      // Calculate horizontal alignment
+      const textX = calculateTextX(
+        cellX,
+        colWidth,
+        textWidth,
+        style.textAlign || 'left'
+      )
+      
+      // Handle text rotation (以文本块中心为原点)
+      const rotation = style.textRotation || 0
+      if (rotation !== 0) {
+        // 以文本块的中心点作为旋转原点
+        const textCenterX = textX + textWidth / 2
+        const textCenterY = textY
+        ctx.translate(textCenterX, textCenterY)
+        ctx.rotate((rotation * Math.PI) / 180)
+        ctx.translate(-textCenterX, -textCenterY)
+      }
+      
+      ctx.fillText(text, textX, textY)
+      
+      // Draw underline if enabled
+      if (style.underline) {
+        drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, textBaseline)
+      }
+      
+      // Draw strikethrough if enabled
+      if (style.strikethrough) {
+        drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, textBaseline)
+      }
+    } else {
+      // Multi-line: render each line
+      const lineHeight = (style.fontSize || 13) * 1.2
+      const totalHeight = lines.length * lineHeight
+      
+      // Calculate starting Y position based on vertical alignment
+      let startY: number
+      switch (style.verticalAlign) {
+        case 'top':
+          startY = cellY + lineHeight / 2 + 2
+          break
+        case 'bottom':
+          startY = cellY + rowHeight - totalHeight + lineHeight / 2 - 2
+          break
+        case 'middle':
+        default:
+          startY = cellY + (rowHeight - totalHeight) / 2 + lineHeight / 2
+      }
+      
+      ctx.textBaseline = 'middle'
+      
+      lines.forEach((line, idx) => {
+        const lineMetrics = ctx.measureText(line)
+        const lineWidth = lineMetrics.width
+        const lineX = calculateTextX(cellX, colWidth, lineWidth, style.textAlign || 'left')
+        const lineY = startY + idx * lineHeight
+        
+        ctx.fillText(line, lineX, lineY)
+        
+        // Draw underline for each line
+        if (style.underline) {
+          drawUnderline(ctx, lineX, lineY, lineWidth, style.fontSize || 13, style.underline, 'middle')
+        }
+        
+        // Draw strikethrough for each line
+        if (style.strikethrough) {
+          drawStrikethrough(ctx, lineX, lineY, lineWidth, style.fontSize || 13, 'middle')
+        }
+      })
+    }
+    
+    ctx.restore()
+  }
+
+  // 收集需要渲染的合并区域（主单元格在可视区域外，但合并区域与可视区域有交集）
+  const mergedRegionsToRender = new Set<string>()
+  for (const region of mergedRegions) {
+    // 检查合并区域是否与可视区域有交集
+    const hasIntersection = !(
+      region.endRow < startRow ||
+      region.startRow > endRow ||
+      region.endCol < startCol ||
+      region.startCol > endCol
+    )
+    
+    // 主单元格是否在可视区域外
+    const masterOutside = region.startRow < startRow || region.startCol < startCol
+    
+    if (hasIntersection && masterOutside) {
+      mergedRegionsToRender.add(`${region.startRow},${region.startCol}`)
+    }
+  }
+
+  // 先渲染主单元格在可视区域外的合并单元格
+  for (const region of mergedRegions) {
+    const key = `${region.startRow},${region.startCol}`
+    if (mergedRegionsToRender.has(key)) {
+      const cellX = rowHeaderWidth + getColLeft(region.startCol, sizes, geometryConfig) - viewport.scrollLeft
+      const cellY = colHeaderHeight + getRowTop(region.startRow, sizes, geometryConfig) - viewport.scrollTop
+      const mergedWidth = getMergedWidth(region.startCol, region.endCol)
+      const mergedHeight = getMergedHeight(region.startRow, region.endRow)
+      
+      renderCellContent(region.startRow, region.startCol, cellX, cellY, mergedWidth, mergedHeight)
+    }
+  }
+
   // Draw visible cells from model
   for (let r = startRow; r <= endRow; r++) {
     const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
     const rowHeight = getRowHeight(r, sizes, geometryConfig)
     
     for (let c = startCol; c <= endCol; c++) {
-      const displayValue = getCellValue(r, c)
-      if (displayValue !== null && displayValue !== undefined) {
-        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-        const colWidth = getColWidth(c, sizes, geometryConfig)
-        
-        // Get cell style
-        const style: CellStyle = getCellStyle ? getCellStyle(r, c) : {
-          fontFamily: 'sans-serif',
-          fontSize: 13,
-          bold: false,
-          italic: false,
-          underline: false,
-          strikethrough: false,
-          color: '#000000',
-          backgroundColor: '#FFFFFF',
-          textAlign: 'left' as const,
-          verticalAlign: 'middle' as const,
-          wrapText: false,
-          textRotation: 0
-        }
-        
-        // Save current drawing state
-        ctx.save()
-        
-        // Create clipping region limited to current cell
-        ctx.beginPath()
-        ctx.rect(cellX, cellY, colWidth, rowHeight)
-        ctx.clip()
-        
-        // Draw background color if specified (留出1px的网格线空间)
-        if (style.backgroundColor && style.backgroundColor !== '#FFFFFF') {
-          ctx.fillStyle = style.backgroundColor
-          ctx.fillRect(cellX + 0.5, cellY + 0.5, colWidth - 1, rowHeight - 1)
-        }
-        
-        // Apply cell style
-        ctx.font = buildFontString(style)
-        ctx.fillStyle = style.color || '#000'
-        
-        // Handle newlines and wrapping
-        const text = String(displayValue)
-        let lines: string[]
-        
-        if (style.wrapText) {
-          // Auto-wrap: split by newlines first, then wrap each line
-          const rawLines = text.split('\n')
-          lines = []
-          for (const rawLine of rawLines) {
-            const wrappedLines = wrapText(ctx, rawLine, colWidth)
-            lines.push(...wrappedLines)
-          }
-        } else {
-          // No wrapping: just split by newlines
-          lines = text.split('\n')
-        }
-        
-        if (lines.length === 1) {
-          // Single line: apply alignment
-          const textMetrics = ctx.measureText(text)
-          const textWidth = textMetrics.width
-          
-          // Calculate vertical alignment
-          const { textY, textBaseline } = calculateTextY(
-            cellY,
-            rowHeight,
-            style.fontSize || 13,
-            style.verticalAlign || 'middle'
-          )
-          ctx.textBaseline = textBaseline
-          
-          // Calculate horizontal alignment
-          const textX = calculateTextX(
-            cellX,
-            colWidth,
-            textWidth,
-            style.textAlign || 'left'
-          )
-          
-          // Handle text rotation (以文本块中心为原点)
-          const rotation = style.textRotation || 0
-          if (rotation !== 0) {
-            // 以文本块的中心点作为旋转原点
-            const textCenterX = textX + textWidth / 2
-            const textCenterY = textY
-            ctx.translate(textCenterX, textCenterY)
-            ctx.rotate((rotation * Math.PI) / 180)
-            ctx.translate(-textCenterX, -textCenterY)
-          }
-          
-          ctx.fillText(text, textX, textY)
-          
-          // Draw underline
-          if (style.underline) {
-            drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, textBaseline)
-          }
-          
-          // Draw strikethrough
-          if (style.strikethrough) {
-            drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, textBaseline)
-          }
-        } else {
-          // Multi-line: draw from top (vertical align for multi-line uses top as start)
-          const lineHeight = (style.fontSize || 13) * 1.4 // Line height = fontSize * 1.4
-          const totalHeight = lines.length * lineHeight
-          
-          // Calculate starting Y based on vertical alignment
-          let startY: number
-          const vAlign = style.verticalAlign || 'top'
-          if (vAlign === 'top') {
-            startY = cellY + 4
-          } else if (vAlign === 'middle') {
-            const centered = cellY + (rowHeight - totalHeight) / 2
-            // If content would overflow above cell, start from top instead
-            startY = Math.max(centered, cellY + 4)
-          } else { // bottom
-            const fromBottom = cellY + rowHeight - totalHeight - 4
-            // If content would overflow above cell, start from top instead
-            startY = Math.max(fromBottom, cellY + 4)
-          }
-          
-          ctx.textBaseline = 'top'
-          
-          lines.forEach((line, index) => {
-            const textY = startY + index * lineHeight
-            // Only draw lines within cell bounds (check top is within cell)
-            if (textY >= cellY && textY < cellY + rowHeight) {
-              // Measure text for alignment
-              const textMetrics = ctx.measureText(line)
-              const textWidth = textMetrics.width
-              
-              // Calculate horizontal alignment
-              const textX = calculateTextX(
-                cellX,
-                colWidth,
-                textWidth,
-                style.textAlign || 'left'
-              )
-              
-              ctx.fillText(line, textX, textY)
-              
-              // Draw underline for multi-line
-              if (style.underline) {
-                drawUnderline(ctx, textX, textY, textWidth, style.fontSize || 13, style.underline, 'top')
-              }
-              
-              // Draw strikethrough for multi-line
-              if (style.strikethrough) {
-                drawStrikethrough(ctx, textX, textY, textWidth, style.fontSize || 13, 'top')
-              }
-            }
-          })
-          ctx.textBaseline = 'middle' // Restore default
-        }
-        
-        // Restore drawing state (including clipping region)
-        ctx.restore()
+      // 检查合并单元格信息
+      const mergeInfo = getMergedCellInfo?.(r, c)
+      
+      // 如果是合并单元格的非主单元格，跳过渲染
+      if (mergeInfo?.isMerged && !mergeInfo.isMaster) {
+        continue
       }
+
+      // 计算单元格位置和尺寸
+      const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+      let colWidth = getColWidth(c, sizes, geometryConfig)
+      let actualRowHeight = rowHeight
+
+      // 如果是合并单元格的主单元格，使用合并区域的尺寸
+      if (mergeInfo?.isMaster && mergeInfo.region) {
+        const region = mergeInfo.region
+        colWidth = getMergedWidth(region.startCol, region.endCol)
+        actualRowHeight = getMergedHeight(region.startRow, region.endRow)
+      }
+      
+      renderCellContent(r, c, cellX, cellY, colWidth, actualRowHeight)
     }
   }
 
   // Draw cell borders (after cell content, before selection highlights)
   // This ensures borders are visible but don't cover selection highlights
   if (config.model && config.model.getCellBorder) {
+    // 记录已绘制边框的合并区域，避免重复
+    const drawnMergedBorders = new Set<string>()
+    
     for (let r = startRow; r <= endRow; r++) {
       const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
       const rowHeight = getRowHeight(r, sizes, geometryConfig)
       
       for (let c = startCol; c <= endCol; c++) {
-        const border = config.model.getCellBorder(r, c)
-        if (border) {
-          const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-          const colWidth = getColWidth(c, sizes, geometryConfig)
+        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+        const colWidth = getColWidth(c, sizes, geometryConfig)
+        
+        // 检查单元格是否在合并区域内
+        const mergeInfo = getMergedCellInfo?.(r, c)
+        
+        if (mergeInfo?.isMerged && mergeInfo.region) {
+          // 合并区域：只从主单元格获取边框，且只绘制一次
+          const region = mergeInfo.region
+          const regionKey = `${region.startRow},${region.startCol}`
           
-          drawCellBorder(ctx, cellX, cellY, colWidth, rowHeight, border)
+          if (!drawnMergedBorders.has(regionKey)) {
+            drawnMergedBorders.add(regionKey)
+            
+            // 从主单元格获取边框
+            const masterBorder = config.model.getCellBorder(region.startRow, region.startCol)
+            if (masterBorder) {
+              // 计算合并区域的实际位置和大小
+              const mergeX = rowHeaderWidth + getColLeft(region.startCol, sizes, geometryConfig) - viewport.scrollLeft
+              const mergeY = colHeaderHeight + getRowTop(region.startRow, sizes, geometryConfig) - viewport.scrollTop
+              const mergeWidth = getColLeft(region.endCol + 1, sizes, geometryConfig) - getColLeft(region.startCol, sizes, geometryConfig)
+              const mergeHeight = getRowTop(region.endRow + 1, sizes, geometryConfig) - getRowTop(region.startRow, sizes, geometryConfig)
+              
+              // 在合并区域的边界上绘制边框
+              drawCellBorder(ctx, mergeX, mergeY, mergeWidth, mergeHeight, masterBorder)
+            }
+          }
+        } else {
+          // 普通单元格，正常绘制边框
+          const border = config.model.getCellBorder(r, c)
+          if (border) {
+            drawCellBorder(ctx, cellX, cellY, colWidth, rowHeight, border)
+          }
         }
       }
     }
@@ -520,16 +623,38 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   // Highlight selection range (fill with light blue)
   if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
     ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
+    
+    // 记录已绘制的合并区域，避免重复绘制
+    const drawnMergedRegions = new Set<string>()
+    
     for (let r = selectionRange.startRow; r <= selectionRange.endRow; r++) {
-      const sy = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
-      const rowHeight = getRowHeight(r, sizes, geometryConfig)
-      
       for (let c = selectionRange.startCol; c <= selectionRange.endCol; c++) {
-        const sx = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-        const colWidth = getColWidth(c, sizes, geometryConfig)
+        const mergeInfo = getMergedCellInfo?.(r, c)
         
-        if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
-          ctx.fillRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
+        if (mergeInfo?.isMerged && mergeInfo.region) {
+          // 合并区域：只绘制一次整个区域
+          const regionKey = `${mergeInfo.region.startRow},${mergeInfo.region.startCol}`
+          if (!drawnMergedRegions.has(regionKey)) {
+            drawnMergedRegions.add(regionKey)
+            // 绘制整个合并区域
+            const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol, sizes, geometryConfig) - viewport.scrollLeft
+            const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow, sizes, geometryConfig) - viewport.scrollTop
+            const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
+            const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+            if (ex > 0 && sx < w && ey > 0 && sy < h) {
+              ctx.fillRect(sx, sy, ex - sx, ey - sy)
+            }
+          }
+        } else {
+          // 普通单元格：正常绘制
+          const sx = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+          const sy = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+          const colWidth = getColWidth(c, sizes, geometryConfig)
+          const rowHeight = getRowHeight(r, sizes, geometryConfig)
+          
+          if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
+            ctx.fillRect(sx, sy, colWidth, rowHeight)
+          }
         }
       }
     }
@@ -544,14 +669,28 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   }
 
   // Highlight single selection
+  // 如果选中的单元格在合并区域内，且选择范围已经覆盖整个合并区域，则不绘制额外的单选框
   if (selected.row >= 0 && selected.col >= 0) {
-    const sx = rowHeaderWidth + getColLeft(selected.col, sizes, geometryConfig) - viewport.scrollLeft
-    const sy = colHeaderHeight + getRowTop(selected.row, sizes, geometryConfig) - viewport.scrollTop
-    const colWidth = getColWidth(selected.col, sizes, geometryConfig)
-    const rowHeight = getRowHeight(selected.row, sizes, geometryConfig)
-    ctx.strokeStyle = '#3b82f6'
-    ctx.lineWidth = 2
-    ctx.strokeRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
+    const mergeInfo = getMergedCellInfo?.(selected.row, selected.col)
+    const isInMergedRegion = mergeInfo?.isMerged
+    
+    // 检查选择范围是否已经覆盖了合并区域
+    const selectionCoversRegion = isInMergedRegion && mergeInfo?.region && 
+      selectionRange.startRow <= mergeInfo.region.startRow &&
+      selectionRange.startCol <= mergeInfo.region.startCol &&
+      selectionRange.endRow >= mergeInfo.region.endRow &&
+      selectionRange.endCol >= mergeInfo.region.endCol
+    
+    // 只有当选中单元格不在合并区域内，或者选择范围没有覆盖合并区域时，才绘制单选框
+    if (!selectionCoversRegion) {
+      const sx = rowHeaderWidth + getColLeft(selected.col, sizes, geometryConfig) - viewport.scrollLeft
+      const sy = colHeaderHeight + getRowTop(selected.row, sizes, geometryConfig) - viewport.scrollTop
+      const colWidth = getColWidth(selected.col, sizes, geometryConfig)
+      const rowHeight = getRowHeight(selected.row, sizes, geometryConfig)
+      ctx.strokeStyle = '#3b82f6'
+      ctx.lineWidth = 2
+      ctx.strokeRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
+    }
   }
 
   // Draw colored borders for formula references (Excel style)

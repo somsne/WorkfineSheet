@@ -4,7 +4,7 @@
  */
 
 import type { SelectedCell } from './rowcol'
-import type { CellStyle, CellBorder, BorderEdge, CellFormat } from './types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo } from './types'
 
 /**
  * 行列尺寸 API
@@ -363,9 +363,97 @@ export interface FormatAPI {
 }
 
 /**
+ * 合并单元格 API
+ */
+export interface MergeAPI {
+  /**
+   * 合并单元格
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @returns 是否成功（如果有冲突则返回 false）
+   */
+  mergeCells(startRow: number, startCol: number, endRow: number, endCol: number): boolean
+  
+  /**
+   * 取消合并单元格
+   * @param row 合并区域内任意单元格的行
+   * @param col 合并区域内任意单元格的列
+   * @returns 被取消的合并区域，如果不存在则返回 null
+   */
+  unmergeCells(row: number, col: number): MergedRegion | null
+  
+  /**
+   * 检查是否可以合并指定范围
+   * @returns 是否可以合并（不与现有合并区域冲突）
+   */
+  canMerge(startRow: number, startCol: number, endRow: number, endCol: number): boolean
+  
+  /**
+   * 获取单元格的合并信息
+   */
+  getMergedCellInfo(row: number, col: number): MergedCellInfo
+  
+  /**
+   * 获取包含指定单元格的合并区域
+   */
+  getMergedRegion(row: number, col: number): MergedRegion | null
+  
+  /**
+   * 获取所有合并区域
+   */
+  getAllMergedRegions(): MergedRegion[]
+  
+  /**
+   * 检查合并操作是否会丢失数据
+   * @returns 是否会丢失数据（除主单元格外还有其他单元格有值）
+   */
+  hasDataToLose(startRow: number, startCol: number, endRow: number, endCol: number): boolean
+  
+  /**
+   * 合并当前选择范围
+   * @returns 是否成功
+   */
+  mergeSelection(): boolean
+  
+  /**
+   * 取消当前选择范围内的所有合并
+   */
+  unmergeSelection(): void
+}
+
+/**
+ * 撤销还原 API
+ */
+export interface UndoRedoAPI {
+  /**
+   * 撤销上一步操作
+   * @returns 是否成功撤销
+   */
+  undo(): boolean
+  
+  /**
+   * 还原上一步撤销的操作
+   * @returns 是否成功还原
+   */
+  redo(): boolean
+  
+  /**
+   * 检查是否可以撤销
+   */
+  canUndo(): boolean
+  
+  /**
+   * 检查是否可以还原
+   */
+  canRedo(): boolean
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI {
   /**
    * 刷新绘制
    */
@@ -447,6 +535,21 @@ export function createSheetAPI(context: {
   clearCellFormatFn: (row: number, col: number) => void
   setRangeFormatFn: (startRow: number, startCol: number, endRow: number, endCol: number, format: CellFormat) => void
   getFormattedValueFn: (row: number, col: number) => string
+  
+  // 合并单元格相关
+  mergeCellsFn: (startRow: number, startCol: number, endRow: number, endCol: number) => boolean
+  unmergeCellsFn: (row: number, col: number) => MergedRegion | null
+  canMergeFn: (startRow: number, startCol: number, endRow: number, endCol: number) => boolean
+  getMergedCellInfoFn: (row: number, col: number) => MergedCellInfo
+  getMergedRegionFn: (row: number, col: number) => MergedRegion | null
+  getAllMergedRegionsFn: () => MergedRegion[]
+  hasDataToLoseFn: (startRow: number, startCol: number, endRow: number, endCol: number) => boolean
+  
+  // 撤销还原相关
+  undoFn: () => boolean
+  redoFn: () => boolean
+  canUndoFn: () => boolean
+  canRedoFn: () => boolean
 }): SheetAPI {
   return {
     // 行高列宽
@@ -732,6 +835,99 @@ export function createSheetAPI(context: {
       context.setRangeFormatFn(startRow, startCol, endRow, endCol, format)
       context.draw()
     },
-    getFormattedValue: context.getFormattedValueFn
+    getFormattedValue: context.getFormattedValueFn,
+    
+    // ==================== 合并单元格 API ====================
+    
+    mergeCells(startRow: number, startCol: number, endRow: number, endCol: number): boolean {
+      const result = context.mergeCellsFn(startRow, startCol, endRow, endCol)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    unmergeCells(row: number, col: number): MergedRegion | null {
+      const result = context.unmergeCellsFn(row, col)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    canMerge: context.canMergeFn,
+    getMergedCellInfo: context.getMergedCellInfoFn,
+    getMergedRegion: context.getMergedRegionFn,
+    getAllMergedRegions: context.getAllMergedRegionsFn,
+    hasDataToLose: context.hasDataToLoseFn,
+    
+    mergeSelection(): boolean {
+      const { startRow, startCol, endRow, endCol } = context.selectionRange
+      if (startRow < 0 || startCol < 0) {
+        // 没有选择范围，尝试使用单选
+        const { row, col } = context.selected
+        if (row >= 0 && col >= 0) {
+          // 单个单元格无法合并
+          return false
+        }
+        return false
+      }
+      const result = context.mergeCellsFn(startRow, startCol, endRow, endCol)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    unmergeSelection(): void {
+      const { startRow, startCol, endRow, endCol } = context.selectionRange
+      let hasUnmerged = false
+      
+      if (startRow >= 0 && startCol >= 0) {
+        // 遍历选择范围内的所有单元格，取消所有合并
+        for (let r = startRow; r <= endRow; r++) {
+          for (let c = startCol; c <= endCol; c++) {
+            const result = context.unmergeCellsFn(r, c)
+            if (result) {
+              hasUnmerged = true
+            }
+          }
+        }
+      } else {
+        // 没有范围选择，尝试取消单选单元格所在的合并
+        const { row, col } = context.selected
+        if (row >= 0 && col >= 0) {
+          const result = context.unmergeCellsFn(row, col)
+          if (result) {
+            hasUnmerged = true
+          }
+        }
+      }
+      
+      if (hasUnmerged) {
+        context.draw()
+      }
+    },
+    
+    // ==================== 撤销还原 API ====================
+    
+    undo(): boolean {
+      const result = context.undoFn()
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    redo(): boolean {
+      const result = context.redoFn()
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    canUndo: context.canUndoFn,
+    canRedo: context.canRedoFn
   }
 }

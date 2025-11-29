@@ -185,14 +185,19 @@ export class FormulaEngine {
       for (let c = range.startCol; c <= range.endCol; c++) {
         const cellValue = this.getCellValue(r, c)
         const normalizedValue = this.normalizeValue(cellValue)
-        // 只收集数值
+        // 收集数值，字符串类型的数值也要转换
         if (typeof normalizedValue === 'number') {
           row.push(normalizedValue)
+        } else if (typeof normalizedValue === 'string') {
+          // 尝试将字符串转为数值，如果失败则使用 0
+          const numValue = parseFloat(normalizedValue)
+          row.push(isNaN(numValue) ? 0 : numValue)
+        } else {
+          // 其他类型（如 null）使用 0
+          row.push(0)
         }
       }
-      if (row.length > 0) {
-        values.push(row)
-      }
+      values.push(row)
     }
     return values
   }

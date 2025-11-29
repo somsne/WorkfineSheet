@@ -38,6 +38,23 @@ export class UndoRedoManager {
   }
 
   /**
+   * 只记录操作到撤销栈（不执行 redo）
+   * 用于操作已经手动执行后的场景
+   */
+  record(action: UndoRedoAction): void {
+    // 清空重做栈（因为有新操作）
+    this.redoStack = []
+    
+    // 添加到撤销栈
+    this.undoStack.push(action)
+    
+    // 限制历史大小
+    if (this.undoStack.length > this.maxHistorySize) {
+      this.undoStack.shift()
+    }
+  }
+
+  /**
    * 撤销上一步操作
    */
   undo(): boolean {

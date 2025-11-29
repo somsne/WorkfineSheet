@@ -3,7 +3,7 @@
  * 负责行列的插入、删除和尺寸设置
  */
 
-import type { CellStyle, CellBorder } from './types'
+import type { CellStyle, CellBorder, MergedRegion } from './types'
 
 /**
  * 公式表接口（适配器模式）
@@ -24,6 +24,10 @@ export interface FormulaSheetAdapter {
     setCellBorder(row: number, col: number, border: Partial<CellBorder>): void
     hasCellBorder(row: number, col: number): boolean
     clearCellBorder(row: number, col: number): void
+    // 合并单元格相关
+    getAllMergedRegions(): MergedRegion[]
+    unmergeCells(row: number, col: number): MergedRegion | null
+    mergeCells(startRow: number, startCol: number, endRow: number, endCol: number): boolean
   }
 }
 
@@ -133,6 +137,39 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
     }
   })
   sizeConfig.rowHeights = newRowHeights
+  
+  // 步骤7: 调整合并区域
+  // 对于插入行：
+  // - 如果插入位置在合并区域内部（不在起始行），需要扩展合并区域（向下扩展1行）
+  // - 如果插入位置在合并区域下方，合并区域需要整体下移
+  // - 如果插入位置在合并区域上方或起始行，合并区域位置需要下移
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    // 取消原合并
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    let newStartRow = region.startRow
+    let newEndRow = region.endRow
+    
+    if (row > region.startRow && row <= region.endRow) {
+      // 插入位置在合并区域内部（不在起始行），扩展区域
+      newEndRow = region.endRow + 1
+      // 起始行不变
+    } else if (row <= region.startRow) {
+      // 插入位置在合并区域上方或起始行，整体下移
+      newStartRow = region.startRow + 1
+      newEndRow = region.endRow + 1
+    }
+    // 如果 row > region.endRow，合并区域不受影响，保持原位置
+    
+    // 重新合并（如果区域有变化或位置需要调整）
+    if (newStartRow !== region.startRow || newEndRow !== region.endRow || row <= region.startRow) {
+      model.mergeCells(newStartRow, region.startCol, newEndRow, region.endCol)
+    } else {
+      // 恢复原合并
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    }
+  }
   
   // 重新绘制
   onRedraw()
@@ -246,6 +283,34 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
     selected.row--
   }
   
+  // 步骤9: 调整合并区域
+  // 对于删除行：
+  // - 如果删除位置在合并区域内部，需要收缩合并区域（减少1行）
+  // - 如果删除位置在合并区域下方，合并区域不受影响
+  // - 如果删除位置在合并区域上方，合并区域位置需要上移
+  // - 如果删除位置是合并区域的起始行且合并区域只有1行高，取消合并
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    // 取消原合并
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    if (row < region.startRow) {
+      // 删除位置在合并区域上方，整体上移
+      model.mergeCells(region.startRow - 1, region.startCol, region.endRow - 1, region.endCol)
+    } else if (row > region.endRow) {
+      // 删除位置在合并区域下方，保持原样
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    } else {
+      // 删除位置在合并区域内部
+      const newEndRow = region.endRow - 1
+      if (newEndRow >= region.startRow) {
+        // 仍有多行，收缩区域
+        model.mergeCells(region.startRow, region.startCol, newEndRow, region.endCol)
+      }
+      // 如果收缩后只有1行1列，不再合并
+    }
+  }
+  
   // 重新绘制
   onRedraw()
 }
@@ -325,6 +390,39 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
     }
   })
   sizeConfig.colWidths = newColWidths
+  
+  // 步骤7: 调整合并区域
+  // 对于插入列：
+  // - 如果插入位置在合并区域内部（不在起始列），需要扩展合并区域（向右扩展1列）
+  // - 如果插入位置在合并区域右侧，合并区域不受影响
+  // - 如果插入位置在合并区域左侧或起始列，合并区域位置需要右移
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    // 取消原合并
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    let newStartCol = region.startCol
+    let newEndCol = region.endCol
+    
+    if (col > region.startCol && col <= region.endCol) {
+      // 插入位置在合并区域内部（不在起始列），扩展区域
+      newEndCol = region.endCol + 1
+      // 起始列不变
+    } else if (col <= region.startCol) {
+      // 插入位置在合并区域左侧或起始列，整体右移
+      newStartCol = region.startCol + 1
+      newEndCol = region.endCol + 1
+    }
+    // 如果 col > region.endCol，合并区域不受影响，保持原位置
+    
+    // 重新合并（如果区域有变化或位置需要调整）
+    if (newStartCol !== region.startCol || newEndCol !== region.endCol || col <= region.startCol) {
+      model.mergeCells(region.startRow, newStartCol, region.endRow, newEndCol)
+    } else {
+      // 恢复原合并
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    }
+  }
   
   // 重新绘制
   onRedraw()
@@ -436,6 +534,34 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
     selected.col = Math.max(0, col - 1)
   } else if (selected.col > col) {
     selected.col--
+  }
+  
+  // 步骤9: 调整合并区域
+  // 对于删除列：
+  // - 如果删除位置在合并区域内部，需要收缩合并区域（减少1列）
+  // - 如果删除位置在合并区域右侧，合并区域不受影响
+  // - 如果删除位置在合并区域左侧，合并区域位置需要左移
+  // - 如果删除位置是合并区域的起始列且合并区域只有1列宽，取消合并
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    // 取消原合并
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    if (col < region.startCol) {
+      // 删除位置在合并区域左侧，整体左移
+      model.mergeCells(region.startRow, region.startCol - 1, region.endRow, region.endCol - 1)
+    } else if (col > region.endCol) {
+      // 删除位置在合并区域右侧，保持原样
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    } else {
+      // 删除位置在合并区域内部
+      const newEndCol = region.endCol - 1
+      if (newEndCol >= region.startCol) {
+        // 仍有多列，收缩区域
+        model.mergeCells(region.startRow, region.startCol, region.endRow, newEndCol)
+      }
+      // 如果收缩后只有1行1列，不再合并
+    }
   }
   
   // 重新绘制

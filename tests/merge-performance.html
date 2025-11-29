@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>合并单元格性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #4facfe; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #4facfe; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(79, 172, 254, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    button.extreme { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    .progress { width: 100%; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin: 10px 0; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); width: 0%; transition: width 0.3s ease; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>🔗 合并单元格性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>合并单元格性能测试</h2>
+      <p>测试 SheetModel 合并单元格系统的操作性能，包括合并、取消合并、状态查询、边框处理等核心功能。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricMergeRate">--</div>
+          <div class="label">合并操作/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricUnmergeRate">--</div>
+          <div class="label">取消合并/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricQueryRate">--</div>
+          <div class="label">状态查询/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricRegionCount">--</div>
+          <div class="label">合并区域数</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 合并操作测试 -->
+    <div class="test-section">
+      <h3>🔗 测试 1: 批量合并操作</h3>
+      <p class="desc">测试 SheetModel.mergeCells 批量合并的性能</p>
+      <div class="controls">
+        <button onclick="testMerge(100)">100 个区域</button>
+        <button onclick="testMerge(500)">500 个区域</button>
+        <button onclick="testMerge(1000)">1,000 个区域</button>
+        <button onclick="testMerge(2000)" class="extreme">⚡ 2,000 个区域</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 取消合并测试 -->
+    <div class="test-section">
+      <h3>✂️ 测试 2: 批量取消合并</h3>
+      <p class="desc">测试 unmergeCells 批量取消合并的性能</p>
+      <div class="controls">
+        <button onclick="testUnmerge(100)">100 个区域</button>
+        <button onclick="testUnmerge(500)">500 个区域</button>
+        <button onclick="testUnmerge(1000)">1,000 个区域</button>
+        <button onclick="testUnmerge(2000)" class="extreme">🔥 2,000 个区域</button>
+      </div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 状态查询测试 -->
+    <div class="test-section">
+      <h3>🔎 测试 3: 合并状态查询</h3>
+      <p class="desc">测试 getMergedRegion、isMergedCell、getMergedCellInfo 的查询性能</p>
+      <div class="controls">
+        <button onclick="testMergeQuery(5000)">5,000 次</button>
+        <button onclick="testMergeQuery(20000)">20,000 次</button>
+        <button onclick="testMergeQuery(50000)">50,000 次</button>
+        <button onclick="testMergeQuery(100000)" class="extreme">100K 次</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 大区域合并测试 -->
+    <div class="test-section">
+      <h3>📐 测试 4: 大区域合并</h3>
+      <p class="desc">测试合并大范围单元格的性能</p>
+      <div class="controls">
+        <button onclick="testLargeMerge(10, 10)">10×10</button>
+        <button onclick="testLargeMerge(50, 50)">50×50</button>
+        <button onclick="testLargeMerge(100, 100)">100×100</button>
+        <button onclick="testLargeMerge(200, 200)" class="extreme">200×200</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 边框处理测试 -->
+    <div class="test-section">
+      <h3>📊 测试 5: 合并时边框处理</h3>
+      <p class="desc">测试合并/取消合并时边框收集和分发的性能 (Excel 行为)</p>
+      <div class="controls">
+        <button onclick="testMergeBorder(100)">100 个区域</button>
+        <button onclick="testMergeBorder(500)">500 个区域</button>
+        <button onclick="testMergeBorder(1000)" class="extreme">1,000 个区域</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+    
+    <!-- canMerge 检查测试 -->
+    <div class="test-section">
+      <h3>✅ 测试 6: canMerge 冲突检查</h3>
+      <p class="desc">测试 canMerge 方法检查合并区域冲突的性能</p>
+      <div class="controls">
+        <button onclick="testCanMerge(1000)">1,000 次</button>
+        <button onclick="testCanMerge(5000)">5,000 次</button>
+        <button onclick="testCanMerge(10000)">10,000 次</button>
+        <button onclick="testCanMerge(20000)" class="extreme">20,000 次</button>
+      </div>
+      <div id="result6" class="result"></div>
+    </div>
+    
+    <!-- 综合测试 -->
+    <div class="test-section">
+      <h3>🔄 测试 7: 合并/取消合并循环</h3>
+      <p class="desc">测试反复合并和取消合并的性能稳定性</p>
+      <div class="controls">
+        <button onclick="testMergeUnmergeCycle(50, 5)">50 区域 × 5 轮</button>
+        <button onclick="testMergeUnmergeCycle(100, 10)">100 区域 × 10 轮</button>
+        <button onclick="testMergeUnmergeCycle(200, 10)" class="extreme">200 区域 × 10 轮</button>
+      </div>
+      <div id="result7" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    
+    function formatTime(ms) {
+      if (ms < 0.001) return `${(ms * 1000000).toFixed(2)} ns`
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 批量合并
+    window.testMerge = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 填充一些数据
+      for (let r = 0; r < 200; r++) {
+        for (let c = 0; c < 200; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试批量合并...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      // 创建不重叠的 2x2 合并区域
+      const mergeStart = performance.now()
+      let successCount = 0
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 50) * 3
+        const baseCol = (i % 50) * 3
+        if (model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)) {
+          successCount++
+        }
+      }
+      const mergeTime = performance.now() - mergeStart
+      
+      const mergeRate = Math.round(count / (mergeTime / 1000))
+      document.getElementById('metricMergeRate').textContent = mergeRate.toLocaleString()
+      document.getElementById('metricRegionCount').textContent = model.getAllMergedRegions().length.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 批量合并测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 个 2×2 合并区域
+
+⏱️ 合并性能:
+  • 总时间: <span class="badge ${getSpeedClass(mergeTime, {fast: 100, medium: 500})}">${formatTime(mergeTime)}</span>
+  • 平均时间: ${formatTime(mergeTime / count)}/次
+  • 合并速率: <span class="badge fast">${mergeRate.toLocaleString()} 区域/秒</span>
+
+📊 结果验证:
+  • 成功合并: ${successCount.toLocaleString()} 个
+  • 当前合并区域数: ${model.getAllMergedRegions().length.toLocaleString()}
+
+📈 性能评估:
+  ${mergeTime / count < 0.1 ? '🚀 优秀 - 合并操作极快' : 
+    mergeTime / count < 0.5 ? '✅ 良好 - 合并操作正常' : 
+    '⚠️ 需优化 - 合并操作较慢'}
+`
+      window._testModel = model
+    }
+    
+    // 测试 2: 批量取消合并
+    window.testUnmerge = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 准备合并区域...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 先创建合并区域
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 50) * 3
+        const baseCol = (i % 50) * 3
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      
+      const regionsBefore = model.getAllMergedRegions().length
+      
+      resultDiv.innerHTML = '⏳ 测试批量取消合并...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const unmergeStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 50) * 3
+        const baseCol = (i % 50) * 3
+        model.unmergeCells(baseRow, baseCol)
+      }
+      const unmergeTime = performance.now() - unmergeStart
+      
+      const unmergeRate = Math.round(count / (unmergeTime / 1000))
+      document.getElementById('metricUnmergeRate').textContent = unmergeRate.toLocaleString()
+      
+      const regionsAfter = model.getAllMergedRegions().length
+      
+      resultDiv.innerHTML = `
+✅ 批量取消合并测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 个合并区域
+
+⏱️ 取消合并性能:
+  • 总时间: <span class="badge ${getSpeedClass(unmergeTime, {fast: 100, medium: 500})}">${formatTime(unmergeTime)}</span>
+  • 平均时间: ${formatTime(unmergeTime / count)}/次
+  • 取消速率: <span class="badge fast">${unmergeRate.toLocaleString()} 区域/秒</span>
+
+📊 结果验证:
+  • 取消前区域数: ${regionsBefore.toLocaleString()}
+  • 取消后区域数: ${regionsAfter.toLocaleString()}
+
+📈 性能评估:
+  ${unmergeTime / count < 0.1 ? '🚀 优秀 - 取消合并极快' : 
+    unmergeTime / count < 0.5 ? '✅ 良好 - 取消合并正常' : 
+    '⚠️ 需优化 - 取消合并较慢'}
+`
+    }
+    
+    // 测试 3: 状态查询
+    window.testMergeQuery = async function(count) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 准备合并区域...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 创建 500 个合并区域
+      for (let i = 0; i < 500; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试状态查询...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const queryStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(Math.random() * 200)
+        const col = Math.floor(Math.random() * 100)
+        model.getMergedRegion(row, col)
+        model.isMergedCell(row, col)
+        model.getMergedCellInfo(row, col)
+      }
+      const queryTime = performance.now() - queryStart
+      
+      const queryRate = Math.round(count / (queryTime / 1000))
+      document.getElementById('metricQueryRate').textContent = queryRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 合并状态查询测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次查询 (每次调用 3 个方法)
+📊 合并区域数: 500 个
+
+⏱️ 查询性能:
+  • 总时间: <span class="badge ${getSpeedClass(queryTime, {fast: 100, medium: 500})}">${formatTime(queryTime)}</span>
+  • 平均时间: ${formatTime(queryTime / count)}/次
+  • 查询速率: <span class="badge fast">${queryRate.toLocaleString()} 次/秒</span>
+
+📊 查询方法:
+  • getMergedRegion - 获取合并区域
+  • isMergedCell - 判断是否合并
+  • getMergedCellInfo - 获取详细信息
+
+📈 性能评估:
+  ${queryTime / count < 0.01 ? '🚀 优秀 - 查询性能极快' : 
+    queryTime / count < 0.05 ? '✅ 良好 - 查询性能正常' : 
+    '⚠️ 需优化 - 查询性能较慢'}
+`
+    }
+    
+    // 测试 4: 大区域合并
+    window.testLargeMerge = async function(rows, cols) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const cellCount = rows * cols
+      
+      // 填充数据
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试大区域合并...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const mergeStart = performance.now()
+      const success = model.mergeCells(0, 0, rows - 1, cols - 1)
+      const mergeTime = performance.now() - mergeStart
+      
+      resultDiv.innerHTML = '⏳ 测试取消合并...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const unmergeStart = performance.now()
+      model.unmergeCells(0, 0)
+      const unmergeTime = performance.now() - unmergeStart
+      
+      resultDiv.innerHTML = `
+✅ 大区域合并测试完成 (使用真实 SheetModel)
+
+📊 区域大小: ${rows} × ${cols} = ${cellCount.toLocaleString()} 单元格
+
+⏱️ 合并性能:
+  • 合并时间: <span class="badge ${getSpeedClass(mergeTime, {fast: 10, medium: 50})}">${formatTime(mergeTime)}</span>
+  • 合并结果: ${success ? '✅ 成功' : '❌ 失败'}
+
+⏱️ 取消合并性能:
+  • 取消时间: <span class="badge ${getSpeedClass(unmergeTime, {fast: 10, medium: 50})}">${formatTime(unmergeTime)}</span>
+
+📈 性能评估:
+  ${mergeTime < 20 ? '🚀 优秀 - 大区域合并极快' : 
+    mergeTime < 100 ? '✅ 良好 - 大区域合并正常' : 
+    '⚠️ 需优化 - 大区域合并较慢'}
+`
+    }
+    
+    // 测试 5: 边框处理
+    window.testMergeBorder = async function(count) {
+      const resultDiv = document.getElementById('result5')
+      resultDiv.innerHTML = '⏳ 设置边框...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 为每个要合并的区域设置边框
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        
+        // 设置外边框
+        for (let c = baseCol; c <= baseCol + 1; c++) {
+          model.setCellBorder(baseRow, c, { top: { style: 'thin', color: '#000' } })
+          model.setCellBorder(baseRow + 1, c, { bottom: { style: 'thin', color: '#000' } })
+        }
+        for (let r = baseRow; r <= baseRow + 1; r++) {
+          model.setCellBorder(r, baseCol, { left: { style: 'thin', color: '#000' } })
+          model.setCellBorder(r, baseCol + 1, { right: { style: 'thin', color: '#000' } })
+        }
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试带边框的合并...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const mergeStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      const mergeTime = performance.now() - mergeStart
+      
+      resultDiv.innerHTML = '⏳ 测试取消合并 (边框分发)...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const unmergeStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.unmergeCells(baseRow, baseCol)
+      }
+      const unmergeTime = performance.now() - unmergeStart
+      
+      resultDiv.innerHTML = `
+✅ 边框处理测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 个带边框的 2×2 合并区域
+
+⏱️ 合并性能 (边框收集):
+  • 合并时间: <span class="badge ${getSpeedClass(mergeTime, {fast: 200, medium: 800})}">${formatTime(mergeTime)}</span>
+  • 平均每区域: ${formatTime(mergeTime / count)}
+
+⏱️ 取消合并性能 (边框分发):
+  • 取消时间: <span class="badge ${getSpeedClass(unmergeTime, {fast: 200, medium: 800})}">${formatTime(unmergeTime)}</span>
+  • 平均每区域: ${formatTime(unmergeTime / count)}
+
+📊 Excel 行为说明:
+  • 合并时: 收集外边框到主单元格
+  • 取消时: 分发边框到各边界单元格
+
+📈 性能评估:
+  ${(mergeTime + unmergeTime) / count < 0.5 ? '🚀 优秀 - 边框处理极快' : 
+    (mergeTime + unmergeTime) / count < 2 ? '✅ 良好 - 边框处理正常' : 
+    '⚠️ 需优化 - 边框处理较慢'}
+`
+    }
+    
+    // 测试 6: canMerge 检查
+    window.testCanMerge = async function(count) {
+      const resultDiv = document.getElementById('result6')
+      resultDiv.innerHTML = '⏳ 准备合并区域...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 创建 200 个合并区域
+      for (let i = 0; i < 200; i++) {
+        const baseRow = Math.floor(i / 20) * 5
+        const baseCol = (i % 20) * 5
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试 canMerge 检查...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      let canMergeCount = 0
+      let cannotMergeCount = 0
+      
+      const checkStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(Math.random() * 100)
+        const col = Math.floor(Math.random() * 100)
+        const result = model.canMerge(row, col, row + 2, col + 2)
+        if (result) canMergeCount++
+        else cannotMergeCount++
+      }
+      const checkTime = performance.now() - checkStart
+      
+      const checkRate = Math.round(count / (checkTime / 1000))
+      
+      resultDiv.innerHTML = `
+✅ canMerge 检查测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次 canMerge 检查
+📊 现有合并区域: 200 个
+
+⏱️ 检查性能:
+  • 总时间: <span class="badge ${getSpeedClass(checkTime, {fast: 100, medium: 500})}">${formatTime(checkTime)}</span>
+  • 平均时间: ${formatTime(checkTime / count)}/次
+  • 检查速率: <span class="badge fast">${checkRate.toLocaleString()} 次/秒</span>
+
+📊 检查结果:
+  • 可以合并: ${canMergeCount.toLocaleString()} 次
+  • 存在冲突: ${cannotMergeCount.toLocaleString()} 次
+  • 冲突率: ${(cannotMergeCount / count * 100).toFixed(1)}%
+
+📈 性能评估:
+  ${checkTime / count < 0.01 ? '🚀 优秀 - 冲突检查极快' : 
+    checkTime / count < 0.05 ? '✅ 良好 - 冲突检查正常' : 
+    '⚠️ 需优化 - 冲突检查较慢'}
+`
+    }
+    
+    // 测试 7: 合并/取消合并循环
+    window.testMergeUnmergeCycle = async function(regionCount, cycles) {
+      const resultDiv = document.getElementById('result7')
+      resultDiv.innerHTML = '⏳ 开始循环测试...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const times = { merge: [], unmerge: [] }
+      
+      for (let cycle = 0; cycle < cycles; cycle++) {
+        resultDiv.innerHTML = `⏳ 第 ${cycle + 1}/${cycles} 轮测试中...`
+        
+        // 合并
+        const mergeStart = performance.now()
+        for (let i = 0; i < regionCount; i++) {
+          const baseRow = Math.floor(i / 25) * 3
+          const baseCol = (i % 25) * 3
+          model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+        }
+        times.merge.push(performance.now() - mergeStart)
+        
+        await new Promise(r => setTimeout(r, 5))
+        
+        // 取消合并
+        const unmergeStart = performance.now()
+        for (let i = 0; i < regionCount; i++) {
+          const baseRow = Math.floor(i / 25) * 3
+          const baseCol = (i % 25) * 3
+          model.unmergeCells(baseRow, baseCol)
+        }
+        times.unmerge.push(performance.now() - unmergeStart)
+        
+        await new Promise(r => setTimeout(r, 5))
+      }
+      
+      const avgMerge = times.merge.reduce((a, b) => a + b, 0) / cycles
+      const avgUnmerge = times.unmerge.reduce((a, b) => a + b, 0) / cycles
+      const minMerge = Math.min(...times.merge)
+      const maxMerge = Math.max(...times.merge)
+      const minUnmerge = Math.min(...times.unmerge)
+      const maxUnmerge = Math.max(...times.unmerge)
+      
+      resultDiv.innerHTML = `
+✅ 合并/取消合并循环测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${regionCount} 个区域 × ${cycles} 轮循环
+
+⏱️ 合并性能统计:
+  • 平均时间: <span class="badge fast">${formatTime(avgMerge)}</span>
+  • 最快: ${formatTime(minMerge)}
+  • 最慢: ${formatTime(maxMerge)}
+  • 波动: ${((maxMerge - minMerge) / avgMerge * 100).toFixed(1)}%
+
+⏱️ 取消合并性能统计:
+  • 平均时间: <span class="badge fast">${formatTime(avgUnmerge)}</span>
+  • 最快: ${formatTime(minUnmerge)}
+  • 最慢: ${formatTime(maxUnmerge)}
+  • 波动: ${((maxUnmerge - minUnmerge) / avgUnmerge * 100).toFixed(1)}%
+
+📈 稳定性评估:
+  ${Math.max((maxMerge - minMerge) / avgMerge, (maxUnmerge - minUnmerge) / avgUnmerge) < 0.3 
+    ? '🚀 优秀 - 性能非常稳定' 
+    : Math.max((maxMerge - minMerge) / avgMerge, (maxUnmerge - minUnmerge) / avgUnmerge) < 0.5 
+    ? '✅ 良好 - 性能较为稳定' 
+    : '⚠️ 需关注 - 性能波动较大'}
+`
+    }
+  </script>
+</body>
+</html>

@@ -137,6 +137,42 @@
         </div>
       </div>
       
+      <div class="benchmark-item" data-benchmark="mergeSet">
+        <div class="benchmark-icon interaction">🔗</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">合并单元格</div>
+          <div class="benchmark-desc">SheetModel 合并/取消合并 500 个区域</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-mergeSet"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-mergeSet">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="mergeQuery">
+        <div class="benchmark-icon data">🔍</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">合并查询</div>
+          <div class="benchmark-desc">SheetModel 查询 20,000 个单元格合并状态</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-mergeQuery"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-mergeQuery">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="styleQuery">
+        <div class="benchmark-icon data">🔎</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">样式查询</div>
+          <div class="benchmark-desc">SheetModel 查询 20,000 个单元格样式</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-styleQuery"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-styleQuery">等待测试</div>
+        </div>
+      </div>
+      
       <div class="benchmark-item" data-benchmark="renderBasic">
         <div class="benchmark-icon render">🖼️</div>
         <div class="benchmark-info">
@@ -197,6 +233,9 @@
       formulaSet: { excellent: 200, good: 500, average: 1000, count: 2000 },
       formulaCalc: { excellent: 100, good: 300, average: 600, count: 2000 },
       styleSet: { excellent: 100, good: 300, average: 600, count: 10000 },
+      mergeSet: { excellent: 100, good: 300, average: 600, count: 500 },
+      mergeQuery: { excellent: 50, good: 150, average: 300, count: 20000 },
+      styleQuery: { excellent: 50, good: 150, average: 300, count: 20000 },
       renderBasic: { excellent: 16, good: 33, average: 50, count: 30, isFps: true },
       renderScroll: { excellent: 16, good: 33, average: 50, count: 50, isFps: true }
     }
@@ -386,6 +425,131 @@
       const time = performance.now() - start
       
       updateStatus('styleSet', 'done', time)
+      
+      // 保存 model 供后续查询测试使用
+      window._benchmarkStyleModel = model
+      
+      return time
+    }
+    
+    // 合并单元格设置测试
+    async function benchmarkMergeSet() {
+      updateStatus('mergeSet', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.mergeSet.count
+      const model = new SheetModel()
+      
+      // 先填充一些数据
+      for (let r = 0; r < 200; r++) {
+        for (let c = 0; c < 100; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+        }
+      }
+      
+      // 设置一些边框用于测试边框合并行为
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.setCellBorder(baseRow, baseCol, { 
+          top: { style: 'thin', color: '#000000' },
+          left: { style: 'thin', color: '#000000' }
+        })
+      }
+      
+      const start = performance.now()
+      
+      // 合并测试：创建 2x2 的合并区域
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      
+      // 取消合并测试
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.unmergeCells(baseRow, baseCol)
+      }
+      
+      const time = performance.now() - start
+      
+      updateStatus('mergeSet', 'done', time)
+      
+      // 保存带合并的 model 供后续测试使用
+      // 重新创建一些合并区域
+      for (let i = 0; i < count; i++) {
+        const baseRow = Math.floor(i / 25) * 4
+        const baseCol = (i % 25) * 4
+        model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+      }
+      window._benchmarkMergeModel = model
+      
+      return time
+    }
+    
+    // 合并状态查询测试
+    async function benchmarkMergeQuery() {
+      updateStatus('mergeQuery', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.mergeQuery.count
+      const model = window._benchmarkMergeModel || new SheetModel()
+      
+      // 如果没有现成的 model，创建一些合并区域
+      if (!window._benchmarkMergeModel) {
+        for (let i = 0; i < 500; i++) {
+          const baseRow = Math.floor(i / 25) * 4
+          const baseCol = (i % 25) * 4
+          model.mergeCells(baseRow, baseCol, baseRow + 1, baseCol + 1)
+        }
+      }
+      
+      const start = performance.now()
+      
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(Math.random() * 200)
+        const col = Math.floor(Math.random() * 100)
+        // 测试各种查询方法
+        model.getMergedRegion(row, col)
+        model.isMergedCell(row, col)
+        model.getMergedCellInfo(row, col)
+      }
+      
+      const time = performance.now() - start
+      
+      updateStatus('mergeQuery', 'done', time)
+      return time
+    }
+    
+    // 样式查询测试
+    async function benchmarkStyleQuery() {
+      updateStatus('styleQuery', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.styleQuery.count
+      const model = window._benchmarkStyleModel || new SheetModel()
+      
+      // 如果没有现成的 model，设置一些样式
+      if (!window._benchmarkStyleModel) {
+        for (let i = 0; i < 10000; i++) {
+          model.setCellStyle(Math.floor(i / 100), i % 100, { bold: true })
+        }
+      }
+      
+      const start = performance.now()
+      
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(Math.random() * 100)
+        const col = Math.floor(Math.random() * 100)
+        model.getCellStyle(row, col)
+        model.hasCellStyle(row, col)
+      }
+      
+      const time = performance.now() - start
+      
+      updateStatus('styleQuery', 'done', time)
       return time
     }
     
@@ -515,6 +679,9 @@
       await benchmarkFormulaSet()
       await benchmarkFormulaCalc()
       await benchmarkStyleSet()
+      await benchmarkMergeSet()
+      await benchmarkMergeQuery()
+      await benchmarkStyleQuery()
       await benchmarkRenderBasic()
       await benchmarkRenderScroll()
       

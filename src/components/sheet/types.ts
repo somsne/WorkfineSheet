@@ -417,3 +417,44 @@ export const FORMAT_OPTIONS = [
     ]
   }
 ]
+
+// ==================== 合并单元格 ====================
+
+/**
+ * 合并单元格区域
+ * 定义一个合并区域的范围，以左上角单元格为主单元格
+ */
+export interface MergedRegion {
+  /** 起始行（主单元格行号，0-based） */
+  startRow: number
+  /** 起始列（主单元格列号，0-based） */
+  startCol: number
+  /** 结束行（包含，0-based） */
+  endRow: number
+  /** 结束列（包含，0-based） */
+  endCol: number
+}
+
+/**
+ * 合并单元格查询结果
+ * 用于查询某个单元格的合并状态
+ */
+export interface MergedCellInfo {
+  /** 是否是合并区域的一部分 */
+  isMerged: boolean
+  /** 是否是主单元格（左上角） */
+  isMaster: boolean
+  /** 所属的合并区域（如果有） */
+  region?: MergedRegion
+}
+
+/**
+ * 合并单元格的跨度信息
+ * 用于渲染时计算单元格的实际尺寸
+ */
+export interface MergedSpan {
+  /** 行跨度（合并了多少行） */
+  rowSpan: number
+  /** 列跨度（合并了多少列） */
+  colSpan: number
+}

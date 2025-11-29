@@ -32,7 +32,12 @@ describe('StyleToolbar 组件', () => {
       setWrapText: vi.fn(),
       setTextRotation: vi.fn(),
       getShowGridLines: vi.fn(() => true),
-      setShowGridLines: vi.fn()
+      setShowGridLines: vi.fn(),
+      // 撤销还原相关
+      undo: vi.fn(() => false),
+      redo: vi.fn(() => false),
+      canUndo: vi.fn(() => false),
+      canRedo: vi.fn(() => false)
     } as any
   })
 

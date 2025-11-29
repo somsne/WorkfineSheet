@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>单元格样式性能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #fa709a; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }
+    .metric-card { background: #f9fafb; border-radius: 8px; padding: 16px; text-align: center; }
+    .metric-card .value { font-size: 1.5rem; font-weight: 700; color: #fa709a; }
+    .metric-card .label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .test-section .desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    button { padding: 10px 20px; background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(250, 112, 154, 0.4); }
+    button.secondary { background: #e5e7eb; color: #374151; }
+    button.extreme { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .result { background: #f9fafb; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; line-height: 1.8; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .result:empty::before { content: '点击上方按钮开始测试...'; color: #9ca3af; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.fast { background: #d1fae5; color: #065f46; }
+    .badge.medium { background: #fef3c7; color: #92400e; }
+    .badge.slow { background: #fee2e2; color: #991b1b; }
+    .progress { width: 100%; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin: 10px 0; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #fa709a 0%, #fee140 100%); width: 0%; transition: width 0.3s ease; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>🎨 单元格样式性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>单元格样式性能测试</h2>
+      <p>测试 SheetModel 样式系统的读写性能，包括样式设置、样式查询、边框操作、范围样式等核心功能。</p>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="value" id="metricSetRate">--</div>
+          <div class="label">样式设置/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricQueryRate">--</div>
+          <div class="label">样式查询/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricBorderRate">--</div>
+          <div class="label">边框设置/秒</div>
+        </div>
+        <div class="metric-card">
+          <div class="value" id="metricRangeRate">--</div>
+          <div class="label">范围样式/秒</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 样式设置测试 -->
+    <div class="test-section">
+      <h3>🎨 测试 1: 单元格样式设置</h3>
+      <p class="desc">测试 SheetModel.setCellStyle 的基础性能</p>
+      <div class="controls">
+        <button onclick="testStyleSet(1000)">1,000 次</button>
+        <button onclick="testStyleSet(5000)">5,000 次</button>
+        <button onclick="testStyleSet(10000)">10,000 次</button>
+        <button onclick="testStyleSet(50000)" class="extreme">⚡ 50K 次</button>
+      </div>
+      <div id="result1" class="result"></div>
+    </div>
+    
+    <!-- 样式查询测试 -->
+    <div class="test-section">
+      <h3>🔎 测试 2: 样式查询性能</h3>
+      <p class="desc">测试 getCellStyle 和 hasCellStyle 的查询性能</p>
+      <div class="controls">
+        <button onclick="testStyleQuery(5000)">5,000 次</button>
+        <button onclick="testStyleQuery(20000)">20,000 次</button>
+        <button onclick="testStyleQuery(50000)">50,000 次</button>
+        <button onclick="testStyleQuery(100000)" class="extreme">🔥 100K 次</button>
+      </div>
+      <div id="result2" class="result"></div>
+    </div>
+    
+    <!-- 边框设置测试 -->
+    <div class="test-section">
+      <h3>📐 测试 3: 边框设置性能</h3>
+      <p class="desc">测试 setCellBorder 边框设置的性能</p>
+      <div class="controls">
+        <button onclick="testBorderSet(1000)">1,000 次</button>
+        <button onclick="testBorderSet(5000)">5,000 次</button>
+        <button onclick="testBorderSet(10000)">10,000 次</button>
+        <button onclick="testBorderSet(20000)" class="extreme">20,000 次</button>
+      </div>
+      <div id="result3" class="result"></div>
+    </div>
+    
+    <!-- 范围样式测试 -->
+    <div class="test-section">
+      <h3>📊 测试 4: 范围样式设置</h3>
+      <p class="desc">测试 setRangeStyle 批量设置范围样式的性能</p>
+      <div class="controls">
+        <button onclick="testRangeStyle(10, 10)">10×10</button>
+        <button onclick="testRangeStyle(50, 50)">50×50</button>
+        <button onclick="testRangeStyle(100, 100)">100×100</button>
+        <button onclick="testRangeStyle(200, 200)" class="extreme">200×200</button>
+      </div>
+      <div id="result4" class="result"></div>
+    </div>
+    
+    <!-- 复杂样式测试 -->
+    <div class="test-section">
+      <h3>🌈 测试 5: 复杂样式组合</h3>
+      <p class="desc">测试设置包含多个属性的复杂样式的性能</p>
+      <div class="controls">
+        <button onclick="testComplexStyle('simple')">简单样式</button>
+        <button onclick="testComplexStyle('medium')">中等样式</button>
+        <button onclick="testComplexStyle('complex')">复杂样式</button>
+        <button onclick="testComplexStyle('compare')">对比测试</button>
+      </div>
+      <div id="result5" class="result"></div>
+    </div>
+    
+    <!-- 样式清除测试 -->
+    <div class="test-section">
+      <h3>🧹 测试 6: 样式清除与内存</h3>
+      <p class="desc">测试样式清除性能和内存回收效率</p>
+      <div class="controls">
+        <button onclick="testStyleClear(5000)">5,000 个</button>
+        <button onclick="testStyleClear(10000)">10,000 个</button>
+        <button onclick="testStyleClear(20000)" class="extreme">20,000 个</button>
+      </div>
+      <div id="result6" class="result"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { SheetModel } from '../src/lib/SheetModel.ts'
+    
+    function formatTime(ms) {
+      if (ms < 0.001) return `${(ms * 1000000).toFixed(2)} ns`
+      if (ms < 1) return `${(ms * 1000).toFixed(2)} μs`
+      if (ms < 1000) return `${ms.toFixed(2)} ms`
+      return `${(ms / 1000).toFixed(2)} s`
+    }
+    
+    function getSpeedClass(ms, thresholds) {
+      if (ms < thresholds.fast) return 'fast'
+      if (ms < thresholds.medium) return 'medium'
+      return 'slow'
+    }
+    
+    // 测试 1: 样式设置
+    window.testStyleSet = async function(count) {
+      const resultDiv = document.getElementById('result1')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const cols = 100
+      
+      // 先填充数据
+      for (let i = 0; i < count; i++) {
+        model.setValue(Math.floor(i / cols), i % cols, `Cell-${i}`)
+      }
+      
+      const styles = [
+        { bold: true },
+        { italic: true },
+        { bgColor: '#ffcccc' },
+        { color: '#0000ff' },
+        { textAlign: 'center' }
+      ]
+      
+      resultDiv.innerHTML = '⏳ 测试样式设置...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const setStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.setCellStyle(Math.floor(i / cols), i % cols, styles[i % styles.length])
+      }
+      const setTime = performance.now() - setStart
+      
+      const setRate = Math.round(count / (setTime / 1000))
+      document.getElementById('metricSetRate').textContent = setRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 样式设置测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次样式设置
+
+⏱️ 设置性能:
+  • 总时间: <span class="badge ${getSpeedClass(setTime, {fast: 100, medium: 500})}">${formatTime(setTime)}</span>
+  • 平均时间: ${formatTime(setTime / count)}/次
+  • 设置速率: <span class="badge fast">${setRate.toLocaleString()} 次/秒</span>
+
+📈 性能评估:
+  ${setTime / count < 0.01 ? '🚀 优秀 - 样式设置极快' : 
+    setTime / count < 0.05 ? '✅ 良好 - 样式设置正常' : 
+    '⚠️ 需优化 - 样式设置较慢'}
+`
+    }
+    
+    // 测试 2: 样式查询
+    window.testStyleQuery = async function(count) {
+      const resultDiv = document.getElementById('result2')
+      resultDiv.innerHTML = '⏳ 准备数据...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      
+      // 设置一些样式
+      for (let i = 0; i < 10000; i++) {
+        model.setCellStyle(Math.floor(i / 100), i % 100, { bold: true })
+      }
+      
+      resultDiv.innerHTML = '⏳ 测试样式查询...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const queryStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(Math.random() * 150)
+        const col = Math.floor(Math.random() * 150)
+        model.getCellStyle(row, col)
+        model.hasCellStyle(row, col)
+      }
+      const queryTime = performance.now() - queryStart
+      
+      const queryRate = Math.round(count / (queryTime / 1000))
+      document.getElementById('metricQueryRate').textContent = queryRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 样式查询测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次查询 (getCellStyle + hasCellStyle)
+
+⏱️ 查询性能:
+  • 总时间: <span class="badge ${getSpeedClass(queryTime, {fast: 50, medium: 200})}">${formatTime(queryTime)}</span>
+  • 平均时间: ${formatTime(queryTime / count)}/次
+  • 查询速率: <span class="badge fast">${queryRate.toLocaleString()} 次/秒</span>
+
+📈 性能评估:
+  ${queryTime / count < 0.005 ? '🚀 优秀 - 样式查询极快' : 
+    queryTime / count < 0.02 ? '✅ 良好 - 样式查询正常' : 
+    '⚠️ 需优化 - 样式查询较慢'}
+`
+    }
+    
+    // 测试 3: 边框设置
+    window.testBorderSet = async function(count) {
+      const resultDiv = document.getElementById('result3')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const cols = 100
+      
+      const borders = [
+        { top: { style: 'thin', color: '#000000' } },
+        { left: { style: 'medium', color: '#ff0000' } },
+        { bottom: { style: 'thick', color: '#00ff00' } },
+        { right: { style: 'dashed', color: '#0000ff' } },
+        { top: { style: 'thin', color: '#000' }, bottom: { style: 'thin', color: '#000' }, left: { style: 'thin', color: '#000' }, right: { style: 'thin', color: '#000' } }
+      ]
+      
+      resultDiv.innerHTML = '⏳ 测试边框设置...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const borderStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.setCellBorder(Math.floor(i / cols), i % cols, borders[i % borders.length])
+      }
+      const borderTime = performance.now() - borderStart
+      
+      const borderRate = Math.round(count / (borderTime / 1000))
+      document.getElementById('metricBorderRate').textContent = borderRate.toLocaleString()
+      
+      resultDiv.innerHTML = `
+✅ 边框设置测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 次边框设置
+
+⏱️ 边框设置性能:
+  • 总时间: <span class="badge ${getSpeedClass(borderTime, {fast: 100, medium: 500})}">${formatTime(borderTime)}</span>
+  • 平均时间: ${formatTime(borderTime / count)}/次
+  • 设置速率: <span class="badge fast">${borderRate.toLocaleString()} 次/秒</span>
+
+📈 性能评估:
+  ${borderTime / count < 0.01 ? '🚀 优秀 - 边框设置极快' : 
+    borderTime / count < 0.05 ? '✅ 良好 - 边框设置正常' : 
+    '⚠️ 需优化 - 边框设置较慢'}
+`
+    }
+    
+    // 测试 4: 范围样式
+    window.testRangeStyle = async function(rows, cols) {
+      const resultDiv = document.getElementById('result4')
+      resultDiv.innerHTML = '⏳ 创建 SheetModel 实例...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const count = rows * cols
+      
+      const style = { bold: true, bgColor: '#ffeecc', textAlign: 'center' }
+      
+      resultDiv.innerHTML = '⏳ 测试范围样式设置...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const rangeStart = performance.now()
+      model.setRangeStyle(0, 0, rows - 1, cols - 1, style)
+      const rangeTime = performance.now() - rangeStart
+      
+      const rangeRate = Math.round(count / (rangeTime / 1000))
+      document.getElementById('metricRangeRate').textContent = rangeRate.toLocaleString()
+      
+      // 验证
+      const styledCount = model.getStyledCellCount()
+      
+      resultDiv.innerHTML = `
+✅ 范围样式设置测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${rows} × ${cols} = ${count.toLocaleString()} 单元格
+
+⏱️ 范围样式设置性能:
+  • 总时间: <span class="badge ${getSpeedClass(rangeTime, {fast: 50, medium: 300})}">${formatTime(rangeTime)}</span>
+  • 平均每单元格: ${formatTime(rangeTime / count)}
+  • 设置速率: <span class="badge fast">${rangeRate.toLocaleString()} 单元格/秒</span>
+
+📊 验证:
+  • 已设置样式单元格数: ${styledCount.toLocaleString()}
+
+📈 性能评估:
+  ${rangeTime < 100 ? '🚀 优秀 - 范围样式设置极快' : 
+    rangeTime < 500 ? '✅ 良好 - 范围样式设置正常' : 
+    '⚠️ 需优化 - 范围样式设置较慢'}
+`
+    }
+    
+    // 测试 5: 复杂样式
+    window.testComplexStyle = async function(type) {
+      const resultDiv = document.getElementById('result5')
+      const count = 5000
+      
+      const styles = {
+        simple: { bold: true },
+        medium: { bold: true, italic: true, bgColor: '#ffcccc', color: '#0000ff' },
+        complex: { 
+          bold: true, 
+          italic: true, 
+          underline: 'single',
+          strikethrough: true,
+          bgColor: '#ffcccc', 
+          color: '#0000ff',
+          fontSize: 14,
+          fontFamily: 'Arial',
+          textAlign: 'center',
+          verticalAlign: 'middle',
+          wrapText: true
+        }
+      }
+      
+      if (type === 'compare') {
+        resultDiv.innerHTML = '⏳ 对比测试中...'
+        await new Promise(r => setTimeout(r, 10))
+        
+        const results = {}
+        
+        for (const [name, style] of Object.entries(styles)) {
+          const model = new SheetModel()
+          const start = performance.now()
+          for (let i = 0; i < count; i++) {
+            model.setCellStyle(Math.floor(i / 100), i % 100, style)
+          }
+          results[name] = { 
+            time: performance.now() - start,
+            props: Object.keys(style).length
+          }
+        }
+        
+        resultDiv.innerHTML = `
+✅ 复杂样式对比测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 单元格 × 3 种样式
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+<tr style="background: #f9fafb;"><th style="padding: 10px; text-align: left;">样式类型</th><th>属性数</th><th>设置时间</th><th>速率</th></tr>
+<tr>
+  <td style="padding: 10px;">简单样式</td>
+  <td>${results.simple.props} 个</td>
+  <td><span class="badge fast">${formatTime(results.simple.time)}</span></td>
+  <td>${Math.round(count / (results.simple.time / 1000)).toLocaleString()}/秒</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">中等样式</td>
+  <td>${results.medium.props} 个</td>
+  <td><span class="badge fast">${formatTime(results.medium.time)}</span></td>
+  <td>${Math.round(count / (results.medium.time / 1000)).toLocaleString()}/秒</td>
+</tr>
+<tr>
+  <td style="padding: 10px;">复杂样式</td>
+  <td>${results.complex.props} 个</td>
+  <td><span class="badge ${getSpeedClass(results.complex.time, {fast: 100, medium: 300})}">${formatTime(results.complex.time)}</span></td>
+  <td>${Math.round(count / (results.complex.time / 1000)).toLocaleString()}/秒</td>
+</tr>
+</table>
+
+📈 分析:
+  • 样式属性数量对性能影响: ${((results.complex.time / results.simple.time - 1) * 100).toFixed(1)}% 增幅
+  • SheetModel 使用对象合并，复杂样式开销可控
+`
+      } else {
+        const model = new SheetModel()
+        const style = styles[type]
+        
+        resultDiv.innerHTML = `⏳ 测试 ${type === 'simple' ? '简单' : type === 'medium' ? '中等' : '复杂'} 样式...`
+        await new Promise(r => setTimeout(r, 10))
+        
+        const start = performance.now()
+        for (let i = 0; i < count; i++) {
+          model.setCellStyle(Math.floor(i / 100), i % 100, style)
+        }
+        const time = performance.now() - start
+        
+        resultDiv.innerHTML = `
+✅ ${type === 'simple' ? '简单' : type === 'medium' ? '中等' : '复杂'}样式测试完成
+
+📊 样式属性数: ${Object.keys(style).length} 个
+📊 设置时间: <span class="badge fast">${formatTime(time)}</span>
+  • 设置速率: ${Math.round(count / (time / 1000)).toLocaleString()} 单元格/秒
+`
+      }
+    }
+    
+    // 测试 6: 样式清除
+    window.testStyleClear = async function(count) {
+      const resultDiv = document.getElementById('result6')
+      resultDiv.innerHTML = '⏳ 设置样式...'
+      
+      await new Promise(r => setTimeout(r, 10))
+      
+      const model = new SheetModel()
+      const cols = 100
+      
+      // 设置样式
+      for (let i = 0; i < count; i++) {
+        model.setCellStyle(Math.floor(i / cols), i % cols, { bold: true, bgColor: '#ffcccc' })
+      }
+      
+      const countBefore = model.getStyledCellCount()
+      
+      resultDiv.innerHTML = '⏳ 测试样式清除...'
+      await new Promise(r => setTimeout(r, 10))
+      
+      const clearStart = performance.now()
+      for (let i = 0; i < count; i++) {
+        model.clearCellStyle(Math.floor(i / cols), i % cols)
+      }
+      const clearTime = performance.now() - clearStart
+      
+      const countAfter = model.getStyledCellCount()
+      const clearRate = Math.round(count / (clearTime / 1000))
+      
+      resultDiv.innerHTML = `
+✅ 样式清除测试完成 (使用真实 SheetModel)
+
+📊 测试规模: ${count.toLocaleString()} 个单元格
+
+⏱️ 清除性能:
+  • 清除时间: <span class="badge ${getSpeedClass(clearTime, {fast: 50, medium: 200})}">${formatTime(clearTime)}</span>
+  • 平均每单元格: ${formatTime(clearTime / count)}
+  • 清除速率: <span class="badge fast">${clearRate.toLocaleString()} 次/秒</span>
+
+📊 内存验证:
+  • 清除前样式数: ${countBefore.toLocaleString()}
+  • 清除后样式数: ${countAfter.toLocaleString()}
+  • 内存释放: ${countBefore === countAfter ? '❌ 未释放' : '✅ 已释放'}
+
+📈 性能评估:
+  ${clearTime / count < 0.005 ? '🚀 优秀 - 样式清除极快' : 
+    clearTime / count < 0.02 ? '✅ 良好 - 样式清除正常' : 
+    '⚠️ 需优化 - 样式清除较慢'}
+`
+    }
+  </script>
+</body>
+</html>
