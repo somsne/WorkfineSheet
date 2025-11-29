@@ -1,0 +1,414 @@
+/**
+ * useSheetState - 电子表格状态管理 composable
+ * 集中管理所有响应式状态，包括：
+ * - 数据模型 (model, formulaSheet, undoRedo)
+ * - 视口状态 (viewport, scrollbar)
+ * - 选择状态 (selected, selectionRange, dragState)
+ * - 编辑状态 (overlay, imeState)
+ * - 行列尺寸 (rowHeights, colWidths, hiddenRows, hiddenCols)
+ * - UI 状态 (contextMenu, inputDialog, calculationProgress)
+ */
+
+import { ref, reactive, computed } from 'vue'
+import { SheetModel } from '../../../lib/SheetModel'
+import { UndoRedoManager } from '../../../lib/UndoRedoManager'
+import { FormulaSheet } from '../../../lib/FormulaSheet'
+import { initializeDemoData } from '../../../lib/demoData'
+import { parseFormulaReferences } from '../references'
+
+// ==================== 类型定义 ====================
+
+/** 内部剪贴板单元格接口 */
+export interface InternalClipboardCell {
+  value: string  // 原始值或公式
+  isFormula: boolean
+}
+
+/** 公式引用高亮显示接口 */
+export interface FormulaReference {
+  range: string  // 如 "A1" 或 "A1:B3"
+  startRow: number
+  startCol: number
+  endRow: number
+  endCol: number
+  color: string
+}
+
+/** 常量配置 */
+export interface SheetConstants {
+  ROW_HEIGHT: number
+  COL_WIDTH: number
+  ROW_HEADER_WIDTH: number
+  COL_HEADER_HEIGHT: number
+  DEFAULT_ROWS: number
+  DEFAULT_COLS: number
+  RESIZE_HANDLE_SIZE: number
+}
+
+/** 滚动条状态 */
+export interface ScrollbarState {
+  v: {
+    visible: boolean
+    trackSize: number
+    thumbSize: number
+    thumbPos: number
+  }
+  h: {
+    visible: boolean
+    trackSize: number
+    thumbSize: number
+    thumbPos: number
+  }
+  dragging: '' | 'v' | 'h'
+  startMousePos: number
+  startScroll: number
+}
+
+/** 右键菜单项 */
+export interface ContextMenuItem {
+  label: string
+  action: () => void
+  disabled?: boolean
+  divider?: boolean
+}
+
+/** 右键菜单状态 */
+export interface ContextMenuState {
+  visible: boolean
+  x: number
+  y: number
+  items: ContextMenuItem[]
+  targetRow: number
+  targetCol: number
+}
+
+/** 输入对话框状态 */
+export interface InputDialogState {
+  visible: boolean
+  title: string
+  defaultValue: string
+  placeholder: string
+  callback: ((value: string) => void) | null
+}
+
+// ==================== 默认常量 ====================
+
+export const DEFAULT_CONSTANTS: SheetConstants = {
+  ROW_HEIGHT: 26,
+  COL_WIDTH: 100,
+  ROW_HEADER_WIDTH: 40,
+  COL_HEADER_HEIGHT: 26,
+  DEFAULT_ROWS: 200,
+  DEFAULT_COLS: 50,
+  RESIZE_HANDLE_SIZE: 4  // 拖动调整的检测区域（分隔线两侧各2px）
+}
+
+// ==================== Composable ====================
+
+export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
+  // ==================== DOM 引用 ====================
+  const container = ref<HTMLElement | null>(null)
+  const gridCanvas = ref<HTMLCanvasElement | null>(null)
+  const contentCanvas = ref<HTMLCanvasElement | null>(null)
+  const overlayInput = ref<any>(null)
+  const imeProxy = ref<HTMLTextAreaElement | null>(null)
+  
+  // ==================== 核心数据模型 ====================
+  const model = new SheetModel()
+  const formulaSheet = new FormulaSheet(model, true) // 启用异步计算
+  const undoRedo = new UndoRedoManager(100)
+  
+  // 初始化演示数据
+  initializeDemoData(model)
+  
+  // ==================== 自定义行高和列宽 ====================
+  const rowHeights = ref<Map<number, number>>(new Map())
+  const colWidths = ref<Map<number, number>>(new Map())
+  
+  // ==================== 隐藏行列状态 ====================
+  const hiddenRows = ref<Set<number>>(new Set())
+  const hiddenCols = ref<Set<number>>(new Set())
+  
+  // ==================== 网格线显示开关 ====================
+  const showGridLines = ref<boolean>(true)
+  
+  // ==================== 调整大小状态 ====================
+  const resizeState = reactive({
+    isResizing: false,
+    type: '' as 'row' | 'col' | '',
+    index: -1,
+    startPos: 0,
+    startSize: 0
+  })
+  
+  // ==================== 悬停状态（用于高亮显示可调整的分隔线）====================
+  const hoverState = reactive({
+    type: '' as 'row' | 'col' | '',
+    index: -1
+  })
+  
+  // ==================== 视口状态 ====================
+  const viewport = reactive({
+    scrollTop: 0,
+    scrollLeft: 0
+  })
+  
+  // ==================== 滚动条状态 ====================
+  const scrollbar = reactive<ScrollbarState>({
+    v: {
+      visible: true,
+      trackSize: 0,
+      thumbSize: 0,
+      thumbPos: 0
+    },
+    h: {
+      visible: true,
+      trackSize: 0,
+      thumbSize: 0,
+      thumbPos: 0
+    },
+    dragging: '',
+    startMousePos: 0,
+    startScroll: 0
+  })
+  
+  // ==================== 选择状态 ====================
+  const selected = reactive({ row: -1, col: -1 })
+  
+  const selectionRange = reactive({
+    startRow: -1,
+    startCol: -1,
+    endRow: -1,
+    endCol: -1
+  })
+  
+  const dragState = reactive({
+    isDragging: false,
+    startRow: -1,
+    startCol: -1,
+    currentRow: -1,
+    currentCol: -1,
+    justFinishedDrag: false  // 标记刚完成拖动，用于阻止 onClick
+  })
+  
+  // ==================== 编辑器覆盖层状态 ====================
+  const overlay = reactive({
+    visible: false,
+    row: 0,
+    col: 0,
+    top: 0,
+    left: 0,
+    width: constants.COL_WIDTH,
+    height: constants.ROW_HEIGHT,
+    value: '',
+    mode: 'edit' as 'edit' | 'typing',
+    originalValue: ''  // 保存编辑前的原始值，用于 ESC 取消
+  })
+  
+  // ==================== IME 输入状态 ====================
+  const imeState = reactive({
+    isComposing: false,
+    compositionText: '',
+    cursorPos: 0
+  })
+  
+  // ==================== 内部剪贴板 ====================
+  const internalClipboard = reactive<{
+    data: InternalClipboardCell[][] | null
+    startRow: number
+    startCol: number
+  }>({
+    data: null,
+    startRow: -1,
+    startCol: -1
+  })
+  const lastCopyTs = ref(0)
+  
+  // ==================== 公式引用高亮 ====================
+  const formulaReferences = ref<FormulaReference[]>([])
+  
+  // 为 RichTextInput 转换 FormulaReference 格式
+  const richTextFormulaReferences = computed(() => {
+    const refs = formulaReferences.value
+    const text = (overlayInput.value as any)?.getCurrentValue?.() || overlay.value
+    const result: Array<{ ref: string; color: string; startIndex: number; endIndex: number }> = []
+    
+    for (const ref of refs) {
+      const textUpper = text.toUpperCase()
+      const refUpper = ref.range.toUpperCase()
+      
+      let searchStart = 0
+      while (searchStart < text.length) {
+        const startIndex = textUpper.indexOf(refUpper, searchStart)
+        if (startIndex === -1) break
+        
+        const endIndex = startIndex + ref.range.length
+        result.push({
+          ref: ref.range,
+          color: ref.color,
+          startIndex,
+          endIndex
+        })
+        
+        searchStart = endIndex
+      }
+    }
+    
+    return result
+  })
+  
+  // ==================== 右键菜单状态 ====================
+  const contextMenu = reactive<ContextMenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    items: [],
+    targetRow: -1,
+    targetCol: -1
+  })
+  
+  // ==================== 输入对话框状态 ====================
+  const inputDialog = reactive<InputDialogState>({
+    visible: false,
+    title: '',
+    defaultValue: '',
+    placeholder: '',
+    callback: null
+  })
+  
+  // ==================== 计算进度状态 ====================
+  const calculationProgress = reactive({
+    visible: false,
+    pending: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0
+  })
+  
+  // ==================== 公式引用更新 ====================
+  let updateReferencesTimer: number | null = null
+  
+  function updateFormulaReferences() {
+    if (updateReferencesTimer !== null) {
+      clearTimeout(updateReferencesTimer)
+    }
+    
+    updateReferencesTimer = window.setTimeout(() => {
+      if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
+        const currentValue = (overlayInput.value as any).getCurrentValue?.() || overlay.value
+        formulaReferences.value = parseFormulaReferences(currentValue)
+      } else {
+        formulaReferences.value = []
+      }
+      updateReferencesTimer = null
+    }, 100)
+  }
+  
+  // ==================== 快照管理（用于撤销/重做）====================
+  function saveRowHeightsSnapshot(): Map<number, number> {
+    return new Map(rowHeights.value)
+  }
+  
+  function restoreRowHeights(snapshot: Map<number, number>) {
+    rowHeights.value.clear()
+    snapshot.forEach((height, row) => {
+      rowHeights.value.set(row, height)
+    })
+  }
+  
+  function saveColWidthsSnapshot(): Map<number, number> {
+    return new Map(colWidths.value)
+  }
+  
+  function restoreColWidths(snapshot: Map<number, number>) {
+    colWidths.value.clear()
+    snapshot.forEach((width, col) => {
+      colWidths.value.set(col, width)
+    })
+  }
+  
+  // ==================== 清除选区 ====================
+  function clearSelectionRange() {
+    selectionRange.startRow = -1
+    selectionRange.startCol = -1
+    selectionRange.endRow = -1
+    selectionRange.endCol = -1
+  }
+  
+  // ==================== 重置拖拽状态 ====================
+  function clearDragState() {
+    dragState.isDragging = false
+    dragState.startRow = -1
+    dragState.startCol = -1
+    dragState.currentRow = -1
+    dragState.currentCol = -1
+    dragState.justFinishedDrag = false
+  }
+  
+  return {
+    // 常量
+    constants,
+    
+    // DOM 引用
+    container,
+    gridCanvas,
+    contentCanvas,
+    overlayInput,
+    imeProxy,
+    
+    // 核心数据模型
+    model,
+    formulaSheet,
+    undoRedo,
+    
+    // 行高列宽
+    rowHeights,
+    colWidths,
+    hiddenRows,
+    hiddenCols,
+    showGridLines,
+    
+    // 调整大小和悬停
+    resizeState,
+    hoverState,
+    
+    // 视口和滚动
+    viewport,
+    scrollbar,
+    
+    // 选择状态
+    selected,
+    selectionRange,
+    dragState,
+    
+    // 编辑器
+    overlay,
+    imeState,
+    
+    // 剪贴板
+    internalClipboard,
+    lastCopyTs,
+    
+    // 公式引用
+    formulaReferences,
+    richTextFormulaReferences,
+    updateFormulaReferences,
+    
+    // UI 状态
+    contextMenu,
+    inputDialog,
+    calculationProgress,
+    
+    // 快照管理
+    saveRowHeightsSnapshot,
+    restoreRowHeights,
+    saveColWidthsSnapshot,
+    restoreColWidths,
+    
+    // 辅助方法
+    clearSelectionRange,
+    clearDragState
+  }
+}
+
+export type SheetState = ReturnType<typeof useSheetState>

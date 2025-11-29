@@ -320,7 +320,7 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     getCellStyle,
     getSelectionRangeText,
     getMergedCellInfo,
-    getMergedRegion,
+    // getMergedRegion is available but not used in this function (used via config.model)
     mergedRegions = [],
     startRow,
     endRow,
