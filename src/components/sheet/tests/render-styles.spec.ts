@@ -233,8 +233,9 @@ describe('单元格样式渲染', () => {
 
       drawCells(ctx, config)
 
-      // 当 color 为 undefined 时，使用默认文字颜色 (浅色模式下为 #000000)
-      expect(ctx.fillStyle).toBe('#000000')
+      // 当 color 为 undefined 时，使用默认文字颜色 (浅色模式下为黑色)
+      // Canvas 可能会将 #000000 简化为 #000
+      expect(['#000000', '#000']).toContain(ctx.fillStyle)
     })
   })
 

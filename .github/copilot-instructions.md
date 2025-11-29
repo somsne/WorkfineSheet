@@ -1,22 +1,33 @@
 # 🤖 Copilot Instructions for WorkfineSheet
 
 ## 项目概览
-WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组件，采用模块化架构（14 个独立模块），支持 100+ Excel 公式。
+WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组件，采用模块化架构，支持 100+ Excel 公式。
 
 ## 核心架构 (理解数据流是关键)
 ```
-应用层 (CanvasSheet.vue) → 公式层 (FormulaSheet.ts) → 计算层 (FormulaEngine.ts) → 数据层 (SheetModel.ts)
+应用层 (CanvasSheet.vue) → Composables (8个) → 公式层 (FormulaSheet.ts) → 计算层 (FormulaEngine.ts) → 数据层 (SheetModel.ts)
 ```
 
-**关键模块** (`src/components/sheet/`):
+**Composables 架构** (`src/components/sheet/composables/`):
+- `useSheetState.ts` - 核心状态管理（选区、编辑状态、滚动位置）
+- `useSheetDrawing.ts` - Canvas 绑定与绘制调度
+- `useSheetMouse.ts` - 鼠标事件处理（选择、拖拽、调整大小）
+- `useSheetKeyboard.ts` - 键盘事件处理（导航、编辑、快捷键）
+- `useSheetEditing.ts` - 单元格编辑逻辑
+- `useSheetClipboard.ts` - 复制粘贴功能
+- `useSheetContextMenu.ts` - 右键菜单
+- `useFillHandle.ts` - 填充柄功能（拖拽填充、双击快填、反向清除）
+
+**核心模块** (`src/components/sheet/`):
 - `types.ts` - 所有共享类型定义（CellStyle, SelectionRange 等），修改类型从这里开始
 - `geometry.ts` - 行列位置计算（纯函数），支持隐藏行列
 - `renderCells.ts` - 单元格渲染（样式、选择、公式引用高亮）
 - `api.ts` - 对外 API 接口 (`SheetAPI`)，父组件通过此接口操作表格
-- `rowcol.ts` - 行列增删操作，需配合 `UndoRedoManager` 使用
+- `rowcol.ts` - 行列增删操作，支持样式/边框/格式继承
+- `fillHandle.ts` - 填充柄核心逻辑（模式识别、值生成、公式调整）
 
 **数据层** (`src/lib/`):
-- `SheetModel.ts` - 稀疏存储模型，管理 cells/styles/borders
+- `SheetModel.ts` - 稀疏存储模型，管理 cells/styles/borders/formats
 - `UndoRedoManager.ts` - 命令模式实现撤销重做
 
 ## 开发命令
@@ -57,11 +68,25 @@ undoRedo.execute({
 - 公式以 `=` 开头，由 `FormulaEngine` (基于 hot-formula-parser) 计算
 - `FormulaSheet.getValue()` 返回计算结果，`getDisplayValue()` 返回原始公式
 
+### 5. 填充柄 (Fill Handle)
+- 核心逻辑在 `fillHandle.ts`，交互在 `useFillHandle.ts`
+- 支持智能模式识别：数字序列、日期序列、周期模式、自定义列表
+- 公式填充时自动调整相对引用
+- 反向拖拽清除内容（Excel 行为）
+- 配置：`FILL_HANDLE_CONFIG = { SIZE: 8, HIT_AREA_PADDING: 5 }`
+
+### 6. 行列操作样式继承 (rowcol.ts)
+- 插入行：新行继承**上方行**的样式/边框/格式/行高（第0行继承下方）
+- 插入列：新列继承**左侧列**的样式/边框/格式/列宽（第0列继承右侧）
+- 删除行列：格式随单元格移动
+
 ## 测试约定
 - 单元测试位于 `src/components/sheet/tests/*.spec.ts`
+- HTML 功能测试位于 `tests/*.html`
 - 测试框架: Vitest + jsdom
-- 纯函数模块（geometry, references, clipboard）优先测试
+- 纯函数模块（geometry, references, clipboard, fillHandle）优先测试
 - 运行单个测试: `npm test -- geometry`
+- 当前测试: 514 个用例
 
 ## 目录结构快速导航
 ```
