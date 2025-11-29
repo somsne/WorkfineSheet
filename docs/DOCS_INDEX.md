@@ -14,6 +14,13 @@
 
 ---
 
+## 🔬 研究文档
+
+### 性能优化研究
+- **[OFFSCREEN_CANVAS_RESEARCH.md](./research/OFFSCREEN_CANVAS_RESEARCH.md)** ⭐ OffscreenCanvas + Web Worker 多线程渲染研究
+
+---
+
 ## 🎯 功能模块文档
 
 ### RichTextInput 富文本编辑器
