@@ -196,6 +196,42 @@
           <div class="benchmark-status" id="status-renderScroll">等待测试</div>
         </div>
       </div>
+      
+      <div class="benchmark-item" data-benchmark="fillPattern">
+        <div class="benchmark-icon interaction">🎯</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">填充柄 - 模式检测</div>
+          <div class="benchmark-desc">检测 10,000 组数据的序列模式</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-fillPattern"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-fillPattern">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="fillGenerate">
+        <div class="benchmark-icon interaction">✨</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">填充柄 - 值生成</div>
+          <div class="benchmark-desc">生成 100x100 填充区域值</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-fillGenerate"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-fillGenerate">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="fillFormula">
+        <div class="benchmark-icon formula">📝</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">填充柄 - 公式调整</div>
+          <div class="benchmark-desc">调整 10,000 个公式引用</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-fillFormula"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-fillFormula">等待测试</div>
+        </div>
+      </div>
     </div>
     
     <div class="summary" id="summary" style="display: none;">
@@ -225,6 +261,7 @@
     import { SheetModel } from '../src/lib/SheetModel.ts'
     import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
     import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from '../src/components/sheet/geometry.ts'
+    import { detectFillPattern, generateFillValues, adjustFormulaReferences, calculateFillHandlePosition } from '../src/components/sheet/fillHandle.ts'
     
     // 基准值定义 (毫秒)
     const baselines = {
@@ -237,7 +274,10 @@
       mergeQuery: { excellent: 50, good: 150, average: 300, count: 20000 },
       styleQuery: { excellent: 50, good: 150, average: 300, count: 20000 },
       renderBasic: { excellent: 16, good: 33, average: 50, count: 30, isFps: true },
-      renderScroll: { excellent: 16, good: 33, average: 50, count: 50, isFps: true }
+      renderScroll: { excellent: 16, good: 33, average: 50, count: 50, isFps: true },
+      fillPattern: { excellent: 50, good: 150, average: 300, count: 10000 },
+      fillGenerate: { excellent: 100, good: 300, average: 600, count: 10000 },
+      fillFormula: { excellent: 50, good: 150, average: 300, count: 10000 }
     }
     
     // 渲染配置
@@ -654,6 +694,108 @@
       return avgTime
     }
     
+    // 填充柄 - 模式检测测试
+    async function benchmarkFillPattern() {
+      updateStatus('fillPattern', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.fillPattern.count
+      
+      // 准备多种测试数据
+      const testDataSets = [
+        ['1', '2', '3'],           // 数字序列
+        ['周一', '周二', '周三'],  // 星期
+        ['2024-01-01', '2024-01-02'], // 日期
+        ['Item1', 'Item2'],        // 文本+数字
+        ['A', 'B', 'C'],           // 普通文本
+        ['10', '20', '30']         // 等差序列
+      ]
+      
+      const start = performance.now()
+      
+      for (let i = 0; i < count; i++) {
+        const dataSet = testDataSets[i % testDataSets.length]
+        detectFillPattern(dataSet)
+      }
+      
+      const time = performance.now() - start
+      updateStatus('fillPattern', 'done', time)
+      return time
+    }
+    
+    // 填充柄 - 值生成测试
+    async function benchmarkFillGenerate() {
+      updateStatus('fillGenerate', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.fillGenerate.count
+      
+      // 准备源数据 (10x10)
+      const sourceValues = []
+      for (let r = 0; r < 10; r++) {
+        const row = []
+        for (let c = 0; c < 10; c++) {
+          row.push(`${r * 10 + c + 1}`)
+        }
+        sourceValues.push(row)
+      }
+      
+      const patterns = [
+        { type: 'linear', step: 1 },
+        { type: 'copy' },
+        { type: 'date' },
+        { type: 'weekday', values: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'], startIndex: 0 }
+      ]
+      
+      const start = performance.now()
+      
+      // 生成 100x100 区域 (循环多次以达到 count)
+      for (let i = 0; i < count / 100; i++) {
+        const pattern = patterns[i % patterns.length]
+        generateFillValues({
+          sourceValues,
+          pattern,
+          direction: 'down',
+          targetRowCount: 100,
+          targetColCount: 10
+        })
+      }
+      
+      const time = performance.now() - start
+      updateStatus('fillGenerate', 'done', time)
+      return time
+    }
+    
+    // 填充柄 - 公式调整测试
+    async function benchmarkFillFormula() {
+      updateStatus('fillFormula', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.fillFormula.count
+      
+      // 准备多种公式
+      const formulas = [
+        '=A1+B2',
+        '=SUM(A1:Z100)',
+        '=$A$1+B$2+$C3',
+        '=AVERAGE(A1:B10)*C5',
+        '=IF(A1>0,B1,C1)'
+      ]
+      
+      const start = performance.now()
+      
+      for (let i = 0; i < count; i++) {
+        const formula = formulas[i % formulas.length]
+        const rowOffset = i % 100
+        const colOffset = Math.floor(i / 100) % 26
+        adjustFormulaReferences(formula, rowOffset, colOffset)
+      }
+      
+      const time = performance.now() - start
+      updateStatus('fillFormula', 'done', time)
+      return time
+    }
+    
     // 运行所有测试
     window.runAllBenchmarks = async function() {
       const btn = document.getElementById('runBtn')
@@ -684,6 +826,9 @@
       await benchmarkStyleQuery()
       await benchmarkRenderBasic()
       await benchmarkRenderScroll()
+      await benchmarkFillPattern()
+      await benchmarkFillGenerate()
+      await benchmarkFillFormula()
       
       const totalTime = performance.now() - startTime
       

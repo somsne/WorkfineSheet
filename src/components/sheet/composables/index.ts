@@ -26,3 +26,6 @@ export type { SheetKeyboard, UseSheetKeyboardOptions } from './useSheetKeyboard'
 
 export { useSheetMouse } from './useSheetMouse'
 export type { SheetMouse, UseSheetMouseOptions } from './useSheetMouse'
+
+export { useFillHandle } from './useFillHandle'
+export type { FillHandleComposable, UseFillHandleOptions } from './useFillHandle'

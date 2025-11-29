@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>填充柄功能测试 - WorkfineSheet</title>
+  <style>
+    :root { --primary: #667eea; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; min-height: 100vh; }
+    .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .intro { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .intro h2 { color: #1f2937; margin-bottom: 12px; }
+    .intro p { color: #6b7280; line-height: 1.6; }
+    .controls { display: flex; gap: 12px; margin: 24px 0; flex-wrap: wrap; }
+    button { padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    button.secondary { background: #e5e7eb; color: #4b5563; }
+    button.secondary:hover { background: #d1d5db; }
+    .test-section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .test-section h3 { color: #1f2937; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .test-section h3 .icon { font-size: 1.25rem; }
+    .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .test-item { background: #f9fafb; border-radius: 8px; padding: 16px; border-left: 4px solid #667eea; }
+    .test-item.pass { border-left-color: #10b981; }
+    .test-item.fail { border-left-color: #ef4444; }
+    .test-item .name { font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+    .test-item .desc { font-size: 0.85rem; color: #6b7280; margin-bottom: 8px; }
+    .test-item .result { font-size: 0.9rem; color: #374151; }
+    .test-item .result.pass { color: #10b981; }
+    .test-item .result.fail { color: #ef4444; }
+    .log-area { background: #1f2937; border-radius: 8px; padding: 16px; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; color: #e5e7eb; max-height: 300px; overflow-y: auto; margin-top: 16px; }
+    .log-area .log-line { margin-bottom: 4px; }
+    .log-area .log-line.info { color: #60a5fa; }
+    .log-area .log-line.success { color: #34d399; }
+    .log-area .log-line.error { color: #f87171; }
+    .log-area .log-line.warn { color: #fbbf24; }
+    .summary { display: flex; gap: 24px; margin-top: 24px; flex-wrap: wrap; }
+    .summary-card { flex: 1; min-width: 200px; background: white; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .summary-card .value { font-size: 2rem; font-weight: 700; color: #667eea; }
+    .summary-card .label { font-size: 0.9rem; color: #6b7280; margin-top: 4px; }
+    .summary-card.success .value { color: #10b981; }
+    .summary-card.error .value { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回</a>
+    <h1>🎯 填充柄功能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="intro">
+      <h2>填充柄 (Fill Handle) 功能测试</h2>
+      <p>测试填充柄的各项功能，包括位置计算、方向检测、序列模式识别、填充值生成、公式引用调整、清除区域计算等核心功能。</p>
+    </div>
+    
+    <div class="controls">
+      <button onclick="runAllTests()">🚀 运行全部测试</button>
+      <button class="secondary" onclick="clearResults()">🗑️ 清除结果</button>
+    </div>
+    
+    <div class="summary" id="summary" style="display: none;">
+      <div class="summary-card success">
+        <div class="value" id="passCount">0</div>
+        <div class="label">通过</div>
+      </div>
+      <div class="summary-card error">
+        <div class="value" id="failCount">0</div>
+        <div class="label">失败</div>
+      </div>
+      <div class="summary-card">
+        <div class="value" id="totalTime">0ms</div>
+        <div class="label">总耗时</div>
+      </div>
+    </div>
+    
+    <!-- 位置计算测试 -->
+    <div class="test-section">
+      <h3><span class="icon">📍</span> 位置计算测试</h3>
+      <div class="test-grid" id="positionTests"></div>
+    </div>
+    
+    <!-- 方向检测测试 -->
+    <div class="test-section">
+      <h3><span class="icon">🧭</span> 方向检测测试</h3>
+      <div class="test-grid" id="directionTests"></div>
+    </div>
+    
+    <!-- 填充区域计算测试 -->
+    <div class="test-section">
+      <h3><span class="icon">📐</span> 填充区域计算测试</h3>
+      <div class="test-grid" id="rangeTests"></div>
+    </div>
+    
+    <!-- 清除区域计算测试 -->
+    <div class="test-section">
+      <h3><span class="icon">🧹</span> 清除区域计算测试</h3>
+      <div class="test-grid" id="clearTests"></div>
+    </div>
+    
+    <!-- 序列模式检测测试 -->
+    <div class="test-section">
+      <h3><span class="icon">🔢</span> 序列模式检测测试</h3>
+      <div class="test-grid" id="patternTests"></div>
+    </div>
+    
+    <!-- 填充值生成测试 -->
+    <div class="test-section">
+      <h3><span class="icon">✨</span> 填充值生成测试</h3>
+      <div class="test-grid" id="generateTests"></div>
+    </div>
+    
+    <!-- 公式引用调整测试 -->
+    <div class="test-section">
+      <h3><span class="icon">📝</span> 公式引用调整测试</h3>
+      <div class="test-grid" id="formulaTests"></div>
+    </div>
+    
+    <!-- 日志输出 -->
+    <div class="test-section">
+      <h3><span class="icon">📋</span> 测试日志</h3>
+      <div class="log-area" id="logArea">
+        <div class="log-line info">点击"运行全部测试"开始测试...</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      calculateFillHandlePosition,
+      isPointOnFillHandle,
+      determineFillDirection,
+      calculateFillRange,
+      calculateClearRange,
+      detectFillPattern,
+      generateFillValues,
+      adjustFormulaReferences,
+      BUILT_IN_SEQUENCES
+    } from '../src/components/sheet/fillHandle.ts'
+    import { DEFAULT_FILL_HANDLE_STATE, FILL_HANDLE_CONFIG } from '../src/components/sheet/types.ts'
+    
+    // 测试工具函数
+    function createDefaultGeometryConfig() {
+      return {
+        defaultRowHeight: 26,
+        defaultColWidth: 100,
+        rowHeaderWidth: 40,
+        colHeaderHeight: 26
+      }
+    }
+    
+    function createDefaultSizeAccess() {
+      return {
+        rowHeights: new Map(),
+        colWidths: new Map(),
+        hiddenRows: new Set(),
+        hiddenCols: new Set()
+      }
+    }
+    
+    function createDefaultViewport() {
+      return { scrollTop: 0, scrollLeft: 0 }
+    }
+    
+    // 测试结果
+    let passCount = 0
+    let failCount = 0
+    const startTime = { value: 0 }
+    
+    // 日志函数
+    function log(message, type = 'info') {
+      const logArea = document.getElementById('logArea')
+      const line = document.createElement('div')
+      line.className = `log-line ${type}`
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`
+      logArea.appendChild(line)
+      logArea.scrollTop = logArea.scrollHeight
+    }
+    
+    // 断言函数
+    function assertEqual(actual, expected, message) {
+      const pass = JSON.stringify(actual) === JSON.stringify(expected)
+      if (pass) {
+        passCount++
+        log(`✓ ${message}`, 'success')
+      } else {
+        failCount++
+        log(`✗ ${message}`, 'error')
+        log(`  期望: ${JSON.stringify(expected)}`, 'warn')
+        log(`  实际: ${JSON.stringify(actual)}`, 'warn')
+      }
+      return pass
+    }
+    
+    function assertTrue(actual, message) {
+      return assertEqual(actual, true, message)
+    }
+    
+    function assertFalse(actual, message) {
+      return assertEqual(actual, false, message)
+    }
+    
+    function assertNull(actual, message) {
+      return assertEqual(actual, null, message)
+    }
+    
+    // 渲染测试结果
+    function renderTestResult(containerId, name, desc, pass, result) {
+      const container = document.getElementById(containerId)
+      const item = document.createElement('div')
+      item.className = `test-item ${pass ? 'pass' : 'fail'}`
+      item.innerHTML = `
+        <div class="name">${pass ? '✓' : '✗'} ${name}</div>
+        <div class="desc">${desc}</div>
+        <div class="result ${pass ? 'pass' : 'fail'}">${result}</div>
+      `
+      container.appendChild(item)
+    }
+    
+    // 位置计算测试
+    function runPositionTests() {
+      log('▶ 开始位置计算测试...', 'info')
+      
+      // 测试1: 基本位置计算
+      {
+        const result = calculateFillHandlePosition({
+          selectionRange: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+          viewport: createDefaultViewport(),
+          geometryConfig: createDefaultGeometryConfig(),
+          sizes: createDefaultSizeAccess(),
+          canvasWidth: 800,
+          canvasHeight: 600
+        })
+        const pass = result.visible === true && result.rect.x === 136 && result.rect.y === 48
+        renderTestResult('positionTests', '基本位置计算', '单元格 A1 的填充柄位置', pass, 
+          `visible: ${result.visible}, x: ${result.rect.x}, y: ${result.rect.y}`)
+        assertEqual(result.visible, true, '填充柄应该可见')
+      }
+      
+      // 测试2: 多单元格选区位置
+      {
+        const result = calculateFillHandlePosition({
+          selectionRange: { startRow: 0, startCol: 0, endRow: 2, endCol: 2 },
+          viewport: createDefaultViewport(),
+          geometryConfig: createDefaultGeometryConfig(),
+          sizes: createDefaultSizeAccess(),
+          canvasWidth: 800,
+          canvasHeight: 600
+        })
+        const pass = result.rect.x === 336 && result.rect.y === 100
+        renderTestResult('positionTests', '多单元格选区', '3x3 选区的填充柄位置', pass,
+          `x: ${result.rect.x}, y: ${result.rect.y}`)
+      }
+      
+      // 测试3: 滚动后位置
+      {
+        const result = calculateFillHandlePosition({
+          selectionRange: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+          viewport: { scrollTop: 50, scrollLeft: 100 },
+          geometryConfig: createDefaultGeometryConfig(),
+          sizes: createDefaultSizeAccess(),
+          canvasWidth: 800,
+          canvasHeight: 600
+        })
+        const pass = result.rect.x === 36 && result.rect.y === -2
+        renderTestResult('positionTests', '滚动后位置', '滚动 (100, 50) 后的位置', pass,
+          `x: ${result.rect.x}, y: ${result.rect.y}`)
+      }
+      
+      // 测试4: 点击检测 - 在填充柄上
+      {
+        const state = {
+          ...DEFAULT_FILL_HANDLE_STATE,
+          visible: true,
+          rect: { x: 100, y: 100, width: FILL_HANDLE_CONFIG.SIZE, height: FILL_HANDLE_CONFIG.SIZE }
+        }
+        const pass = isPointOnFillHandle(103, 103, state)
+        renderTestResult('positionTests', '点击检测 - 中心', '鼠标在填充柄中心', pass, `结果: ${pass}`)
+      }
+      
+      // 测试5: 点击检测 - 不在填充柄上
+      {
+        const state = {
+          ...DEFAULT_FILL_HANDLE_STATE,
+          visible: true,
+          rect: { x: 100, y: 100, width: FILL_HANDLE_CONFIG.SIZE, height: FILL_HANDLE_CONFIG.SIZE }
+        }
+        const pass = !isPointOnFillHandle(50, 50, state)
+        renderTestResult('positionTests', '点击检测 - 远离', '鼠标远离填充柄', pass, `结果: ${!pass}`)
+      }
+    }
+    
+    // 方向检测测试
+    function runDirectionTests() {
+      log('▶ 开始方向检测测试...', 'info')
+      
+      const sourceRange = { startRow: 5, startCol: 5, endRow: 5, endCol: 5 }
+      
+      // 测试各个方向
+      const directions = [
+        { name: '向下拖拽', startY: 100, endY: 200, expected: 'down' },
+        { name: '向上拖拽', startY: 200, endY: 100, expected: 'up' },
+        { name: '向右拖拽', startX: 100, endX: 200, expected: 'right' },
+        { name: '向左拖拽', startX: 200, endX: 100, expected: 'left' }
+      ]
+      
+      for (const test of directions) {
+        const direction = determineFillDirection(
+          test.startX ?? 100, test.startY ?? 100,
+          test.endX ?? 100, test.endY ?? 100,
+          sourceRange,
+          createDefaultViewport(),
+          createDefaultGeometryConfig(),
+          createDefaultSizeAccess()
+        )
+        const pass = direction === test.expected
+        renderTestResult('directionTests', test.name, `应该检测为 ${test.expected}`, pass, `结果: ${direction}`)
+        assertEqual(direction, test.expected, `${test.name}应该返回 ${test.expected}`)
+      }
+    }
+    
+    // 填充区域计算测试
+    function runRangeTests() {
+      log('▶ 开始填充区域计算测试...', 'info')
+      
+      // 测试1: 向下填充
+      {
+        const result = calculateFillRange({
+          sourceRange: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+          currentRow: 3,
+          currentCol: 0,
+          direction: 'down',
+          totalRows: 100,
+          totalCols: 26
+        })
+        const pass = result && result.startRow === 1 && result.endRow === 3
+        renderTestResult('rangeTests', '向下填充', '从 A1 向下填充到 A4', pass,
+          result ? `rows: ${result.startRow}-${result.endRow}` : 'null')
+      }
+      
+      // 测试2: 向右填充
+      {
+        const result = calculateFillRange({
+          sourceRange: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+          currentRow: 0,
+          currentCol: 3,
+          direction: 'right',
+          totalRows: 100,
+          totalCols: 26
+        })
+        const pass = result && result.startCol === 1 && result.endCol === 3
+        renderTestResult('rangeTests', '向右填充', '从 A1 向右填充到 D1', pass,
+          result ? `cols: ${result.startCol}-${result.endCol}` : 'null')
+      }
+      
+      // 测试3: 向上填充
+      {
+        const result = calculateFillRange({
+          sourceRange: { startRow: 5, startCol: 0, endRow: 5, endCol: 0 },
+          currentRow: 2,
+          currentCol: 0,
+          direction: 'up',
+          totalRows: 100,
+          totalCols: 26
+        })
+        const pass = result && result.startRow === 2 && result.endRow === 4
+        renderTestResult('rangeTests', '向上填充', '从 A6 向上填充到 A3', pass,
+          result ? `rows: ${result.startRow}-${result.endRow}` : 'null')
+      }
+    }
+    
+    // 清除区域计算测试
+    function runClearTests() {
+      log('▶ 开始清除区域计算测试...', 'info')
+      
+      const sourceRange = { startRow: 2, startCol: 2, endRow: 6, endCol: 4 }
+      
+      // 测试1: 向上缩小
+      {
+        const result = calculateClearRange(sourceRange, 4, 3, 'up')
+        const pass = result && result.startRow === 5 && result.endRow === 6
+        renderTestResult('clearTests', '向上缩小', '清除下方行 (row 5-6)', pass,
+          result ? `rows: ${result.startRow}-${result.endRow}` : 'null')
+      }
+      
+      // 测试2: 向下缩小
+      {
+        const result = calculateClearRange(sourceRange, 4, 3, 'down')
+        const pass = result && result.startRow === 2 && result.endRow === 3
+        renderTestResult('clearTests', '向下缩小', '清除上方行 (row 2-3)', pass,
+          result ? `rows: ${result.startRow}-${result.endRow}` : 'null')
+      }
+      
+      // 测试3: 向左缩小
+      {
+        const result = calculateClearRange(sourceRange, 4, 3, 'left')
+        const pass = result && result.startCol === 4 && result.endCol === 4
+        renderTestResult('clearTests', '向左缩小', '清除右方列 (col 4)', pass,
+          result ? `cols: ${result.startCol}-${result.endCol}` : 'null')
+      }
+      
+      // 测试4: 向右缩小
+      {
+        const result = calculateClearRange(sourceRange, 4, 3, 'right')
+        const pass = result && result.startCol === 2 && result.endCol === 2
+        renderTestResult('clearTests', '向右缩小', '清除左方列 (col 2)', pass,
+          result ? `cols: ${result.startCol}-${result.endCol}` : 'null')
+      }
+      
+      // 测试5: 鼠标在源区域外
+      {
+        const result = calculateClearRange(sourceRange, 1, 3, 'up')
+        const pass = result === null
+        renderTestResult('clearTests', '区域外 - 返回 null', '鼠标在源区域外', pass, `结果: ${result}`)
+      }
+    }
+    
+    // 序列模式检测测试
+    function runPatternTests() {
+      log('▶ 开始序列模式检测测试...', 'info')
+      
+      const tests = [
+        { name: '数字序列', values: ['1', '2', '3'], expected: 'linear' },
+        { name: '等差序列', values: ['2', '4', '6'], expected: 'linear' },
+        { name: '中文星期', values: ['周一', '周二'], expected: 'weekday' },
+        { name: '英文星期', values: ['Monday', 'Tuesday'], expected: 'weekday' },
+        { name: '日期格式', values: ['2024-01-01', '2024-01-02'], expected: 'date' },
+        { name: '文本+数字', values: ['Item1', 'Item2'], expected: 'linear' },
+        { name: '普通文本', values: ['Hello', 'World'], expected: 'copy' },
+        { name: '单个数字', values: ['5'], expected: 'copy' }
+      ]
+      
+      for (const test of tests) {
+        const pattern = detectFillPattern(test.values)
+        const pass = pattern.type === test.expected
+        renderTestResult('patternTests', test.name, `应检测为 ${test.expected}`, pass,
+          `结果: ${pattern.type}`)
+        assertEqual(pattern.type, test.expected, `${test.name}应该检测为 ${test.expected}`)
+      }
+    }
+    
+    // 填充值生成测试
+    function runGenerateTests() {
+      log('▶ 开始填充值生成测试...', 'info')
+      
+      // 测试1: 复制模式
+      {
+        const result = generateFillValues({
+          sourceValues: [['A']],
+          pattern: { type: 'copy' },
+          direction: 'down',
+          targetRowCount: 3,
+          targetColCount: 1
+        })
+        const pass = JSON.stringify(result) === JSON.stringify([['A'], ['A'], ['A']])
+        renderTestResult('generateTests', '复制模式', '复制 A 三次', pass, `结果: ${JSON.stringify(result)}`)
+      }
+      
+      // 测试2: 等差序列
+      {
+        const result = generateFillValues({
+          sourceValues: [['1'], ['2']],
+          pattern: { type: 'linear', step: 1 },
+          direction: 'down',
+          targetRowCount: 3,
+          targetColCount: 1
+        })
+        const pass = JSON.stringify(result) === JSON.stringify([['3'], ['4'], ['5']])
+        renderTestResult('generateTests', '等差序列', '1,2 → 3,4,5', pass, `结果: ${JSON.stringify(result)}`)
+      }
+      
+      // 测试3: 星期循环
+      {
+        const result = generateFillValues({
+          sourceValues: [['周六']],
+          pattern: { type: 'weekday', values: BUILT_IN_SEQUENCES.weekdaysCN, startIndex: 5 },
+          direction: 'down',
+          targetRowCount: 3,
+          targetColCount: 1
+        })
+        const expected = [['周日'], ['周一'], ['周二']]
+        const pass = JSON.stringify(result) === JSON.stringify(expected)
+        renderTestResult('generateTests', '星期循环', '周六 → 周日,周一,周二', pass, `结果: ${JSON.stringify(result)}`)
+      }
+      
+      // 测试4: 日期填充
+      {
+        const result = generateFillValues({
+          sourceValues: [['2024-01-01']],
+          pattern: { type: 'date' },
+          direction: 'down',
+          targetRowCount: 3,
+          targetColCount: 1
+        })
+        const expected = [['2024-01-02'], ['2024-01-03'], ['2024-01-04']]
+        const pass = JSON.stringify(result) === JSON.stringify(expected)
+        renderTestResult('generateTests', '日期填充', '2024-01-01 → 02,03,04', pass, `结果: ${JSON.stringify(result)}`)
+      }
+      
+      // 测试5: 反向填充（向上）
+      {
+        const result = generateFillValues({
+          sourceValues: [['5']],
+          pattern: { type: 'linear', step: 1 },
+          direction: 'up',
+          targetRowCount: 3,
+          targetColCount: 1
+        })
+        const expected = [['2'], ['3'], ['4']]
+        const pass = JSON.stringify(result) === JSON.stringify(expected)
+        renderTestResult('generateTests', '反向填充(向上)', '5 → 4,3,2', pass, `结果: ${JSON.stringify(result)}`)
+      }
+    }
+    
+    // 公式引用调整测试
+    function runFormulaTests() {
+      log('▶ 开始公式引用调整测试...', 'info')
+      
+      const tests = [
+        { name: '相对引用 - 行偏移', formula: '=A1', rowOffset: 1, colOffset: 0, expected: '=A2' },
+        { name: '相对引用 - 列偏移', formula: '=A1', rowOffset: 0, colOffset: 1, expected: '=B1' },
+        { name: '绝对引用 - 不变', formula: '=$A$1', rowOffset: 1, colOffset: 1, expected: '=$A$1' },
+        { name: '混合引用 - 列绝对', formula: '=$A1', rowOffset: 1, colOffset: 1, expected: '=$A2' },
+        { name: '混合引用 - 行绝对', formula: '=A$1', rowOffset: 1, colOffset: 1, expected: '=B$1' },
+        { name: '复杂公式', formula: '=A1+B2', rowOffset: 1, colOffset: 0, expected: '=A2+B3' },
+        { name: 'SUM 范围', formula: '=SUM(A1:B5)', rowOffset: 2, colOffset: 1, expected: '=SUM(B3:C7)' },
+        { name: '非公式文本', formula: 'Hello', rowOffset: 1, colOffset: 1, expected: 'Hello' },
+        { name: '多列字母', formula: '=AA1', rowOffset: 0, colOffset: 1, expected: '=AB1' },
+        { name: 'Z→AA 跨界', formula: '=Z1', rowOffset: 0, colOffset: 1, expected: '=AA1' }
+      ]
+      
+      for (const test of tests) {
+        const result = adjustFormulaReferences(test.formula, test.rowOffset, test.colOffset)
+        const pass = result === test.expected
+        renderTestResult('formulaTests', test.name, `${test.formula} → ${test.expected}`, pass, `结果: ${result}`)
+        assertEqual(result, test.expected, `${test.name}应该返回 ${test.expected}`)
+      }
+    }
+    
+    // 运行所有测试
+    window.runAllTests = function() {
+      passCount = 0
+      failCount = 0
+      startTime.value = performance.now()
+      
+      // 清除之前的结果
+      document.querySelectorAll('.test-grid').forEach(el => el.innerHTML = '')
+      document.getElementById('logArea').innerHTML = ''
+      
+      log('🚀 开始运行填充柄功能测试...', 'info')
+      
+      try {
+        runPositionTests()
+        runDirectionTests()
+        runRangeTests()
+        runClearTests()
+        runPatternTests()
+        runGenerateTests()
+        runFormulaTests()
+        
+        const totalTime = (performance.now() - startTime.value).toFixed(0)
+        
+        log(`\n✅ 测试完成！通过: ${passCount}, 失败: ${failCount}, 耗时: ${totalTime}ms`, 
+          failCount === 0 ? 'success' : 'warn')
+        
+        // 更新摘要
+        document.getElementById('summary').style.display = 'flex'
+        document.getElementById('passCount').textContent = passCount
+        document.getElementById('failCount').textContent = failCount
+        document.getElementById('totalTime').textContent = `${totalTime}ms`
+        
+      } catch (error) {
+        log(`❌ 测试出错: ${error.message}`, 'error')
+        console.error(error)
+      }
+    }
+    
+    // 清除结果
+    window.clearResults = function() {
+      document.querySelectorAll('.test-grid').forEach(el => el.innerHTML = '')
+      document.getElementById('logArea').innerHTML = '<div class="log-line info">点击"运行全部测试"开始测试...</div>'
+      document.getElementById('summary').style.display = 'none'
+      passCount = 0
+      failCount = 0
+    }
+  </script>
+</body>
+</html>

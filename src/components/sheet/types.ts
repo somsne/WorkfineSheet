@@ -458,3 +458,145 @@ export interface MergedSpan {
   /** 列跨度（合并了多少列） */
   colSpan: number
 }
+
+// ==================== 填充柄（Fill Handle）====================
+
+/**
+ * 填充方向
+ */
+export type FillDirection = 'down' | 'up' | 'right' | 'left' | null
+
+/**
+ * 填充柄状态
+ */
+export interface FillHandleState {
+  /** 是否显示填充柄 */
+  visible: boolean
+  /** 填充柄位置（相对于 canvas） */
+  rect: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+  /** 是否正在拖拽 */
+  dragging: boolean
+  /** 填充方向 */
+  direction: FillDirection
+  /** 预览区域（填充目标） */
+  previewRange: SelectionRange | null
+  /** 源区域（被复制的区域） */
+  sourceRange: SelectionRange | null
+}
+
+/**
+ * 填充柄配置常量
+ */
+export const FILL_HANDLE_CONFIG = {
+  /** 填充柄尺寸（像素） */
+  SIZE: 8,
+  /** 填充柄颜色 */
+  COLOR: '#1a73e8',
+  /** 预览边框颜色 */
+  PREVIEW_BORDER_COLOR: '#1a73e8',
+  /** 预览边框虚线样式 */
+  PREVIEW_BORDER_DASH: [3, 3],
+  /** 鼠标悬停检测范围（像素） */
+  HIT_AREA_PADDING: 5
+} as const
+
+/**
+ * 序列填充模式
+ */
+export type FillPatternType = 
+  | 'copy'      // 复制填充
+  | 'linear'    // 线性序列（等差）
+  | 'date'      // 日期序列
+  | 'weekday'   // 星期序列
+  | 'month'     // 月份序列
+  | 'custom'    // 自定义序列
+
+/**
+ * 序列模式检测结果
+ */
+export interface FillPattern {
+  type: FillPatternType
+  /** 等差步长（用于 linear 类型） */
+  step?: number
+  /** 自定义序列值（用于 weekday/month 等） */
+  values?: string[]
+  /** 起始索引（用于循环序列） */
+  startIndex?: number
+}
+
+/**
+ * 填充操作
+ */
+export interface FillOperation {
+  /** 源区域 */
+  sourceRange: SelectionRange
+  /** 目标区域 */
+  targetRange: SelectionRange
+  /** 填充方向 */
+  direction: FillDirection
+  /** 填充模式 */
+  pattern: FillPattern
+  /** 是否包含样式 */
+  includeStyle: boolean
+  /** 是否包含格式 */
+  includeFormat: boolean
+}
+
+/**
+ * 填充选项类型
+ */
+export type FillOptionType = 
+  | 'copy'           // 复制单元格
+  | 'series'         // 填充序列
+  | 'formatsOnly'    // 仅填充格式
+  | 'valuesOnly'     // 不带格式填充
+
+/**
+ * 填充选项菜单状态
+ */
+export interface FillOptionsMenuState {
+  /** 是否显示 */
+  visible: boolean
+  /** 菜单位置 X */
+  x: number
+  /** 菜单位置 Y */
+  y: number
+  /** 源区域 */
+  sourceRange: SelectionRange | null
+  /** 目标区域 */
+  targetRange: SelectionRange | null
+  /** 填充方向 */
+  direction: FillDirection
+  /** 当前选中的填充类型 */
+  selectedType: FillOptionType
+}
+
+/**
+ * 默认填充选项菜单状态
+ */
+export const DEFAULT_FILL_OPTIONS_MENU_STATE: FillOptionsMenuState = {
+  visible: false,
+  x: 0,
+  y: 0,
+  sourceRange: null,
+  targetRange: null,
+  direction: null,
+  selectedType: 'series'
+}
+
+/**
+ * 默认填充柄状态
+ */
+export const DEFAULT_FILL_HANDLE_STATE: FillHandleState = {
+  visible: false,
+  rect: { x: 0, y: 0, width: FILL_HANDLE_CONFIG.SIZE, height: FILL_HANDLE_CONFIG.SIZE },
+  dragging: false,
+  direction: null,
+  previewRange: null,
+  sourceRange: null
+}

@@ -17,6 +17,7 @@ import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
 import type { RowColOperations } from './useRowColOperations'
+import type { FillHandleComposable } from './useFillHandle'
 
 export interface UseSheetMouseOptions {
   state: SheetState
@@ -25,9 +26,10 @@ export interface UseSheetMouseOptions {
   rowColOps: RowColOperations
   onDraw: () => void
   scheduleRedraw: () => void
+  fillHandle?: FillHandleComposable
 }
 
-export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw }: UseSheetMouseOptions) {
+export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle }: UseSheetMouseOptions) {
   const {
     constants,
     container, overlayInput,
@@ -218,6 +220,12 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       }
     }
     
+    // 检测填充柄拖拽
+    if (fillHandle && fillHandle.startFillHandleDrag(x, y)) {
+      e.preventDefault()
+      return
+    }
+    
     // 普通单元格拖拽
     startDragSelection({
       x,
@@ -241,6 +249,12 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+    
+    // 先检查填充柄双击
+    if (fillHandle && fillHandle.handleDoubleClick(x, y)) {
+      e.preventDefault()
+      return
+    }
     
     const { shouldOpen } = handleDoubleClickHelper(x, y, createGeometryConfig())
     if (!shouldOpen) return
@@ -291,6 +305,13 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+    
+    // 填充柄拖拽中
+    if (fillHandle && fillHandle.fillHandleState.dragging) {
+      fillHandle.updateFillHandleDrag(x, y)
+      container.value.style.cursor = 'crosshair'
+      return
+    }
     
     // 调整大小
     if (resizeState.isResizing) {
@@ -358,6 +379,14 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       scheduleRedraw()
     }
     
+    // 检测填充柄悬停
+    if (fillHandle) {
+      const fillHandleCursor = fillHandle.getCursor(x, y)
+      if (fillHandleCursor) {
+        cursor = fillHandleCursor
+      }
+    }
+    
     container.value.style.cursor = cursor
     
     // 拖拽选择
@@ -383,6 +412,12 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理鼠标松开事件
    */
   function onMouseUp(): void {
+    // 结束填充柄拖拽
+    if (fillHandle && fillHandle.fillHandleState.dragging) {
+      fillHandle.endFillHandleDrag()
+      return
+    }
+    
     // 结束调整大小
     if (resizeState.isResizing) {
       resizeState.isResizing = false

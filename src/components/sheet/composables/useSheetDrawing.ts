@@ -12,13 +12,15 @@ import { updateScrollbars } from '../scrollbar'
 import { getSelectionRangeText as getSelectionText } from '../selection'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
+import type { FillHandleComposable } from './useFillHandle'
 
 export interface UseSheetDrawingOptions {
   state: SheetState
   geometry: SheetGeometry
+  fillHandle?: FillHandleComposable
 }
 
-export function useSheetDrawing({ state, geometry }: UseSheetDrawingOptions) {
+export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawingOptions) {
   const { 
     constants,
     container, gridCanvas, contentCanvas,
@@ -243,6 +245,14 @@ export function useSheetDrawing({ state, geometry }: UseSheetDrawingOptions) {
     // 先绘制单元格内容，再绘制网格和表头（确保表头在最上层）
     drawCells(w, h)
     drawGrid(w, h)
+    
+    // 绘制填充柄和预览
+    if (fillHandle) {
+      fillHandle.updateFillHandlePosition()
+      const ctx = contentCanvas.value!.getContext('2d')!
+      fillHandle.drawFillHandle(ctx)
+      fillHandle.drawFillPreview(ctx)
+    }
     
     // 如果正在 IME 组合中，在选中单元格上绘制组合文本
     if (imeState.isComposing && imeState.compositionText && selected.row >= 0 && selected.col >= 0 && !overlay.visible) {

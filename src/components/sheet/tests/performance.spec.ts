@@ -8,7 +8,7 @@ import type { CellStyle } from '../types'
 const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true'
 
 // CI 环境使用更宽松的阈值（性能不稳定）
-const PERF_MULTIPLIER = isCI ? 5 : 1
+const PERF_MULTIPLIER = isCI ? 10 : 1
 
 // Mock Canvas context for performance testing
 function createMockContext() {

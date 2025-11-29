@@ -83,6 +83,17 @@
         @cancel="state.inputDialog.visible = false"
       />
       
+      <!-- 填充选项菜单 -->
+      <FillOptionsMenu
+        :visible="fillHandle.fillOptionsMenu.visible"
+        :x="fillHandle.fillOptionsMenu.x"
+        :y="fillHandle.fillOptionsMenu.y"
+        :direction="fillHandle.fillOptionsMenu.direction"
+        :selected-type="fillHandle.fillOptionsMenu.selectedType"
+        @select="fillHandle.handleFillOptionSelect"
+        @close="fillHandle.closeFillOptionsMenu"
+      />
+      
       <!-- 计算进度指示器 -->
       <div v-if="state.calculationProgress.visible" class="calculation-progress">
         <div class="progress-content">
@@ -112,7 +123,8 @@ import {
   useSheetClipboard,
   useRowColOperations,
   useSheetKeyboard,
-  useSheetMouse
+  useSheetMouse,
+  useFillHandle
 } from './sheet/composables'
 
 // @ts-ignore
@@ -123,6 +135,8 @@ import StyleToolbar from './StyleToolbar.vue'
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
 import InputDialog from './InputDialog.vue'
+// @ts-ignore
+import FillOptionsMenu from './FillOptionsMenu.vue'
 
 // ==================== 初始化状态 ====================
 const state = useSheetState()
@@ -152,31 +166,57 @@ const geometry = useSheetGeometry({
   onDraw: () => drawFn() 
 })
 
-// 2. 绘制
-const drawing = useSheetDrawing({ state, geometry })
-drawFn = drawing.draw // 现在绑定真正的 draw
+// 2. 填充柄 (需要在绘制之前创建)
+let scheduleRedrawFn: () => void = () => {}
+const fillHandle = useFillHandle({
+  getSelectionRange: () => state.selectionRange,
+  getViewport: () => state.viewport,
+  getGeometryConfig: () => geometry.createGeometryConfig(),
+  getSizeAccess: () => geometry.createSizeAccess(),
+  getCanvasSize: () => ({
+    width: state.container.value?.clientWidth ?? 0,
+    height: state.container.value?.clientHeight ?? 0
+  }),
+  getModel: () => state.model,
+  getFormulaSheet: () => state.formulaSheet,
+  getUndoRedoManager: () => state.undoRedo,
+  totalRows: state.constants.DEFAULT_ROWS,
+  totalCols: state.constants.DEFAULT_COLS,
+  scheduleRedraw: () => scheduleRedrawFn(),
+  updateSelectionRange: (range) => {
+    state.selectionRange.startRow = range.startRow
+    state.selectionRange.startCol = range.startCol
+    state.selectionRange.endRow = range.endRow
+    state.selectionRange.endCol = range.endCol
+  }
+})
 
-// 3. 输入处理
+// 3. 绘制 (传入 fillHandle)
+const drawing = useSheetDrawing({ state, geometry, fillHandle })
+drawFn = drawing.draw
+scheduleRedrawFn = drawing.scheduleRedraw
+
+// 4. 输入处理
 const input = useSheetInput({ 
   state, 
   geometry, 
   onDraw: drawing.draw 
 })
 
-// 4. 剪贴板
+// 5. 剪贴板
 const clipboard = useSheetClipboard({ 
   state, 
   onDraw: drawing.draw 
 })
 
-// 5. 行列操作
+// 6. 行列操作
 const rowColOps = useRowColOperations({ 
   state, 
   geometry, 
   onDraw: drawing.draw 
 })
 
-// 6. 键盘处理
+// 7. 键盘处理
 const keyboard = useSheetKeyboard({ 
   state, 
   geometry, 
@@ -185,14 +225,15 @@ const keyboard = useSheetKeyboard({
   onDraw: drawing.draw 
 })
 
-// 7. 鼠标处理
+// 8. 鼠标处理
 const mouse = useSheetMouse({ 
   state, 
   geometry, 
   input, 
   rowColOps, 
   onDraw: drawing.draw,
-  scheduleRedraw: drawing.scheduleRedraw 
+  scheduleRedraw: drawing.scheduleRedraw,
+  fillHandle
 })
 
 // ==================== IME KeyDown 包装 ====================
@@ -660,7 +701,7 @@ defineExpose(api)
   position: absolute;
   top: 0;
   left: 0;
-  cursor: default;
+  cursor: inherit;
 }
 
 /* 自定义滚动条样式 */
