@@ -3,7 +3,7 @@
  * 负责行列的插入、删除和尺寸设置
  */
 
-import type { CellStyle, CellBorder, MergedRegion } from './types'
+import type { CellStyle, CellBorder, CellFormat, MergedRegion } from './types'
 
 /**
  * 公式表接口（适配器模式）
@@ -24,6 +24,11 @@ export interface FormulaSheetAdapter {
     setCellBorder(row: number, col: number, border: Partial<CellBorder>): void
     hasCellBorder(row: number, col: number): boolean
     clearCellBorder(row: number, col: number): void
+    // 格式相关
+    getCellFormat(row: number, col: number): CellFormat
+    setCellFormat(row: number, col: number, format: CellFormat): void
+    hasCellFormat(row: number, col: number): boolean
+    clearCellFormat(row: number, col: number): void
     // 合并单元格相关
     getAllMergedRegions(): MergedRegion[]
     unmergeCells(row: number, col: number): MergedRegion | null
@@ -127,7 +132,39 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
     model.setCellBorder(r + 1, c, border)
   })
   
-  // 步骤6: 移动自定义行高
+  // 步骤6: 移动格式 - 收集所有需要移动的格式
+  const formatsToMove: Array<{ row: number; col: number; format: CellFormat }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = sizeConfig.totalRows - 1; r >= row; r--) {
+      if (model.hasCellFormat(r, c)) {
+        formatsToMove.push({ row: r, col: c, format: model.getCellFormat(r, c) })
+        model.clearCellFormat(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  formatsToMove.forEach(({ row: r, col: c, format }) => {
+    model.setCellFormat(r + 1, c, format)
+  })
+  
+  // 步骤7: 新行继承样式（Excel 行为：继承上方行的样式，如果是第0行则继承下方行）
+  const sourceRow = row > 0 ? row - 1 : row + 1  // 继承源行
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    // 继承样式
+    if (model.hasCellStyle(sourceRow, c)) {
+      model.setCellStyle(row, c, model.getCellStyle(sourceRow, c))
+    }
+    // 继承边框
+    if (model.hasCellBorder(sourceRow, c)) {
+      model.setCellBorder(row, c, model.getCellBorder(sourceRow, c)!)
+    }
+    // 继承格式
+    if (model.hasCellFormat(sourceRow, c)) {
+      model.setCellFormat(row, c, model.getCellFormat(sourceRow, c))
+    }
+  }
+  
+  // 步骤8: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   sizeConfig.rowHeights.forEach((height: number, r: number) => {
     if (r >= row) {
@@ -138,7 +175,13 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
   })
   sizeConfig.rowHeights = newRowHeights
   
-  // 步骤7: 调整合并区域
+  // 步骤9: 新行继承行高（Excel 行为：继承上方行的行高，如果是第0行则继承下方行）
+  const heightSourceRow = row > 0 ? row - 1 : row + 1
+  if (sizeConfig.rowHeights.has(heightSourceRow)) {
+    sizeConfig.rowHeights.set(row, sizeConfig.rowHeights.get(heightSourceRow)!)
+  }
+  
+  // 步骤10: 调整合并区域
   // 对于插入行：
   // - 如果插入位置在合并区域内部（不在起始行），需要扩展合并区域（向下扩展1行）
   // - 如果插入位置在合并区域下方，合并区域需要整体下移
@@ -265,7 +308,26 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
     model.setCellBorder(r - 1, c, border)
   })
   
-  // 步骤7: 移动自定义行高
+  // 步骤7: 移动格式
+  // 先清除被删除行的格式
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    model.clearCellFormat(row, c)
+  }
+  // 收集并移动需要上移的格式
+  const formatsToMove: Array<{ row: number; col: number; format: CellFormat }> = []
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = row + 1; r < sizeConfig.totalRows; r++) {
+      if (model.hasCellFormat(r, c)) {
+        formatsToMove.push({ row: r, col: c, format: model.getCellFormat(r, c) })
+        model.clearCellFormat(r, c)
+      }
+    }
+  }
+  formatsToMove.forEach(({ row: r, col: c, format }) => {
+    model.setCellFormat(r - 1, c, format)
+  })
+  
+  // 步骤8: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   sizeConfig.rowHeights.forEach((height: number, r: number) => {
     if (r < row) {
@@ -276,14 +338,14 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
   })
   sizeConfig.rowHeights = newRowHeights
   
-  // 步骤8: 调整选择范围
+  // 步骤9: 调整选择范围
   if (selected.row === row) {
     selected.row = Math.max(0, row - 1)
   } else if (selected.row > row) {
     selected.row--
   }
   
-  // 步骤9: 调整合并区域
+  // 步骤10: 调整合并区域
   // 对于删除行：
   // - 如果删除位置在合并区域内部，需要收缩合并区域（减少1行）
   // - 如果删除位置在合并区域下方，合并区域不受影响
@@ -380,7 +442,39 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
     model.setCellBorder(r, c + 1, border)
   })
   
-  // 步骤6: 移动自定义列宽
+  // 步骤6: 移动格式 - 收集所有需要移动的格式
+  const formatsToMove: Array<{ row: number; col: number; format: CellFormat }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
+      if (model.hasCellFormat(r, c)) {
+        formatsToMove.push({ row: r, col: c, format: model.getCellFormat(r, c) })
+        model.clearCellFormat(r, c)
+      }
+    }
+  }
+  // 设置到新位置
+  formatsToMove.forEach(({ row: r, col: c, format }) => {
+    model.setCellFormat(r, c + 1, format)
+  })
+  
+  // 步骤7: 新列继承样式（Excel 行为：继承左侧列的样式，如果是第0列则继承右侧列）
+  const sourceCol = col > 0 ? col - 1 : col + 1  // 继承源列
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    // 继承样式
+    if (model.hasCellStyle(r, sourceCol)) {
+      model.setCellStyle(r, col, model.getCellStyle(r, sourceCol))
+    }
+    // 继承边框
+    if (model.hasCellBorder(r, sourceCol)) {
+      model.setCellBorder(r, col, model.getCellBorder(r, sourceCol)!)
+    }
+    // 继承格式
+    if (model.hasCellFormat(r, sourceCol)) {
+      model.setCellFormat(r, col, model.getCellFormat(r, sourceCol))
+    }
+  }
+  
+  // 步骤8: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   sizeConfig.colWidths.forEach((width: number, c: number) => {
     if (c >= col) {
@@ -391,7 +485,13 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
   })
   sizeConfig.colWidths = newColWidths
   
-  // 步骤7: 调整合并区域
+  // 步骤9: 新列继承列宽（Excel 行为：继承左侧列的列宽，如果是第0列则继承右侧列）
+  const widthSourceCol = col > 0 ? col - 1 : col + 1
+  if (sizeConfig.colWidths.has(widthSourceCol)) {
+    sizeConfig.colWidths.set(col, sizeConfig.colWidths.get(widthSourceCol)!)
+  }
+  
+  // 步骤10: 调整合并区域
   // 对于插入列：
   // - 如果插入位置在合并区域内部（不在起始列），需要扩展合并区域（向右扩展1列）
   // - 如果插入位置在合并区域右侧，合并区域不受影响
@@ -518,7 +618,26 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
     model.setCellBorder(r, c - 1, border)
   })
   
-  // 步骤7: 移动自定义列宽
+  // 步骤7: 移动格式
+  // 先清除被删除列的格式
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    model.clearCellFormat(r, col)
+  }
+  // 收集并移动需要左移的格式
+  const formatsToMove: Array<{ row: number; col: number; format: CellFormat }> = []
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = col + 1; c < sizeConfig.totalCols; c++) {
+      if (model.hasCellFormat(r, c)) {
+        formatsToMove.push({ row: r, col: c, format: model.getCellFormat(r, c) })
+        model.clearCellFormat(r, c)
+      }
+    }
+  }
+  formatsToMove.forEach(({ row: r, col: c, format }) => {
+    model.setCellFormat(r, c - 1, format)
+  })
+  
+  // 步骤8: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   sizeConfig.colWidths.forEach((width: number, c: number) => {
     if (c < col) {
@@ -529,14 +648,14 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
   })
   sizeConfig.colWidths = newColWidths
   
-  // 步骤8: 调整选择范围
+  // 步骤9: 调整选择范围
   if (selected.col === col) {
     selected.col = Math.max(0, col - 1)
   } else if (selected.col > col) {
     selected.col--
   }
   
-  // 步骤9: 调整合并区域
+  // 步骤10: 调整合并区域
   // 对于删除列：
   // - 如果删除位置在合并区域内部，需要收缩合并区域（减少1列）
   // - 如果删除位置在合并区域右侧，合并区域不受影响
