@@ -1,5 +1,5 @@
 import type { FormulaMetadata } from './FormulaMetadata'
-import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo, FloatingImage } from '../components/sheet/types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo, FloatingImage, CellImage } from '../components/sheet/types'
 import { DEFAULT_CELL_STYLE, DEFAULT_CELL_FORMAT } from '../components/sheet/types'
 
 export type CellKey = string
@@ -52,6 +52,10 @@ export class SheetModel {
   
   // 下一个图片 z-index
   private nextImageZIndex: number = 1
+  
+  // 单元格内嵌图片存储
+  // Key: "row,col" → 该单元格的图片数组
+  private cellImages: Map<CellKey, CellImage[]> = new Map()
 
   getCell(r: number, c: number): Cell | null {
     const k = keyFor(r, c)
@@ -953,6 +957,271 @@ export class SheetModel {
     this.mergedCellIndex.clear()
   }
   
+  // ==================== 单元格内嵌图片管理方法 ====================
+
+  /**
+   * 添加单元格图片
+   * @param row 行号
+   * @param col 列号
+   * @param imageData 图片数据（不含 id 和 timestamp）
+   * @returns 图片 ID
+   */
+  addCellImage(
+    row: number,
+    col: number,
+    imageData: Omit<CellImage, 'id' | 'timestamp'>
+  ): string {
+    const id = `cimg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const image: CellImage = {
+      ...imageData,
+      id,
+      timestamp: Date.now()
+    }
+    
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key) || []
+    images.push(image)
+    this.cellImages.set(key, images)
+    
+    return id
+  }
+
+  /**
+   * 获取单元格的所有图片（按时间戳排序，最新的在最后）
+   * @param row 行号
+   * @param col 列号
+   * @returns 图片数组
+   */
+  getCellImages(row: number, col: number): CellImage[] {
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key) || []
+    // 按时间戳排序，最新的在最后
+    return [...images].sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  /**
+   * 获取单元格显示的图片（最新的一张）
+   * @param row 行号
+   * @param col 列号
+   * @returns 最新的图片，如果没有则返回 undefined
+   */
+  getCellDisplayImage(row: number, col: number): CellImage | undefined {
+    const images = this.getCellImages(row, col)
+    return images.length > 0 ? images[images.length - 1] : undefined
+  }
+
+  /**
+   * 获取单元格图片数量
+   * @param row 行号
+   * @param col 列号
+   * @returns 图片数量
+   */
+  getCellImageCount(row: number, col: number): number {
+    const key = keyFor(row, col)
+    return this.cellImages.get(key)?.length || 0
+  }
+
+  /**
+   * 移除单元格的某张图片
+   * @param row 行号
+   * @param col 列号
+   * @param imageId 图片 ID
+   * @returns 被移除的图片，如果不存在则返回 undefined
+   */
+  removeCellImage(row: number, col: number, imageId: string): CellImage | undefined {
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key)
+    if (!images) return undefined
+    
+    const index = images.findIndex(img => img.id === imageId)
+    if (index === -1) return undefined
+    
+    const removed = images.splice(index, 1)[0]
+    
+    // 如果数组为空，删除整个 key
+    if (images.length === 0) {
+      this.cellImages.delete(key)
+    }
+    
+    return removed
+  }
+
+  /**
+   * 清除单元格的所有图片
+   * @param row 行号
+   * @param col 列号
+   * @returns 被清除的图片数组
+   */
+  clearCellImages(row: number, col: number): CellImage[] {
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key) || []
+    this.cellImages.delete(key)
+    return images
+  }
+
+  /**
+   * 更新单元格图片的对齐方式
+   * @param row 行号
+   * @param col 列号
+   * @param imageId 图片 ID
+   * @param horizontalAlign 水平对齐
+   * @param verticalAlign 垂直对齐
+   */
+  updateCellImageAlignment(
+    row: number,
+    col: number,
+    imageId: string,
+    horizontalAlign?: 'left' | 'center' | 'right',
+    verticalAlign?: 'top' | 'middle' | 'bottom'
+  ): void {
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key)
+    if (!images) return
+    
+    const image = images.find(img => img.id === imageId)
+    if (!image) return
+    
+    if (horizontalAlign !== undefined) {
+      image.horizontalAlign = horizontalAlign
+    }
+    if (verticalAlign !== undefined) {
+      image.verticalAlign = verticalAlign
+    }
+  }
+
+  /**
+   * 检查单元格是否有图片
+   * @param row 行号
+   * @param col 列号
+   * @returns 是否有图片
+   */
+  hasCellImage(row: number, col: number): boolean {
+    const key = keyFor(row, col)
+    const images = this.cellImages.get(key)
+    return images !== undefined && images.length > 0
+  }
+
+  /**
+   * 获取所有有图片的单元格数量
+   * @returns 有图片的单元格数量
+   */
+  getCellsWithImageCount(): number {
+    return this.cellImages.size
+  }
+
+  /**
+   * 遍历所有有图片的单元格
+   * @param fn 回调函数
+   */
+  forEachCellImage(fn: (row: number, col: number, images: CellImage[]) => void): void {
+    for (const [key, images] of this.cellImages.entries()) {
+      const parts = key.split(',')
+      const rs = parts[0]
+      const cs = parts[1]
+      if (rs && cs) {
+        fn(parseInt(rs, 10), parseInt(cs, 10), images)
+      }
+    }
+  }
+
+  /**
+   * 根据行插入调整单元格图片位置
+   */
+  adjustCellImagesForRowInsert(row: number, count: number = 1): void {
+    const newCellImages = new Map<CellKey, CellImage[]>()
+    
+    for (const [key, images] of this.cellImages.entries()) {
+      const parts = key.split(',')
+      const r = parseInt(parts[0]!, 10)
+      const c = parseInt(parts[1]!, 10)
+      
+      if (r >= row) {
+        // 该行及之后的行下移
+        newCellImages.set(keyFor(r + count, c), images)
+      } else {
+        // 该行之前的行保持不变
+        newCellImages.set(key, images)
+      }
+    }
+    
+    this.cellImages = newCellImages
+  }
+
+  /**
+   * 根据行删除调整单元格图片位置
+   */
+  adjustCellImagesForRowDelete(row: number, count: number = 1): void {
+    const newCellImages = new Map<CellKey, CellImage[]>()
+    
+    for (const [key, images] of this.cellImages.entries()) {
+      const parts = key.split(',')
+      const r = parseInt(parts[0]!, 10)
+      const c = parseInt(parts[1]!, 10)
+      
+      if (r >= row && r < row + count) {
+        // 被删除行的图片直接丢弃
+        continue
+      } else if (r >= row + count) {
+        // 该行之后的行上移
+        newCellImages.set(keyFor(r - count, c), images)
+      } else {
+        // 该行之前的行保持不变
+        newCellImages.set(key, images)
+      }
+    }
+    
+    this.cellImages = newCellImages
+  }
+
+  /**
+   * 根据列插入调整单元格图片位置
+   */
+  adjustCellImagesForColInsert(col: number, count: number = 1): void {
+    const newCellImages = new Map<CellKey, CellImage[]>()
+    
+    for (const [key, images] of this.cellImages.entries()) {
+      const parts = key.split(',')
+      const r = parseInt(parts[0]!, 10)
+      const c = parseInt(parts[1]!, 10)
+      
+      if (c >= col) {
+        // 该列及之后的列右移
+        newCellImages.set(keyFor(r, c + count), images)
+      } else {
+        // 该列之前的列保持不变
+        newCellImages.set(key, images)
+      }
+    }
+    
+    this.cellImages = newCellImages
+  }
+
+  /**
+   * 根据列删除调整单元格图片位置
+   */
+  adjustCellImagesForColDelete(col: number, count: number = 1): void {
+    const newCellImages = new Map<CellKey, CellImage[]>()
+    
+    for (const [key, images] of this.cellImages.entries()) {
+      const parts = key.split(',')
+      const r = parseInt(parts[0]!, 10)
+      const c = parseInt(parts[1]!, 10)
+      
+      if (c >= col && c < col + count) {
+        // 被删除列的图片直接丢弃
+        continue
+      } else if (c >= col + count) {
+        // 该列之后的列左移
+        newCellImages.set(keyFor(r, c - count), images)
+      } else {
+        // 该列之前的列保持不变
+        newCellImages.set(key, images)
+      }
+    }
+    
+    this.cellImages = newCellImages
+  }
+
   // ==================== 浮动图片管理方法 ====================
 
   /**
@@ -1174,6 +1443,12 @@ export class SheetModel {
       imagesCopy.set(id, { ...img })
     }
     
+    // 深拷贝单元格图片
+    const cellImagesCopy = new Map<CellKey, CellImage[]>()
+    for (const [key, images] of this.cellImages.entries()) {
+      cellImagesCopy.set(key, images.map(img => ({ ...img })))
+    }
+    
     return {
       cells: new Map(this.cells),
       cellStyles: new Map(this.cellStyles),
@@ -1182,7 +1457,8 @@ export class SheetModel {
       mergedRegions: new Map(this.mergedRegions),
       mergedCellIndex: new Map(this.mergedCellIndex),
       floatingImages: imagesCopy,
-      nextImageZIndex: this.nextImageZIndex
+      nextImageZIndex: this.nextImageZIndex,
+      cellImages: cellImagesCopy
     }
   }
   
@@ -1208,6 +1484,14 @@ export class SheetModel {
     if (snapshot.nextImageZIndex !== undefined) {
       this.nextImageZIndex = snapshot.nextImageZIndex
     }
+    
+    // 恢复单元格图片
+    if (snapshot.cellImages) {
+      this.cellImages = new Map()
+      for (const [key, images] of snapshot.cellImages.entries()) {
+        this.cellImages.set(key, images.map(img => ({ ...img })))
+      }
+    }
   }
 }
 
@@ -1223,4 +1507,5 @@ export interface ModelSnapshot {
   mergedCellIndex: Map<CellKey, CellKey>
   floatingImages?: Map<string, FloatingImage>
   nextImageZIndex?: number
+  cellImages?: Map<CellKey, CellImage[]>
 }

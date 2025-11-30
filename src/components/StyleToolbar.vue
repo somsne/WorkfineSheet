@@ -253,20 +253,44 @@
 
     <div class="separator"></div>
 
-    <!-- 插入图片 -->
-    <button 
-      @click="triggerImageUpload" 
-      class="style-btn" 
-      title="插入图片"
-    >
-      🖼️
-    </button>
+    <!-- 插入图片（带下拉菜单） -->
+    <div class="image-dropdown">
+      <button 
+        @click="toggleImageMenu" 
+        class="style-btn" 
+        title="插入图片"
+      >
+        🖼️
+        <span class="dropdown-arrow">▾</span>
+      </button>
+      <div v-if="showImageMenu" class="image-menu">
+        <div class="image-menu-item" @click="triggerFloatingImageUpload">
+          <span class="image-type-icon">🖼️</span>
+          <span>浮动图片</span>
+          <span class="image-desc">可自由移动和调整大小</span>
+        </div>
+        <div class="image-menu-item" @click="triggerCellImageUpload">
+          <span class="image-type-icon">📷</span>
+          <span>单元格图片</span>
+          <span class="image-desc">嵌入到选中单元格</span>
+        </div>
+      </div>
+    </div>
     <input 
-      ref="imageInput" 
+      ref="floatingImageInput" 
       type="file" 
       accept="image/*" 
+      multiple
       style="display: none;" 
-      @change="handleImageUpload"
+      @change="handleFloatingImageUpload"
+    />
+    <input 
+      ref="cellImageInput" 
+      type="file" 
+      accept="image/*" 
+      multiple
+      style="display: none;" 
+      @change="handleCellImageUpload"
     />
 
     <div class="separator"></div>
@@ -527,6 +551,9 @@ const handleClickOutside = (e: MouseEvent) => {
   }
   if (!target.closest('.merge-dropdown')) {
     showMergeMenu.value = false
+  }
+  if (!target.closest('.image-dropdown')) {
+    showImageMenu.value = false
   }
 }
 
@@ -881,21 +908,58 @@ function doUnmergeCells() {
 }
 
 // 图片上传相关
-const imageInput = ref<HTMLInputElement | null>(null)
+const floatingImageInput = ref<HTMLInputElement | null>(null)
+const cellImageInput = ref<HTMLInputElement | null>(null)
+const showImageMenu = ref(false)
 
-function triggerImageUpload() {
-  imageInput.value?.click()
+function toggleImageMenu() {
+  showImageMenu.value = !showImageMenu.value
+  // 关闭其他菜单
+  showBorderMenu.value = false
+  showFormatMenu.value = false
+  showMergeMenu.value = false
 }
 
-async function handleImageUpload(event: Event) {
+function triggerFloatingImageUpload() {
+  showImageMenu.value = false
+  floatingImageInput.value?.click()
+}
+
+function triggerCellImageUpload() {
+  showImageMenu.value = false
+  cellImageInput.value?.click()
+}
+
+async function handleFloatingImageUpload(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+  const files = input.files
+  if (!files || files.length === 0) return
   
   try {
-    await props.api.insertImage(file)
+    // 支持多文件上传
+    for (const file of Array.from(files)) {
+      await props.api.insertImage(file)
+    }
   } catch (error) {
-    console.error('插入图片失败:', error)
+    console.error('插入浮动图片失败:', error)
+  }
+  
+  // 清除 input 以便能再次选择同一文件
+  input.value = ''
+}
+
+async function handleCellImageUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  if (!files || files.length === 0) return
+  
+  try {
+    // 支持多文件上传
+    for (const file of Array.from(files)) {
+      await props.api.insertCellImage(file)
+    }
+  } catch (error) {
+    console.error('插入单元格图片失败:', error)
   }
   
   // 清除 input 以便能再次选择同一文件
@@ -1351,6 +1415,60 @@ onMounted(() => {
   color: var(--icon-color, #666);
 }
 
+/* 图片下拉菜单 */
+.image-dropdown {
+  position: relative;
+}
+
+.image-dropdown .dropdown-arrow {
+  font-size: 8px;
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+.image-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--menu-bg, white);
+  border: 1px solid var(--menu-border, #d0d0d0);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 200px;
+  z-index: 1000;
+}
+
+.image-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+  color: var(--menu-text, #333);
+  user-select: none;
+}
+
+.image-menu-item:hover {
+  background: var(--menu-hover, #f0f0f0);
+}
+
+.image-menu-item .image-type-icon {
+  display: none;
+}
+
+.image-menu-item span:first-of-type {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.image-desc {
+  font-size: 11px;
+  color: var(--hint-color, #888);
+}
+
 /* 夜间模式 - 系统偏好 */
 @media (prefers-color-scheme: dark) {
   .style-toolbar {
@@ -1394,6 +1512,15 @@ onMounted(() => {
     --menu-text: #e0e0e0;
     --menu-hover: #3a3a3a;
     --icon-color: #b0b0b0;
+  }
+
+  .image-menu {
+    --menu-bg: #2d2d2d;
+    --menu-border: #505050;
+    --menu-text: #e0e0e0;
+    --menu-hover: #3a3a3a;
+    --icon-color: #b0b0b0;
+    --hint-color: #888;
   }
 }
 
@@ -1439,5 +1566,14 @@ onMounted(() => {
   --menu-text: #e0e0e0;
   --menu-hover: #3a3a3a;
   --icon-color: #b0b0b0;
+}
+
+:global(html.dark) .image-menu {
+  --menu-bg: #2d2d2d;
+  --menu-border: #505050;
+  --menu-text: #e0e0e0;
+  --menu-hover: #3a3a3a;
+  --icon-color: #b0b0b0;
+  --hint-color: #888;
 }
 </style>

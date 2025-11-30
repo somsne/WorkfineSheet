@@ -48,6 +48,10 @@
 - **[FLOATING_IMAGES.md](./features/FLOATING_IMAGES.md)** ⭐ 功能说明
 - **[IMAGE_API.md](./api/IMAGE_API.md)** - API 参考
 
+### 单元格内嵌图片
+- **[CELL_IMAGES.md](./features/CELL_IMAGES.md)** ⭐ 功能说明
+- **[CELL_IMAGE_API.md](./api/CELL_IMAGE_API.md)** - API 参考
+
 ---
 
 ## 🐛 问题修复文档
@@ -138,4 +142,4 @@
 ---
 
 **文档维护**: 请在更新文档时同步更新此索引  
-**最后更新**: 2025-11-28
+**最后更新**: 2025-06-18

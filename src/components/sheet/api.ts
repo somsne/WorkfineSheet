@@ -4,7 +4,7 @@
  */
 
 import type { SelectedCell } from './rowcol'
-import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo } from './types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo, CellImage, CellImageAlignment, CellImageVerticalAlign } from './types'
 
 /**
  * 行列尺寸 API
@@ -505,6 +505,119 @@ export interface ImageAPI {
 }
 
 /**
+ * 单元格内嵌图片 API
+ */
+export interface CellImageAPI {
+  /**
+   * 从文件插入单元格图片
+   * @param row 行号
+   * @param col 列号
+   * @param file 图片文件
+   * @param row 行号（可选，默认使用当前选中单元格）
+   * @param col 列号（可选，默认使用当前选中单元格）
+   * @returns 图片 ID，失败返回 null
+   */
+  insertCellImage(
+    file: File,
+    row?: number,
+    col?: number
+  ): Promise<string | null>
+  
+  /**
+   * 从 URL 插入单元格图片
+   * @param url 图片 URL
+   * @param row 行号（可选，默认使用当前选中单元格）
+   * @param col 列号（可选，默认使用当前选中单元格）
+   * @returns 图片 ID，失败返回 null
+   */
+  insertCellImageFromUrl(
+    url: string,
+    row?: number,
+    col?: number
+  ): Promise<string | null>
+  
+  /**
+   * 获取单元格的所有图片
+   * @param row 行号
+   * @param col 列号
+   * @returns 图片数组（按时间戳排序，最新的在最后）
+   */
+  getCellImages(row: number, col: number): CellImage[]
+  
+  /**
+   * 获取单元格当前显示的图片（最新的一张）
+   * @param row 行号
+   * @param col 列号
+   * @returns 图片，如果没有则返回 null
+   */
+  getCellDisplayImage(row: number, col: number): CellImage | null
+  
+  /**
+   * 获取单元格图片数量
+   * @param row 行号
+   * @param col 列号
+   * @returns 图片数量
+   */
+  getCellImageCount(row: number, col: number): number
+  
+  /**
+   * 移除单元格的某张图片
+   * @param row 行号
+   * @param col 列号
+   * @param imageId 图片 ID
+   */
+  removeCellImage(row: number, col: number, imageId: string): void
+  
+  /**
+   * 清除单元格的所有图片
+   * @param row 行号
+   * @param col 列号
+   */
+  clearCellImages(row: number, col: number): void
+  
+  /**
+   * 更新单元格图片的对齐方式
+   * @param row 行号
+   * @param col 列号
+   * @param imageId 图片 ID
+   * @param horizontalAlign 水平对齐
+   * @param verticalAlign 垂直对齐
+   */
+  updateCellImageAlignment(
+    row: number,
+    col: number,
+    imageId: string,
+    horizontalAlign?: CellImageAlignment,
+    verticalAlign?: CellImageVerticalAlign
+  ): void
+  
+  /**
+   * 为当前选中单元格插入图片
+   * @param file 图片文件
+   * @param horizontalAlign 水平对齐（默认 center）
+   * @param verticalAlign 垂直对齐（默认 middle）
+   * @returns 图片 ID，失败返回 null
+   */
+  insertImageToSelection(
+    file: File,
+    horizontalAlign?: CellImageAlignment,
+    verticalAlign?: CellImageVerticalAlign
+  ): Promise<string | null>
+  
+  /**
+   * 打开单元格图片预览
+   * @param row 行号
+   * @param col 列号
+   */
+  openCellImagePreview(row: number, col: number): void
+  
+  /**
+   * 关闭单元格图片预览
+   */
+  closeCellImagePreview(): void
+}
+
+/**
  * 格式刷 API
  */
 export interface FormatPainterAPI {
@@ -537,7 +650,7 @@ export interface FormatPainterAPI {
 /**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI, FormatPainterAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI, CellImageAPI, FormatPainterAPI {
   /**
    * 刷新绘制
    */
@@ -701,6 +814,18 @@ export function createSheetAPI(context: {
   startFormatPainterContinuousFn?: () => void
   stopFormatPainterFn?: () => void
   applyFormatPainterFn?: () => void
+  
+  // 单元格内嵌图片相关
+  insertCellImageFn?: (file: File, row?: number, col?: number) => Promise<string | null>
+  insertCellImageFromUrlFn?: (url: string, row?: number, col?: number) => Promise<string | null>
+  getCellImagesFn?: (row: number, col: number) => CellImage[]
+  getCellDisplayImageFn?: (row: number, col: number) => CellImage | null
+  getCellImageCountFn?: (row: number, col: number) => number
+  removeCellImageFn?: (row: number, col: number, imageId: string) => void
+  clearCellImagesFn?: (row: number, col: number) => void
+  updateCellImageAlignmentFn?: (row: number, col: number, imageId: string, horizontalAlign?: CellImageAlignment, verticalAlign?: CellImageVerticalAlign) => void
+  openCellImagePreviewFn?: (row: number, col: number) => void
+  closeCellImagePreviewFn?: () => void
 }): SheetAPI {
   return {
     // 行高列宽
@@ -1246,6 +1371,108 @@ export function createSheetAPI(context: {
       }
       context.applyFormatPainterFn()
       context.draw()
+    },
+    
+    // ==================== 单元格内嵌图片 API ====================
+    
+    async insertCellImage(file: File, row?: number, col?: number): Promise<string | null> {
+      if (!context.insertCellImageFn) {
+        console.warn('Cell image API not available')
+        return null
+      }
+      const result = await context.insertCellImageFn(file, row, col)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    async insertCellImageFromUrl(url: string, row?: number, col?: number): Promise<string | null> {
+      if (!context.insertCellImageFromUrlFn) {
+        console.warn('Cell image API not available')
+        return null
+      }
+      const result = await context.insertCellImageFromUrlFn(url, row, col)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    getCellImages(row: number, col: number): CellImage[] {
+      if (!context.getCellImagesFn) {
+        return []
+      }
+      return context.getCellImagesFn(row, col)
+    },
+    
+    getCellDisplayImage(row: number, col: number): CellImage | null {
+      if (!context.getCellDisplayImageFn) {
+        return null
+      }
+      return context.getCellDisplayImageFn(row, col)
+    },
+    
+    getCellImageCount(row: number, col: number): number {
+      if (!context.getCellImageCountFn) {
+        return 0
+      }
+      return context.getCellImageCountFn(row, col)
+    },
+    
+    removeCellImage(row: number, col: number, imageId: string): void {
+      if (!context.removeCellImageFn) {
+        console.warn('Cell image API not available')
+        return
+      }
+      context.removeCellImageFn(row, col, imageId)
+      context.draw()
+    },
+    
+    clearCellImages(row: number, col: number): void {
+      if (!context.clearCellImagesFn) {
+        console.warn('Cell image API not available')
+        return
+      }
+      context.clearCellImagesFn(row, col)
+      context.draw()
+    },
+    
+    updateCellImageAlignment(row: number, col: number, imageId: string, horizontalAlign?: CellImageAlignment, verticalAlign?: CellImageVerticalAlign): void {
+      if (!context.updateCellImageAlignmentFn) {
+        console.warn('Cell image API not available')
+        return
+      }
+      context.updateCellImageAlignmentFn(row, col, imageId, horizontalAlign, verticalAlign)
+      context.draw()
+    },
+    
+    openCellImagePreview(row: number, col: number): void {
+      if (!context.openCellImagePreviewFn) {
+        console.warn('Cell image preview API not available')
+        return
+      }
+      context.openCellImagePreviewFn(row, col)
+    },
+    
+    closeCellImagePreview(): void {
+      if (!context.closeCellImagePreviewFn) {
+        return
+      }
+      context.closeCellImagePreviewFn()
+    },
+    
+    async insertImageToSelection(file: File, _horizontalAlign?: CellImageAlignment, _verticalAlign?: CellImageVerticalAlign): Promise<string | null> {
+      if (!context.insertCellImageFn) {
+        console.warn('Cell image API not available')
+        return null
+      }
+      // 使用当前选中位置
+      const result = await context.insertCellImageFn(file)
+      if (result) {
+        context.draw()
+      }
+      return result
     }
   }
 }

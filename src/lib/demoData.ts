@@ -1258,4 +1258,111 @@ function initializeDemoImage(model: SheetModel): void {
     locked: false,
     hidden: false
   })
+  
+  // ===== 单元格内嵌图片演示 =====
+  initializeCellImagesDemo(model)
+}
+
+/**
+ * Initialize cell embedded images demo
+ * 在 L26-N30 区域演示单元格内嵌图片功能
+ */
+function initializeCellImagesDemo(model: SheetModel): void {
+  const startRow = 25 // 第26行 (0-indexed = 25)
+  const startCol = 11 // L列 (0-indexed = 11)
+
+  // ===== 标题 (合并 L26:N26) =====
+  model.setValue(startRow, startCol, '单元格内嵌图片')
+  model.setCellStyle(startRow, startCol, {
+    bold: true,
+    fontSize: 14,
+    color: '#ffffff',
+    backgroundColor: '#0891b2',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(startRow, startCol, startRow, startCol + 2)
+
+  // ===== 说明行 =====
+  model.setValue(startRow + 1, startCol, '点击图片可预览')
+  model.setCellStyle(startRow + 1, startCol, {
+    color: '#6b7280',
+    fontSize: 12,
+    textAlign: 'center'
+  })
+  model.mergeCells(startRow + 1, startCol, startRow + 1, startCol + 2)
+
+  // ===== 不同对齐方式的图片演示 =====
+  // 左对齐
+  model.setValue(startRow + 2, startCol, '')
+  model.setCellStyle(startRow + 2, startCol, {
+    textAlign: 'left',
+    verticalAlign: 'middle',
+    backgroundColor: '#ecfeff'
+  })
+  model.addCellImage(startRow + 2, startCol, {
+    src: DEMO_IMAGE_DATA_URL,
+    naturalWidth: 120,
+    naturalHeight: 120,
+    horizontalAlign: 'left',
+    verticalAlign: 'middle'
+  })
+
+  // 居中对齐
+  model.setValue(startRow + 2, startCol + 1, '')
+  model.setCellStyle(startRow + 2, startCol + 1, {
+    textAlign: 'center',
+    verticalAlign: 'middle',
+    backgroundColor: '#cffafe'
+  })
+  model.addCellImage(startRow + 2, startCol + 1, {
+    src: DEMO_IMAGE_DATA_URL,
+    naturalWidth: 120,
+    naturalHeight: 120,
+    horizontalAlign: 'center',
+    verticalAlign: 'middle'
+  })
+
+  // 右对齐
+  model.setValue(startRow + 2, startCol + 2, '')
+  model.setCellStyle(startRow + 2, startCol + 2, {
+    textAlign: 'right',
+    verticalAlign: 'middle',
+    backgroundColor: '#a5f3fc'
+  })
+  model.addCellImage(startRow + 2, startCol + 2, {
+    src: DEMO_IMAGE_DATA_URL,
+    naturalWidth: 120,
+    naturalHeight: 120,
+    horizontalAlign: 'right',
+    verticalAlign: 'middle'
+  })
+
+  // 对齐说明
+  model.setValue(startRow + 3, startCol, '左对齐')
+  model.setValue(startRow + 3, startCol + 1, '居中')
+  model.setValue(startRow + 3, startCol + 2, '右对齐')
+  for (let c = startCol; c <= startCol + 2; c++) {
+    model.setCellStyle(startRow + 3, c, {
+      textAlign: 'center',
+      color: '#374151',
+      fontSize: 11,
+      backgroundColor: '#f0fdfa'
+    })
+  }
+
+  // ===== 功能说明 =====
+  model.setValue(startRow + 5, startCol, '功能说明')
+  model.setCellStyle(startRow + 5, startCol, {
+    bold: true,
+    backgroundColor: '#f3f4f6'
+  })
+  
+  model.setValue(startRow + 5, startCol + 1, '• 点击图片打开预览\n• 支持多图显示最新\n• 图片跟随单元格对齐')
+  model.setCellStyle(startRow + 5, startCol + 1, {
+    verticalAlign: 'top',
+    fontSize: 11,
+    color: '#4b5563'
+  })
+  model.mergeCells(startRow + 5, startCol + 1, startRow + 5, startCol + 2)
 }

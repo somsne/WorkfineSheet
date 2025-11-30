@@ -3,9 +3,10 @@
  * Depends on geometry module for positions and the FormulaSheet for values.
  */
 
-import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge, MergedCellInfo, MergedRegion } from './types'
+import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge, MergedCellInfo, MergedRegion, CellImage } from './types'
 import { BORDER_PRESETS } from './types'
 import { getRowHeight, getColWidth, getRowTop, getColLeft } from './geometry'
+import { renderCellImage } from './renderCellImage'
 
 /**
  * Build Canvas font string from CellStyle
@@ -300,6 +301,9 @@ export interface CellsRenderConfig {
   getMergedRegion?: (row: number, col: number) => MergedRegion | null
   // All merged regions for rendering merged cells that start outside visible area
   mergedRegions?: MergedRegion[]
+  // Cell image providers
+  getCellDisplayImage?: (row: number, col: number) => CellImage | undefined
+  getCellImageCount?: (row: number, col: number) => number
   // Visible range
   startRow: number
   endRow: number
@@ -327,6 +331,8 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     getMergedCellInfo,
     // getMergedRegion is available but not used in this function (used via config.model)
     mergedRegions = [],
+    getCellDisplayImage,
+    getCellImageCount,
     startRow,
     endRow,
     startCol,
@@ -372,10 +378,7 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     colWidth: number, 
     rowHeight: number
   ) => {
-    const displayValue = getCellValue(r, c)
-    if (displayValue === null || displayValue === undefined) return
-    
-    // Get cell style
+    // Get cell style first for background rendering
     const style: CellStyle = getCellStyle ? getCellStyle(r, c) : {
       fontFamily: 'sans-serif',
       fontSize: 13,
@@ -404,6 +407,42 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       ctx.fillStyle = style.backgroundColor
       ctx.fillRect(cellX + 0.5, cellY + 0.5, colWidth - 1, rowHeight - 1)
     }
+    
+    ctx.restore()
+    
+    // Render cell image if present (图片优先于文本)
+    if (getCellDisplayImage && getCellImageCount) {
+      const displayImage = getCellDisplayImage(r, c)
+      if (displayImage) {
+        const imageCount = getCellImageCount(r, c)
+        renderCellImage(
+          ctx,
+          displayImage,
+          cellX,
+          cellY,
+          colWidth,
+          rowHeight,
+          imageCount,
+          rowHeaderWidth,
+          colHeaderHeight,
+          style.textAlign,    // 传递单元格水平对齐
+          style.verticalAlign // 传递单元格垂直对齐
+        )
+        // 如果有图片，不渲染文本（图片和文本不共存）
+        return
+      }
+    }
+    
+    const displayValue = getCellValue(r, c)
+    if (displayValue === null || displayValue === undefined) return
+    
+    // Save current drawing state for text
+    ctx.save()
+    
+    // Create clipping region limited to current cell (or merged cell area)
+    ctx.beginPath()
+    ctx.rect(Math.max(cellX, rowHeaderWidth), Math.max(cellY, colHeaderHeight), colWidth, rowHeight)
+    ctx.clip()
     
     // Apply cell style
     ctx.font = buildFontString(style)

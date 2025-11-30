@@ -120,7 +120,10 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       startRow,
       endRow,
       startCol,
-      endCol
+      endCol,
+      // 单元格内嵌图片
+      getCellDisplayImage: (r, c) => model.getCellDisplayImage(r, c),
+      getCellImageCount: (r, c) => model.getCellImageCount(r, c)
     }
     
     renderCells(ctx, cellsConfig)

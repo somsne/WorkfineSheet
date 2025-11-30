@@ -45,7 +45,7 @@ describe('格式刷模块', () => {
     it('应该提取单个单元格的格式', () => {
       const style: CellStyle = { ...createDefaultStyle(), bold: true, fontSize: 14 }
       const border: CellBorder = { top: { style: 'thin', color: '#000000' } }
-      const format: CellFormat = { type: 'number', decimals: 2 }
+      const format: CellFormat = { type: 'number', decimalPlaces: 2 }
 
       const data = extractFormats(
         0, 0, 0, 0,

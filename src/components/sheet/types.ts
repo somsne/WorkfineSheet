@@ -612,6 +612,91 @@ export const DEFAULT_FILL_HANDLE_STATE: FillHandleState = {
   sourceRange: null
 }
 
+// ==================== 单元格内嵌图片 ====================
+
+/**
+ * 单元格内嵌图片
+ * 图片嵌入在单元格内部，跟随单元格大小变化
+ * 一个单元格可以有多张图片，但只显示最新的一张
+ */
+export interface CellImage {
+  /** 唯一标识 */
+  id: string
+  
+  /** 图片源 (Data URL、Blob URL 或 远程 URL) */
+  src: string
+  
+  /** 原始图片宽度 */
+  naturalWidth: number
+  
+  /** 原始图片高度 */
+  naturalHeight: number
+  
+  /** 水平对齐 */
+  horizontalAlign: CellImageAlignment
+  
+  /** 垂直对齐 */
+  verticalAlign: CellImageVerticalAlign
+  
+  /** 添加时间戳（用于排序，显示最新的图片） */
+  timestamp: number
+}
+
+/**
+ * 单元格内嵌图片水平对齐方式
+ */
+export type CellImageAlignment = 'left' | 'center' | 'right'
+
+/**
+ * 单元格内嵌图片垂直对齐方式
+ */
+export type CellImageVerticalAlign = 'top' | 'middle' | 'bottom'
+
+/**
+ * 单元格图片配置常量
+ */
+export const CELL_IMAGE_CONFIG = {
+  /** 图片与单元格边界的内边距 */
+  PADDING: 2,
+  /** 角标大小 */
+  BADGE_SIZE: 16,
+  /** 角标字体大小 */
+  BADGE_FONT_SIZE: 10,
+  /** 角标背景颜色 */
+  BADGE_BG_COLOR: 'rgba(0, 0, 0, 0.6)',
+  /** 角标文字颜色 */
+  BADGE_TEXT_COLOR: '#ffffff',
+  /** 最小显示尺寸（小于此尺寸不显示图片） */
+  MIN_DISPLAY_SIZE: 10
+} as const
+
+/**
+ * 图片预览状态
+ */
+export interface ImagePreviewState {
+  /** 是否显示预览 */
+  visible: boolean
+  /** 当前单元格行 */
+  row: number
+  /** 当前单元格列 */
+  col: number
+  /** 当前显示的图片索引 */
+  currentIndex: number
+  /** 图片列表 */
+  images: CellImage[]
+}
+
+/**
+ * 默认图片预览状态
+ */
+export const DEFAULT_IMAGE_PREVIEW_STATE: ImagePreviewState = {
+  visible: false,
+  row: -1,
+  col: -1,
+  currentIndex: 0,
+  images: []
+}
+
 // ==================== 浮动图片 ====================
 
 /**

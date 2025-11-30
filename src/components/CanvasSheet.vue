@@ -95,6 +95,15 @@
         @close="fillHandle.closeFillOptionsMenu"
       />
       
+      <!-- 单元格图片预览 -->
+      <ImagePreview
+        :visible="images.imagePreviewState.value.visible"
+        :images="images.imagePreviewState.value.images"
+        :initial-index="images.imagePreviewState.value.currentIndex"
+        @close="images.closeCellImagePreview"
+        @remove="images.handleCellImageRemove"
+      />
+      
       <!-- 计算进度指示器 -->
       <div v-if="state.calculationProgress.visible" class="calculation-progress">
         <div class="progress-content">
@@ -113,7 +122,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import type { CellFormat, CellStyle, CellBorder } from './sheet/types'
+import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
 import { createSheetAPI } from './sheet/api'
 import { extractFormats, applyFormats } from './sheet/formatPainter'
@@ -141,6 +150,8 @@ import ContextMenu from './ContextMenu.vue'
 import InputDialog from './InputDialog.vue'
 // @ts-ignore
 import FillOptionsMenu from './FillOptionsMenu.vue'
+// @ts-ignore
+import ImagePreview from './ImagePreview.vue'
 
 // ==================== 初始化状态 ====================
 const state = useSheetState()
@@ -358,8 +369,17 @@ onMounted(() => {
     
     // 创建包装后的事件处理器，优先处理图片交互
     const wrappedMouseDown = (e: MouseEvent) => {
-      // 先尝试图片交互
+      // 先尝试浮动图片交互
       if (images.handleImageMouseDown(e)) return
+      
+      // 检测单元格内嵌图片点击
+      const cellImageHit = images.checkCellImageClick(e.offsetX, e.offsetY)
+      if (cellImageHit) {
+        // 打开图片预览
+        images.openCellImagePreview(cellImageHit.row, cellImageHit.col)
+        return
+      }
+      
       // 否则使用默认处理
       mouse.onMouseDown(e)
     }
@@ -1093,7 +1113,31 @@ const api = createSheetAPI({
     }
     
     drawing.draw()
-  }
+  },
+  
+  // 单元格内嵌图片相关
+  insertCellImageFn: async (file: File, row?: number, col?: number) => {
+    const targetRow = row ?? state.selected.row
+    const targetCol = col ?? state.selected.col
+    if (targetRow < 0 || targetCol < 0) return null
+    return images.insertCellImage(targetRow, targetCol, file)
+  },
+  insertCellImageFromUrlFn: async (url: string, row?: number, col?: number) => {
+    const targetRow = row ?? state.selected.row
+    const targetCol = col ?? state.selected.col
+    if (targetRow < 0 || targetCol < 0) return null
+    return images.insertCellImageFromUrl(targetRow, targetCol, url)
+  },
+  getCellImagesFn: (row: number, col: number) => state.model.getCellImages(row, col),
+  getCellDisplayImageFn: (row: number, col: number) => state.model.getCellDisplayImage(row, col) ?? null,
+  getCellImageCountFn: (row: number, col: number) => state.model.getCellImageCount(row, col),
+  removeCellImageFn: (row: number, col: number, imageId: string) => images.removeCellImage(row, col, imageId),
+  clearCellImagesFn: (row: number, col: number) => images.clearCellImages(row, col),
+  updateCellImageAlignmentFn: (row: number, col: number, imageId: string, horizontalAlign?: CellImageAlignment, verticalAlign?: CellImageVerticalAlign) => {
+    images.updateCellImageAlignment(row, col, imageId, horizontalAlign, verticalAlign)
+  },
+  openCellImagePreviewFn: (row: number, col: number) => images.openCellImagePreview(row, col),
+  closeCellImagePreviewFn: () => images.closeCellImagePreview()
 })
 
 defineExpose(api)
