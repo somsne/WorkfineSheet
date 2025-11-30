@@ -1243,14 +1243,19 @@ function initializeDemoImage(model: SheetModel): void {
   // 在 V3 位置 (0-indexed: row=2, col=21) 添加示例图片
   // 使用较大的尺寸让图片更醒目
   model.addFloatingImage({
-    id: 'demo-image-1',
     src: DEMO_IMAGE_DATA_URL,
-    anchorCell: { row: 2, col: 21 }, // V3 单元格
+    naturalWidth: 120,
+    naturalHeight: 120,
+    anchorRow: 2,
+    anchorCol: 21, // V3 单元格
     offsetX: 10,
     offsetY: 10,
     width: 150,
     height: 150,
-    zIndex: 1,
-    name: 'WorkfineSheet Logo'
+    lockAspectRatio: true,
+    rotation: 0,
+    opacity: 1,
+    locked: false,
+    hidden: false
   })
 }

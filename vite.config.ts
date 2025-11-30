@@ -24,9 +24,10 @@ function getTestPages() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [vue()],
-  base: process.env.NODE_ENV === 'production' ? '/WorkfineSheet/' : '/',
+  // 使用 command 判断：build 时使用子路径，serve 时使用根路径
+  base: command === 'build' ? '/WorkfineSheet/' : '/',
   server: {
     host: '0.0.0.0',
     port: 5174,
@@ -39,4 +40,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
