@@ -270,6 +270,11 @@ export interface CellsRenderConfig {
   viewport: { scrollTop: number; scrollLeft: number }
   selected: { row: number; col: number }
   selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
+  /** 多选区（Ctrl+点击产生的多个不连续选区） */
+  multiSelection?: {
+    ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
+    active: boolean
+  }
   dragState: { 
     isDragging: boolean
     startRow: number
@@ -617,6 +622,58 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
           }
         }
       }
+    }
+  }
+
+  // 渲染多选区（Ctrl+点击产生的多个不连续选区）
+  const { multiSelection } = config
+  if (multiSelection && multiSelection.active && multiSelection.ranges.length > 0) {
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
+    
+    for (const range of multiSelection.ranges) {
+      if (range.startRow < 0 || range.startCol < 0) continue
+      
+      const drawnMergedRegions = new Set<string>()
+      
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          const mergeInfo = getMergedCellInfo?.(r, c)
+          
+          if (mergeInfo?.isMerged && mergeInfo.region) {
+            const regionKey = `${mergeInfo.region.startRow},${mergeInfo.region.startCol}`
+            if (!drawnMergedRegions.has(regionKey)) {
+              drawnMergedRegions.add(regionKey)
+              const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol, sizes, geometryConfig) - viewport.scrollLeft
+              const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow, sizes, geometryConfig) - viewport.scrollTop
+              const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
+              const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+              if (ex > 0 && sx < w && ey > 0 && sy < h) {
+                ctx.fillRect(sx, sy, ex - sx, ey - sy)
+              }
+            }
+          } else {
+            const sx = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+            const sy = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+            const colWidth = getColWidth(c, sizes, geometryConfig)
+            const rowHeight = getRowHeight(r, sizes, geometryConfig)
+            
+            if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
+              ctx.fillRect(sx, sy, colWidth, rowHeight)
+            }
+          }
+        }
+      }
+      
+      // 绘制多选区边框（使用虚线样式区分）
+      const sx = rowHeaderWidth + getColLeft(range.startCol, sizes, geometryConfig) - viewport.scrollLeft
+      const sy = colHeaderHeight + getRowTop(range.startRow, sizes, geometryConfig) - viewport.scrollTop
+      const ex = rowHeaderWidth + getColLeft(range.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
+      const ey = colHeaderHeight + getRowTop(range.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+      ctx.strokeStyle = '#3b82f6'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.strokeRect(sx + 0.5, sy + 0.5, ex - sx - 1, ey - sy - 1)
+      ctx.setLineDash([])
     }
   }
 

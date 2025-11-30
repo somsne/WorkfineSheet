@@ -58,21 +58,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   // ==================== 行操作 ====================
   
   /**
-   * 在指定行上方插入行
+   * 在指定行上方插入行（支持批量插入）
    */
-  async function insertRowAbove(row: number) {
+  async function insertRowAbove(row: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await insertRowAboveHelper(row, createRowColConfig())
+    // 批量插入
+    for (let i = 0; i < count; i++) {
+      await insertRowAboveHelper(row, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `在第 ${row + 1} 行上方插入 ${count} 行`
+      : `在第 ${row + 1} 行上方插入行`
+    
     undoRedo.record({
-      name: `在第 ${row + 1} 行上方插入行`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreRowHeights(rowHeightsSnapshot)
@@ -91,21 +98,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   }
   
   /**
-   * 在指定行下方插入行
+   * 在指定行下方插入行（支持批量插入）
    */
-  async function insertRowBelow(row: number) {
+  async function insertRowBelow(row: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await insertRowBelowHelper(row, createRowColConfig())
+    // 批量插入（从后往前插入，保持相对位置）
+    for (let i = 0; i < count; i++) {
+      await insertRowBelowHelper(row, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `在第 ${row + 1} 行下方插入 ${count} 行`
+      : `在第 ${row + 1} 行下方插入行`
+    
     undoRedo.record({
-      name: `在第 ${row + 1} 行下方插入行`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreRowHeights(rowHeightsSnapshot)
@@ -124,21 +138,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   }
   
   /**
-   * 删除指定行
+   * 删除指定行（支持批量删除）
    */
-  async function deleteRow(row: number) {
+  async function deleteRow(row: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await deleteRowHelper(row, createRowColConfig())
+    // 从后往前删除，避免索引偏移
+    for (let i = count - 1; i >= 0; i--) {
+      await deleteRowHelper(row + i, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `删除第 ${row + 1} - ${row + count} 行`
+      : `删除第 ${row + 1} 行`
+    
     undoRedo.record({
-      name: `删除第 ${row + 1} 行`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreRowHeights(rowHeightsSnapshot)
@@ -167,21 +188,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   // ==================== 列操作 ====================
   
   /**
-   * 在指定列左侧插入列
+   * 在指定列左侧插入列（支持批量插入）
    */
-  async function insertColLeft(col: number) {
+  async function insertColLeft(col: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await insertColLeftHelper(col, createRowColConfig())
+    // 批量插入
+    for (let i = 0; i < count; i++) {
+      await insertColLeftHelper(col, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `在第 ${col + 1} 列左侧插入 ${count} 列`
+      : `在第 ${col + 1} 列左侧插入列`
+    
     undoRedo.record({
-      name: `在第 ${col + 1} 列左侧插入列`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreColWidths(colWidthsSnapshot)
@@ -200,21 +228,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   }
   
   /**
-   * 在指定列右侧插入列
+   * 在指定列右侧插入列（支持批量插入）
    */
-  async function insertColRight(col: number) {
+  async function insertColRight(col: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await insertColRightHelper(col, createRowColConfig())
+    // 批量插入（从后往前插入，保持相对位置）
+    for (let i = 0; i < count; i++) {
+      await insertColRightHelper(col, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `在第 ${col + 1} 列右侧插入 ${count} 列`
+      : `在第 ${col + 1} 列右侧插入列`
+    
     undoRedo.record({
-      name: `在第 ${col + 1} 列右侧插入列`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreColWidths(colWidthsSnapshot)
@@ -233,21 +268,28 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   }
   
   /**
-   * 删除指定列
+   * 删除指定列（支持批量删除）
    */
-  async function deleteCol(col: number) {
+  async function deleteCol(col: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    await deleteColHelper(col, createRowColConfig())
+    // 从后往前删除，避免索引偏移
+    for (let i = count - 1; i >= 0; i--) {
+      await deleteColHelper(col + i, createRowColConfig())
+    }
     
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
     
+    const actionName = count > 1 
+      ? `删除第 ${col + 1} - ${col + count} 列`
+      : `删除第 ${col + 1} 列`
+    
     undoRedo.record({
-      name: `删除第 ${col + 1} 列`,
+      name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreColWidths(colWidthsSnapshot)

@@ -1240,18 +1240,18 @@ function initializeMergeCellsDemo(model: SheetModel): void {
  * Initialize demo floating image
  */
 function initializeDemoImage(model: SheetModel): void {
-  // 在 V3 位置 (0-indexed: row=2, col=21) 添加示例图片
-  // 使用较大的尺寸让图片更醒目
+  // 在 L3 位置 (0-indexed: row=2, col=11) 添加示例图片
+  // 放在边框演示区域右侧
   model.addFloatingImage({
     src: DEMO_IMAGE_DATA_URL,
     naturalWidth: 120,
     naturalHeight: 120,
     anchorRow: 2,
-    anchorCol: 21, // V3 单元格
+    anchorCol: 11, // L 列
     offsetX: 10,
     offsetY: 10,
-    width: 150,
-    height: 150,
+    width: 120,
+    height: 120,
     lockAspectRatio: true,
     rotation: 0,
     opacity: 1,

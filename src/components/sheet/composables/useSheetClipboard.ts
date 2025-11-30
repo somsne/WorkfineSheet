@@ -11,7 +11,9 @@ import {
   parseClipboardText,
   writeToClipboard,
   readFromClipboard,
-  isInternalClipboardValid
+  isInternalClipboardValid,
+  type CopySource,
+  type PasteTarget
 } from '../clipboard'
 import type { SheetState, InternalClipboardCell } from './useSheetState'
 
@@ -32,9 +34,18 @@ export function useSheetClipboard({ state, onDraw }: UseSheetClipboardOptions) {
    * 支持 Excel 互操作：使用 TSV (Tab-separated values) 格式
    */
   async function onCopy() {
-    const source = {
+    const model = formulaSheet.getModel()
+    
+    const source: CopySource = {
       getValue: (r: number, c: number) => formulaSheet.getValue(r, c),
-      getRawValue: (r: number, c: number) => formulaSheet.getModel().getValue(r, c)
+      getRawValue: (r: number, c: number) => model.getValue(r, c),
+      getCellStyle: (r: number, c: number) => model.getCellStyle(r, c),
+      getCellBorder: (r: number, c: number) => model.getCellBorder(r, c),
+      getCellFormat: (r: number, c: number) => model.getCellFormat(r, c),
+      hasCellStyle: (r: number, c: number) => model.hasCellStyle(r, c),
+      hasCellBorder: (r: number, c: number) => model.hasCellBorder(r, c),
+      hasCellFormat: (r: number, c: number) => model.hasCellFormat(r, c),
+      getMergedRegion: (r: number, c: number) => model.getMergedRegion(r, c)
     }
 
     let result
@@ -54,6 +65,7 @@ export function useSheetClipboard({ state, onDraw }: UseSheetClipboardOptions) {
     
     // 保存到内部剪贴板
     internalClipboard.data = result.internalData as InternalClipboardCell[][]
+    internalClipboard.mergedRegions = result.mergedRegions
     lastCopyTs.value = Date.now()
     
     // 写入系统剪贴板
@@ -69,16 +81,27 @@ export function useSheetClipboard({ state, onDraw }: UseSheetClipboardOptions) {
    * 1. 从 Excel 复制的数据（TSV 格式）
    * 2. 从本表复制的数据（包含公式）
    * 3. 自动处理相对/绝对引用（$符号）
-   * 4. Excel 行为：无论是否有选区，都从左上角开始粘贴剪贴板数据，然后选中被影响的区域
+   * 4. 样式、格式、边框、合并单元格
+   * 5. Excel 行为：无论是否有选区，都从左上角开始粘贴剪贴板数据，然后选中被影响的区域
    */
   async function onPaste() {
     // 确定粘贴起始位置
     const destStartRow = selectionRange.startRow !== -1 ? selectionRange.startRow : selected.row
     const destStartCol = selectionRange.startCol !== -1 ? selectionRange.startCol : selected.col
     
-    const target = {
+    const model = formulaSheet.getModel()
+    
+    const target: PasteTarget = {
       setValue: (r: number, c: number, v: string) => formulaSheet.setValue(r, c, v),
-      copyCell: (sr: number, sc: number, dr: number, dc: number) => formulaSheet.copyCell(sr, sc, dr, dc)
+      copyCell: (sr: number, sc: number, dr: number, dc: number) => formulaSheet.copyCell(sr, sc, dr, dc),
+      setCellStyle: (r: number, c: number, style) => model.setCellStyle(r, c, style),
+      setCellBorder: (r: number, c: number, border) => model.setCellBorder(r, c, border),
+      setCellFormat: (r: number, c: number, format) => model.setCellFormat(r, c, format),
+      clearCellStyle: (r: number, c: number) => model.clearCellStyle(r, c),
+      clearCellBorder: (r: number, c: number) => model.clearCellBorder(r, c),
+      clearCellFormat: (r: number, c: number) => model.clearCellFormat(r, c),
+      mergeCells: (sr: number, sc: number, er: number, ec: number) => model.mergeCells(sr, sc, er, ec),
+      unmergeCells: (r: number, c: number) => model.unmergeCells(r, c)
     }
     
     // 优先使用内部剪贴板
@@ -94,7 +117,8 @@ export function useSheetClipboard({ state, onDraw }: UseSheetClipboardOptions) {
         internalClipboard.startCol,
         destStartRow,
         destStartCol,
-        target
+        target,
+        internalClipboard.mergedRegions
       )
       
       // 粘贴后选中所有被影响的单元格

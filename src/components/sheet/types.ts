@@ -10,6 +10,14 @@ export interface SelectionRange {
   endCol: number
 }
 
+// 多选区（Ctrl+点击产生的多个不连续选区）
+export interface MultiSelectionState {
+  /** 所有选中的区域（不包括当前正在选择的区域） */
+  ranges: SelectionRange[]
+  /** 是否处于多选模式 */
+  active: boolean
+}
+
 // 单选状态
 export interface SelectedCell {
   row: number
@@ -77,6 +85,9 @@ export interface FormulaReference {
 export interface InternalClipboardCell {
   value: string
   isFormula: boolean
+  style?: CellStyle
+  border?: CellBorder
+  format?: CellFormat
 }
 
 // 悬停状态（用于高亮调整分隔线）

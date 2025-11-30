@@ -26,6 +26,16 @@ export interface ContextMenuState {
 }
 
 /**
+ * 选区范围
+ */
+export interface SelectionRangeInfo {
+  startRow: number
+  startCol: number
+  endRow: number
+  endCol: number
+}
+
+/**
  * 右键菜单配置
  */
 export interface ContextMenuConfig {
@@ -33,16 +43,18 @@ export interface ContextMenuConfig {
   colHeaderHeight: number
   getRowAtY: (y: number) => number
   getColAtX: (x: number) => number
+  /** 当前选区，用于计算多选行列数量 */
+  selectionRange?: SelectionRangeInfo
   rowOperations: {
-    insertRowAbove: (row: number) => void
-    insertRowBelow: (row: number) => void
-    deleteRow: (row: number) => void
+    insertRowAbove: (row: number, count?: number) => void
+    insertRowBelow: (row: number, count?: number) => void
+    deleteRow: (row: number, count?: number) => void
     showSetRowHeightDialog: (row: number) => void
   }
   colOperations: {
-    insertColLeft: (col: number) => void
-    insertColRight: (col: number) => void
-    deleteCol: (col: number) => void
+    insertColLeft: (col: number, count?: number) => void
+    insertColRight: (col: number, count?: number) => void
+    deleteCol: (col: number, count?: number) => void
     showSetColWidthDialog: (col: number) => void
   }
 }
@@ -50,6 +62,7 @@ export interface ContextMenuConfig {
 /**
  * 处理右键菜单事件
  * 根据点击位置（行头、列头或其他区域）生成相应的菜单项
+ * 当选中多行/列时，支持批量插入/删除
  */
 export function handleContextMenu(
   e: MouseEvent,
@@ -63,7 +76,7 @@ export function handleContextMenu(
   menuState.x = e.clientX
   menuState.y = e.clientY
   
-  const { rowHeaderWidth, colHeaderHeight, getRowAtY, getColAtX, rowOperations, colOperations } = config
+  const { rowHeaderWidth, colHeaderHeight, getRowAtY, getColAtX, rowOperations, colOperations, selectionRange } = config
   
   // 判断点击位置
   if (x < rowHeaderWidth && y > colHeaderHeight) {
@@ -71,10 +84,24 @@ export function handleContextMenu(
     const row = getRowAtY(y)
     menuState.targetRow = row
     menuState.targetCol = -1
+    
+    // 计算选中的行数
+    let rowCount = 1
+    let startRow = row
+    if (selectionRange && selectionRange.startRow !== -1 && selectionRange.endRow !== -1) {
+      // 检查点击的行是否在选区范围内
+      if (row >= selectionRange.startRow && row <= selectionRange.endRow) {
+        rowCount = selectionRange.endRow - selectionRange.startRow + 1
+        startRow = selectionRange.startRow
+      }
+    }
+    
+    const rowText = rowCount > 1 ? `${rowCount} 行` : '行'
+    
     menuState.items = [
-      { label: '在上方插入行', action: () => rowOperations.insertRowAbove(row) },
-      { label: '在下方插入行', action: () => rowOperations.insertRowBelow(row) },
-      { label: '删除行', action: () => rowOperations.deleteRow(row) },
+      { label: `在上方插入${rowText}`, action: () => rowOperations.insertRowAbove(startRow, rowCount) },
+      { label: `在下方插入${rowText}`, action: () => rowOperations.insertRowBelow(selectionRange && row >= selectionRange.startRow && row <= selectionRange.endRow ? selectionRange.endRow : row, rowCount) },
+      { label: `删除${rowText}`, action: () => rowOperations.deleteRow(startRow, rowCount) },
       { label: '', action: () => {}, divider: true },
       { label: '设置行高...', action: () => rowOperations.showSetRowHeightDialog(row) }
     ]
@@ -84,10 +111,24 @@ export function handleContextMenu(
     const col = getColAtX(x)
     menuState.targetRow = -1
     menuState.targetCol = col
+    
+    // 计算选中的列数
+    let colCount = 1
+    let startCol = col
+    if (selectionRange && selectionRange.startCol !== -1 && selectionRange.endCol !== -1) {
+      // 检查点击的列是否在选区范围内
+      if (col >= selectionRange.startCol && col <= selectionRange.endCol) {
+        colCount = selectionRange.endCol - selectionRange.startCol + 1
+        startCol = selectionRange.startCol
+      }
+    }
+    
+    const colText = colCount > 1 ? `${colCount} 列` : '列'
+    
     menuState.items = [
-      { label: '在左侧插入列', action: () => colOperations.insertColLeft(col) },
-      { label: '在右侧插入列', action: () => colOperations.insertColRight(col) },
-      { label: '删除列', action: () => colOperations.deleteCol(col) },
+      { label: `在左侧插入${colText}`, action: () => colOperations.insertColLeft(startCol, colCount) },
+      { label: `在右侧插入${colText}`, action: () => colOperations.insertColRight(selectionRange && col >= selectionRange.startCol && col <= selectionRange.endCol ? selectionRange.endCol : col, colCount) },
+      { label: `删除${colText}`, action: () => colOperations.deleteCol(startCol, colCount) },
       { label: '', action: () => {}, divider: true },
       { label: '设置列宽...', action: () => colOperations.showSetColWidthDialog(col) }
     ]

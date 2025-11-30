@@ -26,7 +26,7 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     container, gridCanvas, contentCanvas,
     model, formulaSheet,
     viewport, scrollbar,
-    selected, selectionRange, dragState,
+    selected, selectionRange, dragState, multiSelection,
     overlay, imeState,
     formulaReferences, hoverState
   } = state
@@ -105,6 +105,7 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       viewport,
       selected,
       selectionRange,
+      multiSelection,
       dragState,
       formulaReferences: formulaReferences.value,
       sizes: createSizeAccess(),

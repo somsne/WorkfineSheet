@@ -400,6 +400,10 @@ const props = defineProps<{
   api: SheetAPI
   currentSelection: { row: number; col: number }
   selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
+  multiSelection?: { 
+    ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
+    active: boolean
+  }
 }>()
 
 // 检测是否为 macOS
@@ -490,19 +494,42 @@ onBeforeUnmount(() => {
   }
 })
 
-// 监听选区变化，更新工具栏状态
-watch(() => [props.currentSelection.row, props.currentSelection.col], () => {
+// 监听选区变化，更新工具栏状态（同时监听 currentSelection 和 selectionRange）
+watch(() => [
+  props.currentSelection.row, 
+  props.currentSelection.col,
+  props.selectionRange.startRow,
+  props.selectionRange.startCol
+], () => {
   updateToolbarState()
   updateUndoRedoState()
 }, { immediate: true })
 
-// 辅助函数：应用样式到选区或单个单元格
+// 辅助函数：应用样式到选区或单个单元格（支持多选）
 function applyStyleToSelection(style: Partial<CellStyle>) {
-  if (props.currentSelection.row < 0 || props.currentSelection.col < 0) return
+  // 检查是否有有效的选区（整行/整列选择时 currentSelection 可能为 -1）
+  const hasValidSelection = props.currentSelection.row >= 0 && props.currentSelection.col >= 0
+  const hasValidRange = props.selectionRange.startRow >= 0 && props.selectionRange.startCol >= 0
   
-  // 检查是否有选区
+  if (!hasValidSelection && !hasValidRange) return
+  
+  // 如果有多选区域且处于激活状态，则应用到所有多选区域
+  if (props.multiSelection?.active && props.multiSelection.ranges.length > 0) {
+    // 应用到所有历史多选区域
+    for (const range of props.multiSelection.ranges) {
+      props.api.setRangeStyle(
+        range.startRow,
+        range.startCol,
+        range.endRow,
+        range.endCol,
+        style
+      )
+    }
+  }
+  
+  // 总是应用到当前选区（包括单选和最新的选区）
   if (props.selectionRange.startRow >= 0 && props.selectionRange.startCol >= 0) {
-    // 应用到整个选区
+    // 应用到当前选区
     props.api.setRangeStyle(
       props.selectionRange.startRow,
       props.selectionRange.startCol,
@@ -517,12 +544,21 @@ function applyStyleToSelection(style: Partial<CellStyle>) {
 }
 
 function updateToolbarState() {
-  if (props.currentSelection.row < 0 || props.currentSelection.col < 0) return
+  // 整行/整列选择时使用选区起始位置获取样式
+  let row = props.currentSelection.row
+  let col = props.currentSelection.col
   
-  const style: CellStyle = props.api.getCellStyle(
-    props.currentSelection.row,
-    props.currentSelection.col
-  )
+  if (row < 0 || col < 0) {
+    // 如果 currentSelection 无效，使用 selectionRange 的起始位置
+    if (props.selectionRange.startRow >= 0 && props.selectionRange.startCol >= 0) {
+      row = props.selectionRange.startRow
+      col = props.selectionRange.startCol
+    } else {
+      return
+    }
+  }
+  
+  const style: CellStyle = props.api.getCellStyle(row, col)
   
   fontFamily.value = style.fontFamily || 'Arial, sans-serif'
   fontSize.value = style.fontSize || 12
@@ -608,44 +644,68 @@ function getSelectionRange() {
   }
 }
 
-function applyAllBorders() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+// 获取所有选区（包括多选区域），用于边框、格式等操作
+function getAllSelectionRanges(): Array<{ startRow: number; startCol: number; endRow: number; endCol: number }> {
+  const ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }> = []
   
-  props.api.setAllBorders(
-    range.startRow,
-    range.startCol,
-    range.endRow,
-    range.endCol,
-    { style: borderStyle.value, color: borderColor.value }
-  )
+  // 如果有多选区域且处于激活状态
+  if (props.multiSelection?.active && props.multiSelection.ranges.length > 0) {
+    ranges.push(...props.multiSelection.ranges)
+  }
+  
+  // 添加当前选区
+  const currentRange = getSelectionRange()
+  if (currentRange.startRow >= 0 && currentRange.startCol >= 0) {
+    ranges.push(currentRange)
+  }
+  
+  return ranges
+}
+
+function applyAllBorders() {
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
+  
+  for (const range of ranges) {
+    props.api.setAllBorders(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol,
+      { style: borderStyle.value, color: borderColor.value }
+    )
+  }
   showBorderMenu.value = false
 }
 
 function applyOuterBorder() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  props.api.setOuterBorder(
-    range.startRow,
-    range.startCol,
-    range.endRow,
-    range.endCol,
-    { style: borderStyle.value, color: borderColor.value }
-  )
+  for (const range of ranges) {
+    props.api.setOuterBorder(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol,
+      { style: borderStyle.value, color: borderColor.value }
+    )
+  }
   showBorderMenu.value = false
 }
 
 function applyTopBorder() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  for (let row = range.startRow; row <= range.endRow; row++) {
-    for (let col = range.startCol; col <= range.endCol; col++) {
-      if (row === range.startRow) {
-        props.api.setCellBorder(row, col, {
-          top: { style: borderStyle.value, color: borderColor.value }
-        })
+  for (const range of ranges) {
+    for (let row = range.startRow; row <= range.endRow; row++) {
+      for (let col = range.startCol; col <= range.endCol; col++) {
+        if (row === range.startRow) {
+          props.api.setCellBorder(row, col, {
+            top: { style: borderStyle.value, color: borderColor.value }
+          })
+        }
       }
     }
   }
@@ -653,15 +713,17 @@ function applyTopBorder() {
 }
 
 function applyBottomBorder() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  for (let row = range.startRow; row <= range.endRow; row++) {
-    for (let col = range.startCol; col <= range.endCol; col++) {
-      if (row === range.endRow) {
-        props.api.setCellBorder(row, col, {
-          bottom: { style: borderStyle.value, color: borderColor.value }
-        })
+  for (const range of ranges) {
+    for (let row = range.startRow; row <= range.endRow; row++) {
+      for (let col = range.startCol; col <= range.endCol; col++) {
+        if (row === range.endRow) {
+          props.api.setCellBorder(row, col, {
+            bottom: { style: borderStyle.value, color: borderColor.value }
+          })
+        }
       }
     }
   }
@@ -669,15 +731,17 @@ function applyBottomBorder() {
 }
 
 function applyLeftBorder() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  for (let row = range.startRow; row <= range.endRow; row++) {
-    for (let col = range.startCol; col <= range.endCol; col++) {
-      if (col === range.startCol) {
-        props.api.setCellBorder(row, col, {
-          left: { style: borderStyle.value, color: borderColor.value }
-        })
+  for (const range of ranges) {
+    for (let row = range.startRow; row <= range.endRow; row++) {
+      for (let col = range.startCol; col <= range.endCol; col++) {
+        if (col === range.startCol) {
+          props.api.setCellBorder(row, col, {
+            left: { style: borderStyle.value, color: borderColor.value }
+          })
+        }
       }
     }
   }
@@ -685,15 +749,17 @@ function applyLeftBorder() {
 }
 
 function applyRightBorder() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  for (let row = range.startRow; row <= range.endRow; row++) {
-    for (let col = range.startCol; col <= range.endCol; col++) {
-      if (col === range.endCol) {
-        props.api.setCellBorder(row, col, {
-          right: { style: borderStyle.value, color: borderColor.value }
-        })
+  for (const range of ranges) {
+    for (let row = range.startRow; row <= range.endRow; row++) {
+      for (let col = range.startCol; col <= range.endCol; col++) {
+        if (col === range.endCol) {
+          props.api.setCellBorder(row, col, {
+            right: { style: borderStyle.value, color: borderColor.value }
+          })
+        }
       }
     }
   }
@@ -701,15 +767,17 @@ function applyRightBorder() {
 }
 
 function clearBorders() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  props.api.clearAllBorders(
-    range.startRow,
-    range.startCol,
-    range.endRow,
-    range.endCol
-  )
+  for (const range of ranges) {
+    props.api.clearAllBorders(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol
+    )
+  }
   showBorderMenu.value = false
 }
 
@@ -776,28 +844,32 @@ async function handleImageUpload(event: Event) {
 }
 
 function applyFormat(formatType: CellFormatType) {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  // 应用格式到选区
-  props.api.setRangeFormat(
-    range.startRow,
-    range.startCol,
-    range.endRow,
-    range.endCol,
-    { type: formatType }
-  )
+  // 应用格式到所有选区
+  for (const range of ranges) {
+    props.api.setRangeFormat(
+      range.startRow,
+      range.startCol,
+      range.endRow,
+      range.endCol,
+      { type: formatType }
+    )
+  }
   showFormatMenu.value = false
 }
 
 function clearFormat() {
-  const range = getSelectionRange()
-  if (range.startRow < 0 || range.startCol < 0) return
+  const ranges = getAllSelectionRanges()
+  if (ranges.length === 0) return
   
-  // 清除选区内所有单元格的格式
-  for (let row = range.startRow; row <= range.endRow; row++) {
-    for (let col = range.startCol; col <= range.endCol; col++) {
-      props.api.clearCellFormat(row, col)
+  // 清除所有选区内单元格的格式
+  for (const range of ranges) {
+    for (let row = range.startRow; row <= range.endRow; row++) {
+      for (let col = range.startCol; col <= range.endCol; col++) {
+        props.api.clearCellFormat(row, col)
+      }
     }
   }
   showFormatMenu.value = false

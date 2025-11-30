@@ -21,11 +21,23 @@ export class SheetModel {
   // 样式存储（使用 Map 优化查询性能）
   private cellStyles: Map<CellKey, CellStyle> = new Map()
   
+  // 行样式存储（整行默认样式）
+  private rowStyles: Map<number, CellStyle> = new Map()
+  
+  // 列样式存储（整列默认样式）
+  private colStyles: Map<number, CellStyle> = new Map()
+  
   // 边框存储
   private cellBorders: Map<CellKey, CellBorder> = new Map()
   
   // 格式存储（独立于样式，用于数据显示格式）
   private cellFormats: Map<CellKey, CellFormat> = new Map()
+  
+  // 行格式存储
+  private rowFormats: Map<number, CellFormat> = new Map()
+  
+  // 列格式存储
+  private colFormats: Map<number, CellFormat> = new Map()
   
   // 合并区域存储
   // Key: "startRow,startCol" (主单元格坐标)
@@ -93,20 +105,121 @@ export class SheetModel {
    */
   setCellStyle(r: number, c: number, style: Partial<CellStyle>): void {
     const k = keyFor(r, c)
-    const currentStyle = this.cellStyles.get(k) || { ...DEFAULT_CELL_STYLE }
-    this.cellStyles.set(k, { ...currentStyle, ...style })
+    // 只存储用户设置的属性，不与默认样式合并
+    const currentStyle = this.cellStyles.get(k) || {}
+    this.cellStyles.set(k, { ...currentStyle, ...style } as CellStyle)
+  }
+
+  /**
+   * 设置整行样式
+   * 会清除该行所有单元格的相同样式属性，使行样式生效
+   * @param row 行号
+   * @param style 要设置的样式
+   */
+  setRowStyle(row: number, style: Partial<CellStyle>): void {
+    // 只存储用户设置的属性，不与默认样式合并
+    const currentStyle = this.rowStyles.get(row) || {}
+    this.rowStyles.set(row, { ...currentStyle, ...style } as CellStyle)
+    
+    // 清除该行所有单元格的相同样式属性
+    const styleKeys = Object.keys(style) as (keyof CellStyle)[]
+    for (const [key, cellStyle] of this.cellStyles.entries()) {
+      const [r] = key.split(',').map(Number)
+      if (r === row && cellStyle) {
+        // 删除单元格中与行样式相同的属性
+        for (const prop of styleKeys) {
+          delete (cellStyle as Record<string, unknown>)[prop]
+        }
+        // 如果单元格样式为空，则删除
+        if (Object.keys(cellStyle).length === 0) {
+          this.cellStyles.delete(key)
+        }
+      }
+    }
+  }
+
+  /**
+   * 获取整行样式
+   * @param row 行号
+   * @returns 行样式，如果未设置则返回 undefined
+   */
+  getRowStyle(row: number): CellStyle | undefined {
+    return this.rowStyles.get(row)
+  }
+
+  /**
+   * 清除整行样式
+   * @param row 行号
+   */
+  clearRowStyle(row: number): void {
+    this.rowStyles.delete(row)
+  }
+
+  /**
+   * 设置整列样式
+   * 会清除该列所有单元格的相同样式属性，使列样式生效
+   * @param col 列号
+   * @param style 要设置的样式
+   */
+  setColStyle(col: number, style: Partial<CellStyle>): void {
+    // 只存储用户设置的属性，不与默认样式合并
+    const currentStyle = this.colStyles.get(col) || {}
+    this.colStyles.set(col, { ...currentStyle, ...style } as CellStyle)
+    
+    // 清除该列所有单元格的相同样式属性
+    const styleKeys = Object.keys(style) as (keyof CellStyle)[]
+    for (const [key, cellStyle] of this.cellStyles.entries()) {
+      const [, c] = key.split(',').map(Number)
+      if (c === col && cellStyle) {
+        // 删除单元格中与列样式相同的属性
+        for (const prop of styleKeys) {
+          delete (cellStyle as Record<string, unknown>)[prop]
+        }
+        // 如果单元格样式为空，则删除
+        if (Object.keys(cellStyle).length === 0) {
+          this.cellStyles.delete(key)
+        }
+      }
+    }
+  }
+
+  /**
+   * 获取整列样式
+   * @param col 列号
+   * @returns 列样式，如果未设置则返回 undefined
+   */
+  getColStyle(col: number): CellStyle | undefined {
+    return this.colStyles.get(col)
+  }
+
+  /**
+   * 清除整列样式
+   * @param col 列号
+   */
+  clearColStyle(col: number): void {
+    this.colStyles.delete(col)
   }
 
   /**
    * 获取单元格样式
-   * 如果单元格没有设置样式，返回默认样式
+   * 样式优先级：单元格样式 > 行样式 > 列样式 > 默认样式
    * @param r 行号
    * @param c 列号
    * @returns 单元格样式
    */
   getCellStyle(r: number, c: number): CellStyle {
     const k = keyFor(r, c)
-    return this.cellStyles.get(k) || { ...DEFAULT_CELL_STYLE }
+    const cellStyle = this.cellStyles.get(k)
+    const rowStyle = this.rowStyles.get(r)
+    const colStyle = this.colStyles.get(c)
+    
+    // 合并样式：默认样式 < 列样式 < 行样式 < 单元格样式
+    return {
+      ...DEFAULT_CELL_STYLE,
+      ...(colStyle || {}),
+      ...(rowStyle || {}),
+      ...(cellStyle || {})
+    }
   }
 
   /**
@@ -313,15 +426,94 @@ export class SheetModel {
   }
 
   /**
+   * 设置整行格式
+   * 会清除该行所有单元格的格式，使行格式生效
+   * @param row 行号
+   * @param format 要设置的格式
+   */
+  setRowFormat(row: number, format: CellFormat): void {
+    this.rowFormats.set(row, { ...format })
+    
+    // 清除该行所有单元格的格式
+    for (const key of this.cellFormats.keys()) {
+      const [r] = key.split(',').map(Number)
+      if (r === row) {
+        this.cellFormats.delete(key)
+      }
+    }
+  }
+
+  /**
+   * 获取整行格式
+   * @param row 行号
+   * @returns 行格式，如果未设置则返回 undefined
+   */
+  getRowFormat(row: number): CellFormat | undefined {
+    return this.rowFormats.get(row)
+  }
+
+  /**
+   * 清除整行格式
+   * @param row 行号
+   */
+  clearRowFormat(row: number): void {
+    this.rowFormats.delete(row)
+  }
+
+  /**
+   * 设置整列格式
+   * 会清除该列所有单元格的格式，使列格式生效
+   * @param col 列号
+   * @param format 要设置的格式
+   */
+  setColFormat(col: number, format: CellFormat): void {
+    this.colFormats.set(col, { ...format })
+    
+    // 清除该列所有单元格的格式
+    for (const key of this.cellFormats.keys()) {
+      const [, c] = key.split(',').map(Number)
+      if (c === col) {
+        this.cellFormats.delete(key)
+      }
+    }
+  }
+
+  /**
+   * 获取整列格式
+   * @param col 列号
+   * @returns 列格式，如果未设置则返回 undefined
+   */
+  getColFormat(col: number): CellFormat | undefined {
+    return this.colFormats.get(col)
+  }
+
+  /**
+   * 清除整列格式
+   * @param col 列号
+   */
+  clearColFormat(col: number): void {
+    this.colFormats.delete(col)
+  }
+
+  /**
    * 获取单元格格式
-   * 如果单元格没有设置格式，返回默认格式
+   * 格式优先级：单元格格式 > 行格式 > 列格式 > 默认格式
    * @param r 行号
    * @param c 列号
    * @returns 单元格格式
    */
   getCellFormat(r: number, c: number): CellFormat {
     const k = keyFor(r, c)
-    return this.cellFormats.get(k) || { ...DEFAULT_CELL_FORMAT }
+    const cellFormat = this.cellFormats.get(k)
+    if (cellFormat) return cellFormat
+    
+    const rowFormat = this.rowFormats.get(r)
+    if (rowFormat) return rowFormat
+    
+    const colFormat = this.colFormats.get(c)
+    if (colFormat) return colFormat
+    
+    return { ...DEFAULT_CELL_FORMAT }
   }
 
   /**

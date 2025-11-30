@@ -1,7 +1,7 @@
 <template>
   <div class="sheet-wrapper">
     <!-- 样式工具栏 -->
-    <StyleToolbar v-if="api" :api="api" :current-selection="state.selected" :selection-range="state.selectionRange" />
+    <StyleToolbar v-if="api" :api="api" :current-selection="state.selected" :selection-range="state.selectionRange" :multi-selection="state.multiSelection" />
     
     <div ref="containerRef" class="sheet-container" @contextmenu="handleContextMenuWrapper">
       <canvas ref="gridCanvasRef" class="grid-canvas"></canvas>
@@ -191,7 +191,9 @@ const fillHandle = useFillHandle({
     state.selectionRange.startCol = range.startCol
     state.selectionRange.endRow = range.endRow
     state.selectionRange.endCol = range.endCol
-  }
+  },
+  // 多选状态检查 - 多选激活时隐藏填充柄
+  isMultiSelectionActive: () => state.multiSelection.active && state.multiSelection.ranges.length > 0
 })
 
 // 3. 绘制 (传入 fillHandle)
@@ -499,29 +501,90 @@ const api = createSheetAPI({
     }
   },
   setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => {
-    const oldStyles: Array<{ row: number; col: number; style: CellStyle }> = []
-    for (let r = startRow; r <= endRow; r++) {
-      for (let c = startCol; c <= endCol; c++) {
-        oldStyles.push({ row: r, col: c, style: { ...state.model.getCellStyle(r, c) } })
-      }
-    }
+    const maxRows = state.constants.DEFAULT_ROWS
+    const maxCols = state.constants.DEFAULT_COLS
     
-    state.undoRedo.execute({
-      name: `设置区域样式 (${startRow},${startCol})-(${endRow},${endCol})`,
-      undo: () => {
-        for (const { row, col, style: oldStyle } of oldStyles) {
-          state.model.clearCellStyle(row, col)
-          if (Object.keys(oldStyle).length > 0) {
-            state.model.setCellStyle(row, col, oldStyle)
-          }
-        }
-        drawing.draw()
-      },
-      redo: () => {
-        state.model.setRangeStyle(startRow, startCol, endRow, endCol, style)
-        drawing.draw()
+    // 检测是否为整列选择（startRow=0, endRow=maxRows-1）
+    const isFullColumn = startRow === 0 && endRow === maxRows - 1
+    // 检测是否为整行选择（startCol=0, endCol=maxCols-1）
+    const isFullRow = startCol === 0 && endCol === maxCols - 1
+    
+    if (isFullColumn && !isFullRow) {
+      // 整列选择：使用列样式
+      const oldColStyles: Array<{ col: number; style: CellStyle | undefined }> = []
+      for (let c = startCol; c <= endCol; c++) {
+        oldColStyles.push({ col: c, style: state.model.getColStyle(c) })
       }
-    })
+      
+      state.undoRedo.execute({
+        name: `设置列样式 (${startCol}-${endCol})`,
+        undo: () => {
+          for (const { col, style: oldStyle } of oldColStyles) {
+            state.model.clearColStyle(col)
+            if (oldStyle) {
+              state.model.setColStyle(col, oldStyle)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          for (let c = startCol; c <= endCol; c++) {
+            state.model.setColStyle(c, style)
+          }
+          drawing.draw()
+        }
+      })
+    } else if (isFullRow && !isFullColumn) {
+      // 整行选择：使用行样式
+      const oldRowStyles: Array<{ row: number; style: CellStyle | undefined }> = []
+      for (let r = startRow; r <= endRow; r++) {
+        oldRowStyles.push({ row: r, style: state.model.getRowStyle(r) })
+      }
+      
+      state.undoRedo.execute({
+        name: `设置行样式 (${startRow}-${endRow})`,
+        undo: () => {
+          for (const { row, style: oldStyle } of oldRowStyles) {
+            state.model.clearRowStyle(row)
+            if (oldStyle) {
+              state.model.setRowStyle(row, oldStyle)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          for (let r = startRow; r <= endRow; r++) {
+            state.model.setRowStyle(r, style)
+          }
+          drawing.draw()
+        }
+      })
+    } else {
+      // 普通选区：使用单元格样式
+      const oldStyles: Array<{ row: number; col: number; style: CellStyle }> = []
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          oldStyles.push({ row: r, col: c, style: { ...state.model.getCellStyle(r, c) } })
+        }
+      }
+      
+      state.undoRedo.execute({
+        name: `设置区域样式 (${startRow},${startCol})-(${endRow},${endCol})`,
+        undo: () => {
+          for (const { row, col, style: oldStyle } of oldStyles) {
+            state.model.clearCellStyle(row, col)
+            if (Object.keys(oldStyle).length > 0) {
+              state.model.setCellStyle(row, col, oldStyle)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          state.model.setRangeStyle(startRow, startCol, endRow, endCol, style)
+          drawing.draw()
+        }
+      })
+    }
   },
   
   // 边框相关（支持撤销/重做）
@@ -689,30 +752,91 @@ const api = createSheetAPI({
     }
   },
   setRangeFormatFn: (startRow: number, startCol: number, endRow: number, endCol: number, format) => {
-    const oldFormats: Array<{ row: number; col: number; format: CellFormat | undefined }> = []
-    for (let r = startRow; r <= endRow; r++) {
-      for (let c = startCol; c <= endCol; c++) {
-        oldFormats.push({ row: r, col: c, format: state.model.getCellFormat(r, c) })
-      }
-    }
+    const maxRows = state.constants.DEFAULT_ROWS
+    const maxCols = state.constants.DEFAULT_COLS
     
-    state.undoRedo.execute({
-      name: `设置区域格式 (${startRow},${startCol})-(${endRow},${endCol})`,
-      undo: () => {
-        for (const { row, col, format: oldFormat } of oldFormats) {
-          if (oldFormat) {
-            state.model.setCellFormat(row, col, oldFormat)
-          } else {
-            state.model.clearCellFormat(row, col)
-          }
-        }
-        drawing.draw()
-      },
-      redo: () => {
-        state.formulaSheet.setRangeFormat(startRow, startCol, endRow, endCol, format)
-        drawing.draw()
+    // 检测是否为整列选择
+    const isFullColumn = startRow === 0 && endRow === maxRows - 1
+    // 检测是否为整行选择
+    const isFullRow = startCol === 0 && endCol === maxCols - 1
+    
+    if (isFullColumn && !isFullRow) {
+      // 整列选择：使用列格式
+      const oldColFormats: Array<{ col: number; format: CellFormat | undefined }> = []
+      for (let c = startCol; c <= endCol; c++) {
+        oldColFormats.push({ col: c, format: state.model.getColFormat(c) })
       }
-    })
+      
+      state.undoRedo.execute({
+        name: `设置列格式 (${startCol}-${endCol})`,
+        undo: () => {
+          for (const { col, format: oldFormat } of oldColFormats) {
+            state.model.clearColFormat(col)
+            if (oldFormat) {
+              state.model.setColFormat(col, oldFormat)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          for (let c = startCol; c <= endCol; c++) {
+            state.model.setColFormat(c, format)
+          }
+          drawing.draw()
+        }
+      })
+    } else if (isFullRow && !isFullColumn) {
+      // 整行选择：使用行格式
+      const oldRowFormats: Array<{ row: number; format: CellFormat | undefined }> = []
+      for (let r = startRow; r <= endRow; r++) {
+        oldRowFormats.push({ row: r, format: state.model.getRowFormat(r) })
+      }
+      
+      state.undoRedo.execute({
+        name: `设置行格式 (${startRow}-${endRow})`,
+        undo: () => {
+          for (const { row, format: oldFormat } of oldRowFormats) {
+            state.model.clearRowFormat(row)
+            if (oldFormat) {
+              state.model.setRowFormat(row, oldFormat)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          for (let r = startRow; r <= endRow; r++) {
+            state.model.setRowFormat(r, format)
+          }
+          drawing.draw()
+        }
+      })
+    } else {
+      // 普通选区：使用单元格格式
+      const oldFormats: Array<{ row: number; col: number; format: CellFormat | undefined }> = []
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          oldFormats.push({ row: r, col: c, format: state.model.getCellFormat(r, c) })
+        }
+      }
+      
+      state.undoRedo.execute({
+        name: `设置区域格式 (${startRow},${startCol})-(${endRow},${endCol})`,
+        undo: () => {
+          for (const { row, col, format: oldFormat } of oldFormats) {
+            if (oldFormat) {
+              state.model.setCellFormat(row, col, oldFormat)
+            } else {
+              state.model.clearCellFormat(row, col)
+            }
+          }
+          drawing.draw()
+        },
+        redo: () => {
+          state.formulaSheet.setRangeFormat(startRow, startCol, endRow, endCol, format)
+          drawing.draw()
+        }
+      })
+    }
   },
   getFormattedValueFn: (row: number, col: number) => state.formulaSheet.getFormattedValue(row, col),
   

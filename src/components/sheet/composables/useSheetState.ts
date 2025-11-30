@@ -193,6 +193,15 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     justFinishedDrag: false  // 标记刚完成拖动，用于阻止 onClick
   })
   
+  // ==================== 多选区状态（Ctrl+点击） ====================
+  const multiSelection = reactive<{
+    ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
+    active: boolean
+  }>({
+    ranges: [],
+    active: false
+  })
+  
   // ==================== 编辑器覆盖层状态 ====================
   const overlay = reactive({
     visible: false,
@@ -219,10 +228,18 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     data: InternalClipboardCell[][] | null
     startRow: number
     startCol: number
+    /** 复制区域内的合并单元格信息（相对坐标） */
+    mergedRegions: Array<{
+      startRow: number
+      startCol: number
+      endRow: number
+      endCol: number
+    }>
   }>({
     data: null,
     startRow: -1,
-    startCol: -1
+    startCol: -1,
+    mergedRegions: []
   })
   const lastCopyTs = ref(0)
   
@@ -383,6 +400,7 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     selected,
     selectionRange,
     dragState,
+    multiSelection,
     
     // 编辑器
     overlay,

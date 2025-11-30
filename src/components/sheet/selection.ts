@@ -3,19 +3,21 @@
  * 负责处理单元格选择、范围选择、行列选择和拖拽行为
  */
 
-import type { SelectionRange, DragState, GeometryConfig, SizeAccess, MergedRegion } from './types'
+import type { SelectionRange, DragState, GeometryConfig, SizeAccess, MergedRegion, MultiSelectionState } from './types'
 import { getRowAtY, getColAtX } from './geometry'
 
 export interface SelectionState {
   selected: { row: number; col: number }
   selectionRange: SelectionRange
   dragState: DragState
+  multiSelection?: MultiSelectionState
 }
 
 export interface SelectionClickConfig {
   x: number
   y: number
   shiftKey: boolean
+  ctrlKey?: boolean
   containerRect: DOMRect
   viewport: { scrollTop: number; scrollLeft: number }
   geometryConfig: GeometryConfig
@@ -30,6 +32,8 @@ export interface SelectionClickConfig {
 export interface SelectionDragConfig {
   x: number
   y: number
+  shiftKey?: boolean
+  ctrlKey?: boolean
   containerRect: DOMRect
   viewport: { scrollTop: number; scrollLeft: number }
   geometryConfig: GeometryConfig
@@ -39,6 +43,35 @@ export interface SelectionDragConfig {
   state: SelectionState
   /** 获取单元格所属的合并区域 */
   getMergedRegion?: (row: number, col: number) => MergedRegion | null
+}
+
+/**
+ * 保存当前选区到多选区列表
+ */
+function saveCurrentSelectionToMulti(state: SelectionState): void {
+  if (!state.multiSelection) return
+  
+  const { selectionRange } = state
+  
+  // 只有有效选区才保存
+  if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
+    state.multiSelection.ranges.push({
+      startRow: selectionRange.startRow,
+      startCol: selectionRange.startCol,
+      endRow: selectionRange.endRow,
+      endCol: selectionRange.endCol
+    })
+  }
+}
+
+/**
+ * 清除多选区
+ */
+export function clearMultiSelection(state: SelectionState): void {
+  if (state.multiSelection) {
+    state.multiSelection.ranges = []
+    state.multiSelection.active = false
+  }
 }
 
 /**
@@ -97,7 +130,7 @@ function expandSelectionForMergedCells(
  * @returns true 如果处理了点击（需要重绘）
  */
 export function handleClick(config: SelectionClickConfig): boolean {
-  const { x, y, shiftKey, viewport, geometryConfig, sizes, defaultRows, defaultCols, state, getMergedRegion } = config
+  const { x, y, shiftKey, ctrlKey, viewport, geometryConfig, sizes, defaultRows, defaultCols, state, getMergedRegion } = config
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
 
   // 如果刚完成拖动，忽略 click 事件
@@ -105,33 +138,68 @@ export function handleClick(config: SelectionClickConfig): boolean {
     state.dragState.justFinishedDrag = false
     return false
   }
+  
+  // 处理 Ctrl 多选逻辑
+  if (ctrlKey && state.multiSelection) {
+    // 保存当前选区到多选区列表
+    saveCurrentSelectionToMulti(state)
+    state.multiSelection.active = true
+  } else if (!shiftKey && state.multiSelection) {
+    // 普通点击（非 Shift、非 Ctrl）：清除多选区
+    clearMultiSelection(state)
+  }
 
   // 点击行头：选择整行
   if (x < rowHeaderWidth && y > colHeaderHeight) {
     const row = getRowAtY(y, { scrollTop: viewport.scrollTop, scrollLeft: viewport.scrollLeft }, sizes, geometryConfig, defaultRows)
-    state.selected.row = row
-    state.selected.col = 0
-    state.selectionRange.startRow = row
-    state.selectionRange.startCol = 0
-    state.selectionRange.endRow = row
-    state.selectionRange.endCol = defaultCols - 1
+    
+    if (shiftKey && state.selectionRange.startRow !== -1) {
+      // Shift+点击行头：扩展行选择范围
+      // 保持起始行不变，扩展到当前点击的行
+      const anchorRow = state.selected.row >= 0 ? state.selected.row : state.selectionRange.startRow
+      state.selectionRange.startRow = Math.min(anchorRow, row)
+      state.selectionRange.endRow = Math.max(anchorRow, row)
+      state.selectionRange.startCol = 0
+      state.selectionRange.endCol = defaultCols - 1
+    } else {
+      // 普通点击或 Ctrl 点击：选择单行
+      state.selected.row = row
+      state.selected.col = 0
+      state.selectionRange.startRow = row
+      state.selectionRange.startCol = 0
+      state.selectionRange.endRow = row
+      state.selectionRange.endCol = defaultCols - 1
+    }
     return true
   }
 
   // 点击列头：选择整列
   if (y < colHeaderHeight && x > rowHeaderWidth) {
     const col = getColAtX(x, { scrollTop: viewport.scrollTop, scrollLeft: viewport.scrollLeft }, sizes, geometryConfig, defaultCols)
-    state.selected.row = 0
-    state.selected.col = col
-    state.selectionRange.startRow = 0
-    state.selectionRange.startCol = col
-    state.selectionRange.endRow = defaultRows - 1
-    state.selectionRange.endCol = col
+    
+    if (shiftKey && state.selectionRange.startCol !== -1) {
+      // Shift+点击列头：扩展列选择范围
+      const anchorCol = state.selected.col >= 0 ? state.selected.col : state.selectionRange.startCol
+      state.selectionRange.startCol = Math.min(anchorCol, col)
+      state.selectionRange.endCol = Math.max(anchorCol, col)
+      state.selectionRange.startRow = 0
+      state.selectionRange.endRow = defaultRows - 1
+    } else {
+      // 普通点击或 Ctrl 点击：选择单列
+      state.selected.row = 0
+      state.selected.col = col
+      state.selectionRange.startRow = 0
+      state.selectionRange.startCol = col
+      state.selectionRange.endRow = defaultRows - 1
+      state.selectionRange.endCol = col
+    }
     return true
   }
 
   // 点击左上角：选择全部
   if (x < rowHeaderWidth && y < colHeaderHeight) {
+    // 选择全部时清除多选区
+    clearMultiSelection(state)
     state.selected.row = 0
     state.selected.col = 0
     state.selectionRange.startRow = 0
@@ -169,24 +237,50 @@ export function handleClick(config: SelectionClickConfig): boolean {
  * @returns true 如果开始了拖拽
  */
 export function startDragSelection(config: SelectionDragConfig): boolean {
-  const { x, y, viewport, geometryConfig, sizes, defaultRows, defaultCols, state, getMergedRegion } = config
+  const { x, y, shiftKey, ctrlKey, viewport, geometryConfig, sizes, defaultRows, defaultCols, state, getMergedRegion } = config
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
+
+  // 处理 Ctrl 多选逻辑
+  if (ctrlKey && state.multiSelection) {
+    // 保存当前选区到多选区列表
+    saveCurrentSelectionToMulti(state)
+    state.multiSelection.active = true
+  } else if (!shiftKey && state.multiSelection) {
+    // 普通点击（非 Shift、非 Ctrl）：清除多选区
+    clearMultiSelection(state)
+  }
 
   // 点击行头开始拖拽选择行
   if (x < rowHeaderWidth && y > colHeaderHeight) {
     const row = getRowAtY(y, { scrollTop: viewport.scrollTop, scrollLeft: viewport.scrollLeft }, sizes, geometryConfig, defaultRows)
     state.dragState.isDragging = true
-    state.dragState.startRow = row
-    state.dragState.startCol = 0
-    state.dragState.currentRow = row
-    state.dragState.currentCol = defaultCols - 1
+    
+    if (shiftKey && state.selectionRange.startRow !== -1 && state.selectionRange.endCol === defaultCols - 1) {
+      // Shift+拖拽行头：从当前选区的锚点开始扩展
+      const anchorRow = state.selected.row >= 0 ? state.selected.row : state.selectionRange.startRow
+      state.dragState.startRow = anchorRow
+      state.dragState.startCol = 0
+      state.dragState.currentRow = row
+      state.dragState.currentCol = defaultCols - 1
+      
+      state.selectionRange.startRow = Math.min(anchorRow, row)
+      state.selectionRange.startCol = 0
+      state.selectionRange.endRow = Math.max(anchorRow, row)
+      state.selectionRange.endCol = defaultCols - 1
+    } else {
+      // 普通拖拽行头或 Ctrl 拖拽
+      state.dragState.startRow = row
+      state.dragState.startCol = 0
+      state.dragState.currentRow = row
+      state.dragState.currentCol = defaultCols - 1
 
-    state.selected.row = row
-    state.selected.col = 0
-    state.selectionRange.startRow = row
-    state.selectionRange.startCol = 0
-    state.selectionRange.endRow = row
-    state.selectionRange.endCol = defaultCols - 1
+      state.selected.row = row
+      state.selected.col = 0
+      state.selectionRange.startRow = row
+      state.selectionRange.startCol = 0
+      state.selectionRange.endRow = row
+      state.selectionRange.endCol = defaultCols - 1
+    }
     return true
   }
 
@@ -194,17 +288,33 @@ export function startDragSelection(config: SelectionDragConfig): boolean {
   if (y < colHeaderHeight && x > rowHeaderWidth) {
     const col = getColAtX(x, { scrollTop: viewport.scrollTop, scrollLeft: viewport.scrollLeft }, sizes, geometryConfig, defaultCols)
     state.dragState.isDragging = true
-    state.dragState.startRow = 0
-    state.dragState.startCol = col
-    state.dragState.currentRow = defaultRows - 1
-    state.dragState.currentCol = col
+    
+    if (shiftKey && state.selectionRange.startCol !== -1 && state.selectionRange.endRow === defaultRows - 1) {
+      // Shift+拖拽列头：从当前选区的锚点开始扩展
+      const anchorCol = state.selected.col >= 0 ? state.selected.col : state.selectionRange.startCol
+      state.dragState.startRow = 0
+      state.dragState.startCol = anchorCol
+      state.dragState.currentRow = defaultRows - 1
+      state.dragState.currentCol = col
+      
+      state.selectionRange.startRow = 0
+      state.selectionRange.startCol = Math.min(anchorCol, col)
+      state.selectionRange.endRow = defaultRows - 1
+      state.selectionRange.endCol = Math.max(anchorCol, col)
+    } else {
+      // 普通拖拽列头或 Ctrl 拖拽
+      state.dragState.startRow = 0
+      state.dragState.startCol = col
+      state.dragState.currentRow = defaultRows - 1
+      state.dragState.currentCol = col
 
-    state.selected.row = 0
-    state.selected.col = col
-    state.selectionRange.startRow = 0
-    state.selectionRange.startCol = col
-    state.selectionRange.endRow = defaultRows - 1
-    state.selectionRange.endCol = col
+      state.selected.row = 0
+      state.selected.col = col
+      state.selectionRange.startRow = 0
+      state.selectionRange.startCol = col
+      state.selectionRange.endRow = defaultRows - 1
+      state.selectionRange.endCol = col
+    }
     return true
   }
 
@@ -221,6 +331,32 @@ export function startDragSelection(config: SelectionDragConfig): boolean {
   const region = getMergedRegion?.(row, col)
   
   state.dragState.isDragging = true
+  
+  // Shift+拖拽：从当前选区的锚点开始扩展
+  if (shiftKey && state.selected.row >= 0 && state.selected.col >= 0) {
+    state.dragState.startRow = state.selected.row
+    state.dragState.startCol = state.selected.col
+    
+    if (region) {
+      // 扩展到合并区域边界
+      state.dragState.currentRow = row < state.selected.row ? region.startRow : region.endRow
+      state.dragState.currentCol = col < state.selected.col ? region.startCol : region.endCol
+    } else {
+      state.dragState.currentRow = row
+      state.dragState.currentCol = col
+    }
+    
+    // 更新选择范围
+    state.selectionRange.startRow = Math.min(state.dragState.startRow, state.dragState.currentRow)
+    state.selectionRange.startCol = Math.min(state.dragState.startCol, state.dragState.currentCol)
+    state.selectionRange.endRow = Math.max(state.dragState.startRow, state.dragState.currentRow)
+    state.selectionRange.endCol = Math.max(state.dragState.startCol, state.dragState.currentCol)
+    
+    // 扩展选择范围以包含所有相关的合并单元格
+    expandSelectionForMergedCells(state.selectionRange, getMergedRegion)
+    
+    return true
+  }
   
   if (region) {
     // 如果点击了合并单元格，从主单元格开始拖拽

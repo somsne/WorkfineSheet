@@ -55,6 +55,8 @@ export interface UseFillHandleOptions {
   scheduleRedraw: () => void
   /** 更新选择范围 */
   updateSelectionRange: (range: SelectionRange) => void
+  /** 检查是否处于多选状态 */
+  isMultiSelectionActive?: () => boolean
 }
 
 export interface FillHandleComposable {
@@ -101,7 +103,8 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     totalRows,
     totalCols,
     scheduleRedraw,
-    updateSelectionRange
+    updateSelectionRange,
+    isMultiSelectionActive
   } = options
   
   // 填充柄状态
@@ -574,8 +577,14 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
   
   /**
    * 绘制填充柄
+   * 多选状态下不绘制填充柄
    */
   function drawFillHandleOnCanvas(ctx: CanvasRenderingContext2D): void {
+    // 多选状态下隐藏填充柄
+    if (isMultiSelectionActive && isMultiSelectionActive()) {
+      return
+    }
+    
     const geometryConfig = getGeometryConfig()
     drawFillHandle({
       ctx,
