@@ -23,10 +23,35 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     selected, selectionRange,
     overlay, imeState,
     formulaReferences, updateFormulaReferences,
-    rowHeights, manualRowHeights, model
+    rowHeights, manualRowHeights, model,
+    copyRange, internalClipboard, lastCopyTs
   } = state
   
   const { createSizeAccess, createGeometryConfig, getRowHeight, getColWidth, getRowTop, getColLeft } = geometry
+  
+  /**
+   * 检查并清除复制区域（如果被修改的单元格在复制区域内）
+   */
+  function checkAndClearCopyRange(row: number, col: number) {
+    if (!copyRange.visible) return
+    
+    // 检查单元格是否在复制区域内
+    if (row >= copyRange.startRow && row <= copyRange.endRow &&
+        col >= copyRange.startCol && col <= copyRange.endCol) {
+      // 清除蚂蚁线和内部剪贴板
+      copyRange.startRow = -1
+      copyRange.startCol = -1
+      copyRange.endRow = -1
+      copyRange.endCol = -1
+      copyRange.visible = false
+      internalClipboard.data = null
+      internalClipboard.startRow = -1
+      internalClipboard.startCol = -1
+      internalClipboard.tsvContent = ''
+      internalClipboard.mergedRegions = []
+      lastCopyTs.value = 0
+    }
+  }
   
   // ==================== Overlay 编辑器 ====================
   
@@ -57,6 +82,9 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     
     // Only create undo action if value actually changed or needs conversion
     if (oldValue !== val || needsConversion) {
+      // 如果修改了复制区域内的单元格，清除蚂蚁线
+      checkAndClearCopyRange(row, col)
+      
       undoRedo.execute({
         name: `Edit cell (${row}, ${col})`,
         undo: () => {
@@ -340,6 +368,8 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
       e.preventDefault()
       e.stopPropagation()
       if (selected.row >= 0 && selected.col >= 0) {
+        // 如果修改了复制区域内的单元格，清除蚂蚁线
+        checkAndClearCopyRange(selected.row, selected.col)
         formulaSheet.setValue(selected.row, selected.col, '')
         onDraw()
       }

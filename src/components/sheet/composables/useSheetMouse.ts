@@ -14,6 +14,7 @@ import { handleWheel, handleScrollbarDrag, startVerticalDrag, startHorizontalDra
 import { handleDoubleClick as handleDoubleClickHelper, isClickInsideOverlay } from '../overlay'
 import { handleContextMenu, handleInputDialogConfirm as handleInputDialogConfirmHelper, type ContextMenuConfig } from '../uiMenus'
 import { applyFormats } from '../formatPainter'
+import { parseFormulaReferences } from '../references'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
@@ -91,6 +92,38 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+    
+    // 检测是否在行高调整区域 - 如果是则不处理点击
+    if (x < constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
+      let accumulatedY = constants.COL_HEADER_HEIGHT - viewport.scrollTop
+      for (let r = 0; r < constants.DEFAULT_ROWS; r++) {
+        const rowHeight = getRowHeight(r)
+        accumulatedY += rowHeight
+        
+        if (Math.abs(y - accumulatedY) <= constants.RESIZE_HANDLE_SIZE / 2) {
+          // 点击了行高调整区域，不处理点击事件
+          return
+        }
+        
+        if (accumulatedY > y + constants.RESIZE_HANDLE_SIZE) break
+      }
+    }
+    
+    // 检测是否在列宽调整区域 - 如果是则不处理点击
+    if (y < constants.COL_HEADER_HEIGHT && x > constants.ROW_HEADER_WIDTH) {
+      let accumulatedX = constants.ROW_HEADER_WIDTH - viewport.scrollLeft
+      for (let c = 0; c < constants.DEFAULT_COLS; c++) {
+        const colWidth = getColWidth(c)
+        accumulatedX += colWidth
+        
+        if (Math.abs(x - accumulatedX) <= constants.RESIZE_HANDLE_SIZE / 2) {
+          // 点击了列宽调整区域，不处理点击事件
+          return
+        }
+        
+        if (accumulatedX > x + constants.RESIZE_HANDLE_SIZE) break
+      }
+    }
     
     const needsRedraw = handleClick({
       x,
@@ -218,6 +251,10 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     // 检查编辑框
     if (overlay.visible && overlayInput.value) {
+      console.log('[DEBUG onMouseDown] overlay visible, checking formulaMode...')
+      console.log('[DEBUG onMouseDown] formulaMode:', (overlayInput.value as any).formulaMode)
+      console.log('[DEBUG onMouseDown] formulaMode?.value:', (overlayInput.value as any).formulaMode?.value)
+      
       const inputElement = (overlayInput.value as any).getInputElement?.()
       
       if (inputElement) {
@@ -238,7 +275,10 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       }
       
       if ((overlayInput.value as any).formulaMode) {
+        console.log('[DEBUG onMouseDown] formulaMode is TRUE, calling preventDefault')
         e.preventDefault()
+      } else {
+        console.log('[DEBUG onMouseDown] formulaMode is FALSE or undefined')
       }
     }
     
@@ -436,6 +476,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理鼠标松开事件
    */
   function onMouseUp(): void {
+    console.log('[DEBUG onMouseUp] called')
+    console.log('[DEBUG onMouseUp] dragState.isDragging:', dragState.isDragging)
+    
     // 结束填充柄拖拽
     if (fillHandle && fillHandle.fillHandleState.dragging) {
       fillHandle.endFillHandleDrag()
@@ -454,9 +497,20 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       return
     }
     
-    if (!dragState.isDragging) return
+    if (!dragState.isDragging) {
+      console.log('[DEBUG onMouseUp] dragState.isDragging is false, returning early')
+      return
+    }
     
     // 公式模式特殊处理
+    console.log('[DEBUG onMouseUp] checking formula mode...')
+    console.log('[DEBUG onMouseUp] overlay.visible:', overlay.visible)
+    console.log('[DEBUG onMouseUp] overlayInput.value:', !!overlayInput.value)
+    if (overlayInput.value) {
+      console.log('[DEBUG onMouseUp] formulaMode:', (overlayInput.value as any).formulaMode)
+      console.log('[DEBUG onMouseUp] isInSelectableState:', (overlayInput.value as any).isInSelectableState)
+      console.log('[DEBUG onMouseUp] hasTextSelection:', (overlayInput.value as any).hasTextSelection)
+    }
     if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
       const clickedSelf = (dragState.startRow === overlay.row && dragState.startCol === overlay.col)
       
@@ -467,6 +521,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       const overlayInputInstance = overlayInput.value as any
       const isSelectable = overlayInputInstance?.isInSelectableState ?? false
       const hasSelection = overlayInputInstance?.hasTextSelection ?? false
+      
+      console.log('[DEBUG onMouseUp] isSelectable:', isSelectable, 'hasSelection:', hasSelection)
       
       if (!isSelectable && !hasSelection) {
         const currentValue = overlayInputInstance?.getCurrentValue?.() ?? ''
@@ -515,6 +571,11 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         const cellAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
         ;(overlayInput.value as any).insertCellReference(cellAddr)
       }
+      
+      // 插入引用后立即更新公式引用高亮（不等待定时器）
+      const currentValue = (overlayInput.value as any).getCurrentValue?.() || ''
+      formulaReferences.value = parseFormulaReferences(currentValue)
+      console.log('[DEBUG onMouseUp] Updated formulaReferences immediately:', formulaReferences.value)
       
       selected.row = overlay.row
       selected.col = overlay.col

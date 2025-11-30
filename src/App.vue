@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import CanvasSheet from './components/CanvasSheet.vue'
+import WorkbookSheet from './components/WorkbookSheet.vue'
 </script>
 
 <template>
-  <CanvasSheet />
+  <WorkbookSheet />
 </template>
 
 <style scoped>

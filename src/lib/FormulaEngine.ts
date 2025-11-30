@@ -1,6 +1,8 @@
 /**
  * Excel 公式引擎
  * 使用 hot-formula-parser 库支持 Excel 公式
+ * 
+ * v2.0: 支持跨工作表引用（Sheet1!A1 语法）
  */
 
 import { Parser } from 'hot-formula-parser'
@@ -11,6 +13,8 @@ export interface CellReference {
   isAbsolute: boolean
   isRowAbsolute: boolean
   isColAbsolute: boolean
+  /** 工作表名称（跨表引用时使用） */
+  sheetName?: string
 }
 
 export interface RangeReference {
@@ -18,16 +22,54 @@ export interface RangeReference {
   startCol: number
   endRow: number
   endCol: number
+  /** 工作表名称（跨表引用时使用） */
+  sheetName?: string
 }
+
+/**
+ * 跨表取值回调函数类型
+ * @param sheetName 工作表名称（undefined 表示当前工作表）
+ * @param row 行号
+ * @param col 列号
+ */
+export type CrossSheetValueGetter = (sheetName: string | undefined, row: number, col: number) => any
 
 export class FormulaEngine {
   private parser: Parser
   private getCellValue: (row: number, col: number) => any
+  /** 跨表取值回调 */
+  private crossSheetValueGetter?: CrossSheetValueGetter
+  /** 当前工作表名称 */
+  private _currentSheetName?: string
 
   constructor(getCellValueFn: (row: number, col: number) => any) {
     this.parser = new Parser()
     this.getCellValue = getCellValueFn
     this.setupFunctions()
+  }
+
+  /**
+   * 设置跨表取值回调
+   * @param getter 跨表取值函数
+   * @param currentSheet 当前工作表名称
+   */
+  setCrossSheetValueGetter(getter: CrossSheetValueGetter, currentSheet?: string): void {
+    this.crossSheetValueGetter = getter
+    this._currentSheetName = currentSheet
+  }
+
+  /**
+   * 设置当前工作表名称
+   */
+  setCurrentSheetName(name: string): void {
+    this._currentSheetName = name
+  }
+
+  /**
+   * 获取当前工作表名称
+   */
+  getCurrentSheetName(): string | undefined {
+    return this._currentSheetName
   }
 
   /**
@@ -71,6 +113,7 @@ export class FormulaEngine {
 
   /**
    * 提取公式中的单元格引用（用于依赖追踪）
+   * 支持跨表引用：Sheet1!A1, 'Sheet Name'!A1
    */
   extractCellReferences(formula: string): CellReference[] {
     if (!this.isFormula(formula)) {
@@ -81,14 +124,65 @@ export class FormulaEngine {
     const references: CellReference[] = []
     const processedRefs = new Set<string>()
 
-    // 匹配单元格引用：A1, $A1, A$1, $A$1, A1:B2 等（包括小写）
-    const cellRegex = /\$?[A-Za-z]+\$?\d+/g
+    // 首先匹配跨表引用：Sheet1!A1 或 'Sheet Name'!A1
+    // 匹配带引号的工作表名：'xxx'!$?[A-Z]+$?\d+
+    const crossSheetQuotedRegex = /'([^']+)'!\$?[A-Za-z]+\$?\d+/g
     let match
 
-    while ((match = cellRegex.exec(expression)) !== null) {
-      const refStr = match[0].toUpperCase()  // 转换为大写
+    while ((match = crossSheetQuotedRegex.exec(expression)) !== null) {
+      const fullMatch = match[0]
+      const sheetName = match[1]
       
-      // 避免重复处理相同的引用
+      // 提取单元格部分
+      const cellPart = fullMatch.split('!')[1]?.toUpperCase()
+      if (!cellPart) continue
+      
+      const refKey = `${sheetName}!${cellPart}`
+      if (processedRefs.has(refKey)) continue
+      processedRefs.add(refKey)
+
+      const ref = this.parseCellReference(cellPart)
+      if (ref) {
+        ref.sheetName = sheetName
+        references.push(ref)
+      }
+    }
+
+    // 匹配不带引号的跨表引用：SheetName!A1
+    const crossSheetRegex = /([A-Za-z_][A-Za-z0-9_]*)!\$?[A-Za-z]+\$?\d+/g
+    while ((match = crossSheetRegex.exec(expression)) !== null) {
+      const fullMatch = match[0]
+      const sheetName = match[1]
+      
+      // 排除已处理的带引号引用
+      if (fullMatch.includes("'")) continue
+      
+      const cellPart = fullMatch.split('!')[1]?.toUpperCase()
+      if (!cellPart) continue
+      
+      const refKey = `${sheetName}!${cellPart}`
+      if (processedRefs.has(refKey)) continue
+      processedRefs.add(refKey)
+
+      const ref = this.parseCellReference(cellPart)
+      if (ref) {
+        ref.sheetName = sheetName
+        references.push(ref)
+      }
+    }
+
+    // 最后匹配本表单元格引用：A1, $A1, A$1, $A$1
+    const cellRegex = /\$?[A-Za-z]+\$?\d+/g
+    while ((match = cellRegex.exec(expression)) !== null) {
+      const refStr = match[0].toUpperCase()
+      
+      // 检查这个引用是否是跨表引用的一部分（已被处理）
+      const beforeMatch = expression.substring(0, match.index)
+      if (beforeMatch.endsWith('!') || beforeMatch.endsWith("'!")) {
+        continue
+      }
+      
+      // 避免重复处理
       if (processedRefs.has(refStr)) {
         continue
       }
@@ -174,8 +268,10 @@ export class FormulaEngine {
   /**
    * 展开范围引用为值数组
    * 例如: B2:D3 展开为 [[B2, C2, D2], [B3, C3, D3]]
+   * @param rangeStr 范围字符串
+   * @param sheetName 可选的工作表名称（跨表引用时使用）
    */
-  private expandRange(rangeStr: string): number[][] {
+  private expandRange(rangeStr: string, sheetName?: string): number[][] {
     const range = this.parseRangeReference(rangeStr)
     if (!range) return []
     
@@ -183,7 +279,13 @@ export class FormulaEngine {
     for (let r = range.startRow; r <= range.endRow; r++) {
       const row: number[] = []
       for (let c = range.startCol; c <= range.endCol; c++) {
-        const cellValue = this.getCellValue(r, c)
+        // 使用跨表取值或本表取值
+        let cellValue: any
+        if (sheetName && this.crossSheetValueGetter) {
+          cellValue = this.crossSheetValueGetter(sheetName, r, c)
+        } else {
+          cellValue = this.getCellValue(r, c)
+        }
         const normalizedValue = this.normalizeValue(cellValue)
         // 收集数值，字符串类型的数值也要转换
         if (typeof normalizedValue === 'number') {
@@ -207,60 +309,107 @@ export class FormulaEngine {
    * hot-formula-parser 不支持包含数字的变量名（如 B2），
    * 所以我们需要直接替换为数值或用括号包装
    * 
+   * 支持跨表引用：Sheet1!A1, 'Sheet Name'!A1
+   * 
    * 注意：getCellValue 回调会自动递归计算公式，
    * 所以我们这里获取的已经是计算后的值
    */
   private replaceReferencesWithValues(expression: string): string {
-    // 首先处理范围引用 (A1:B2, $A$1:$B$2, etc.)
+    // 1. 首先处理跨表范围引用（带引号的工作表名）
+    // 'Sheet Name'!A1:B2
+    expression = expression.replace(/'([^']+)'!(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/gi, (_match, sheetName, start, end) => {
+      const rangeStr = `${start.toUpperCase()}:${end.toUpperCase()}`
+      const values = this.expandRange(rangeStr, sheetName)
+      if (values.length === 0) return '0'
+      return values.flat().join(',')
+    })
+
+    // 2. 处理跨表范围引用（不带引号的工作表名）
+    // Sheet1!A1:B2
+    expression = expression.replace(/([A-Za-z_][A-Za-z0-9_]*)!(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/gi, (_match, sheetName, start, end) => {
+      const rangeStr = `${start.toUpperCase()}:${end.toUpperCase()}`
+      const values = this.expandRange(rangeStr, sheetName)
+      if (values.length === 0) return '0'
+      return values.flat().join(',')
+    })
+
+    // 3. 处理本表范围引用 (A1:B2)
     expression = expression.replace(/(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/gi, (match) => {
       const rangeStr = match.toUpperCase()
       const range = this.parseRangeReference(rangeStr)
       if (!range) return match
       
-      // 检查是否在函数调用中（如 SUM(A1:B2)）
-      // 如果是，hot-formula-parser 会自动处理范围
-      // 我们需要将范围展开为逗号分隔的值
       const values = this.expandRange(rangeStr)
       if (values.length === 0) return '0'
       
-      // 将二维数组展开为一维数组
-      const flatValues = values.flat()
-      return flatValues.join(',')
+      return values.flat().join(',')
     })
     
-    // 然后处理单个单元格引用：A1, $A1, A$1, $A$1 等
+    // 4. 处理跨表单元格引用（带引号的工作表名）
+    // 'Sheet Name'!A1
+    expression = expression.replace(/'([^']+)'!(\$)?([A-Za-z]+)(\$)?(\d+)/gi, (_match, sheetName, colAbs, colLetters, rowAbs, rowNum) => {
+      const ref = this.parseCellReference(`${colAbs || ''}${colLetters.toUpperCase()}${rowAbs || ''}${rowNum}`)
+      if (!ref) return _match
+
+      let cellValue: any
+      if (this.crossSheetValueGetter) {
+        cellValue = this.crossSheetValueGetter(sheetName, ref.row, ref.col)
+      } else {
+        // 没有设置跨表取值器，返回错误
+        return '#REF!'
+      }
+      return this.formatValueForExpression(cellValue)
+    })
+
+    // 5. 处理跨表单元格引用（不带引号的工作表名）
+    // Sheet1!A1
+    expression = expression.replace(/([A-Za-z_][A-Za-z0-9_]*)!(\$)?([A-Za-z]+)(\$)?(\d+)/gi, (_match, sheetName, colAbs, colLetters, rowAbs, rowNum) => {
+      const ref = this.parseCellReference(`${colAbs || ''}${colLetters.toUpperCase()}${rowAbs || ''}${rowNum}`)
+      if (!ref) return _match
+
+      let cellValue: any
+      if (this.crossSheetValueGetter) {
+        cellValue = this.crossSheetValueGetter(sheetName, ref.row, ref.col)
+      } else {
+        // 没有设置跨表取值器，返回错误
+        return '#REF!'
+      }
+      return this.formatValueForExpression(cellValue)
+    })
+    
+    // 6. 处理本表单元格引用：A1, $A1, A$1, $A$1 等
     const cellRegex = /(\$)?([A-Za-z]+)(\$)?(\d+)/g
     
-    return expression.replace(cellRegex, (match) => {
-      const refStr = match.toUpperCase()
+    return expression.replace(cellRegex, (match, colAbs, colLetters, rowAbs, rowNum) => {
+      const refStr = `${colAbs || ''}${colLetters.toUpperCase()}${rowAbs || ''}${rowNum}`
       
       const ref = this.parseCellReference(refStr)
       if (!ref) {
         return match // 无法解析则保持原样
       }
 
-      // 获取单元格值
-      // getCellValue 是由调用者传递的回调函数，可能返回：
-      // 1. 普通值（数字、字符串）
-      // 2. 计算后的公式结果
-      // 3. 错误信息（如 #VALUE!, #DIV/0! 等）
       const cellValue = this.getCellValue(ref.row, ref.col)
-      const normalizedValue = this.normalizeValue(cellValue)
-
-      // 如果是字符串，用双引号包装；如果是数字，直接返回
-      if (typeof normalizedValue === 'string') {
-        // 如果是错误信息，直接返回（会导致公式计算失败）
-        if (normalizedValue.startsWith('#')) {
-          return normalizedValue
-        }
-        return `"${normalizedValue}"`
-      } else if (normalizedValue === 0 && cellValue === '') {
-        // 空单元格返回 0
-        return '0'
-      } else {
-        return String(normalizedValue)
-      }
+      return this.formatValueForExpression(cellValue)
     })
+  }
+
+  /**
+   * 将单元格值格式化为表达式中可用的字符串
+   */
+  private formatValueForExpression(cellValue: any): string {
+    const normalizedValue = this.normalizeValue(cellValue)
+
+    if (typeof normalizedValue === 'string') {
+      // 如果是错误信息，直接返回
+      if (normalizedValue.startsWith('#')) {
+        return normalizedValue
+      }
+      return `"${normalizedValue}"`
+    } else if (normalizedValue === 0 && cellValue === '') {
+      return '0'
+    } else {
+      return String(normalizedValue)
+    }
   }
 
   /**

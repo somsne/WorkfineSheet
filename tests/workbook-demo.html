@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多工作表演示 - WorkfineSheet</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f5f5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    header {
+      background: #2c3e50;
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    
+    header h1 {
+      font-size: 18px;
+      font-weight: 500;
+    }
+    
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex: 1;
+    }
+    
+    .toolbar button {
+      padding: 6px 12px;
+      border: none;
+      background: #3498db;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    
+    .toolbar button:hover {
+      background: #2980b9;
+    }
+    
+    .toolbar button:active {
+      background: #1f618d;
+    }
+    
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    #workbook-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .info-panel {
+      background: #ecf0f1;
+      padding: 10px 20px;
+      border-top: 1px solid #bdc3c7;
+      font-size: 13px;
+      display: flex;
+      gap: 30px;
+    }
+    
+    .info-item {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .info-label {
+      color: #7f8c8d;
+    }
+    
+    .info-value {
+      font-weight: 500;
+      color: #2c3e50;
+    }
+    
+    /* 暗黑模式支持 */
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #1a1a2e;
+      }
+      
+      header {
+        background: #16213e;
+      }
+      
+      .info-panel {
+        background: #0f0f23;
+        border-top-color: #333;
+      }
+      
+      .info-label {
+        color: #888;
+      }
+      
+      .info-value {
+        color: #e0e0e0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📊 多工作表演示</h1>
+    <div class="toolbar">
+      <button onclick="addSheet()">+ 新建工作表</button>
+      <button onclick="duplicateSheet()">复制当前工作表</button>
+      <button onclick="removeSheet()">删除当前工作表</button>
+      <button onclick="renameSheet()">重命名</button>
+      <button onclick="testCrossSheet()">跨表公式测试</button>
+      <button onclick="exportJSON()">导出 JSON</button>
+    </div>
+  </header>
+  
+  <main>
+    <div id="workbook-container"></div>
+    <div class="info-panel">
+      <div class="info-item">
+        <span class="info-label">活动工作表:</span>
+        <span class="info-value" id="activeSheet">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">工作表数量:</span>
+        <span class="info-value" id="sheetCount">-</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">当前选区:</span>
+        <span class="info-value" id="selection">-</span>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { createApp, ref, onMounted, nextTick } from 'vue'
+    import WorkbookSheet from '../src/components/WorkbookSheet.vue'
+    
+    // 全局变量
+    let workbookRef = null
+    
+    const app = createApp({
+      components: { WorkbookSheet },
+      template: `
+        <WorkbookSheet 
+          ref="workbookRef"
+          :initial-sheets="['销售数据', '产品列表', '汇总表']"
+          @sheet-change="onSheetChange"
+          @sheet-add="onSheetAdd"
+          @sheet-delete="onSheetDelete"
+          @sheet-rename="onSheetRename"
+          @loaded="onLoaded"
+        />
+      `,
+      setup() {
+        const workbookRefLocal = ref(null)
+        
+        const updateInfo = () => {
+          if (!workbookRefLocal.value) return
+          
+          const wb = workbookRefLocal.value.getWorkbook()
+          const activeSheet = wb.getActiveSheet()
+          const selection = workbookRefLocal.value.getSelection()
+          
+          document.getElementById('activeSheet').textContent = activeSheet?.metadata.name || '-'
+          document.getElementById('sheetCount').textContent = wb.getSheetCount()
+          document.getElementById('selection').textContent = 
+            selection.row >= 0 ? `R${selection.row + 1}C${selection.col + 1}` : '-'
+        }
+        
+        const onSheetChange = (sheetId, sheetName) => {
+          console.log('工作表切换:', sheetName)
+          nextTick(updateInfo)
+        }
+        
+        const onSheetAdd = (sheetId, sheetName) => {
+          console.log('新增工作表:', sheetName)
+          nextTick(updateInfo)
+        }
+        
+        const onSheetDelete = (sheetId, sheetName) => {
+          console.log('删除工作表:', sheetName)
+          nextTick(updateInfo)
+        }
+        
+        const onSheetRename = (sheetId, oldName, newName) => {
+          console.log('重命名工作表:', oldName, '->', newName)
+          nextTick(updateInfo)
+        }
+        
+        const onLoaded = () => {
+          console.log('工作簿加载完成')
+          
+          // 初始化各工作表的演示数据
+          nextTick(() => {
+            const wb = workbookRefLocal.value.getWorkbook()
+            
+            // 销售数据表
+            const salesSheet = wb.getSheetByName('销售数据')
+            if (salesSheet) {
+              salesSheet.model.setValue(0, 0, '产品')
+              salesSheet.model.setValue(0, 1, '数量')
+              salesSheet.model.setValue(0, 2, '单价')
+              salesSheet.model.setValue(0, 3, '金额')
+              
+              salesSheet.model.setValue(1, 0, '笔记本电脑')
+              salesSheet.model.setValue(1, 1, '10')
+              salesSheet.model.setValue(1, 2, '5000')
+              salesSheet.model.setValue(1, 3, '=B2*C2')
+              
+              salesSheet.model.setValue(2, 0, '显示器')
+              salesSheet.model.setValue(2, 1, '20')
+              salesSheet.model.setValue(2, 2, '2000')
+              salesSheet.model.setValue(2, 3, '=B3*C3')
+              
+              salesSheet.model.setValue(3, 0, '键盘')
+              salesSheet.model.setValue(3, 1, '50')
+              salesSheet.model.setValue(3, 2, '200')
+              salesSheet.model.setValue(3, 3, '=B4*C4')
+              
+              salesSheet.model.setValue(5, 0, '总计')
+              salesSheet.model.setValue(5, 3, '=SUM(D2:D4)')
+            }
+            
+            // 产品列表表
+            const productSheet = wb.getSheetByName('产品列表')
+            if (productSheet) {
+              productSheet.model.setValue(0, 0, '产品编号')
+              productSheet.model.setValue(0, 1, '产品名称')
+              productSheet.model.setValue(0, 2, '类别')
+              productSheet.model.setValue(0, 3, '库存')
+              
+              productSheet.model.setValue(1, 0, 'P001')
+              productSheet.model.setValue(1, 1, '笔记本电脑')
+              productSheet.model.setValue(1, 2, '电子产品')
+              productSheet.model.setValue(1, 3, '100')
+              
+              productSheet.model.setValue(2, 0, 'P002')
+              productSheet.model.setValue(2, 1, '显示器')
+              productSheet.model.setValue(2, 2, '电子产品')
+              productSheet.model.setValue(2, 3, '200')
+              
+              productSheet.model.setValue(3, 0, 'P003')
+              productSheet.model.setValue(3, 1, '键盘')
+              productSheet.model.setValue(3, 2, '外设')
+              productSheet.model.setValue(3, 3, '500')
+            }
+            
+            // 汇总表
+            const summarySheet = wb.getSheetByName('汇总表')
+            if (summarySheet) {
+              summarySheet.model.setValue(0, 0, '跨表引用演示')
+              summarySheet.model.setValue(2, 0, '销售数据总计:')
+              summarySheet.model.setValue(2, 1, "='销售数据'!D6")
+              
+              summarySheet.model.setValue(4, 0, '产品总库存:')
+              summarySheet.model.setValue(4, 1, "=SUM('产品列表'!D2:D4)")
+            }
+            
+            updateInfo()
+            workbookRefLocal.value.redraw()
+          })
+        }
+        
+        onMounted(() => {
+          workbookRef = workbookRefLocal.value
+          window.workbookRef = workbookRef
+          
+          // 定期更新选区信息
+          setInterval(updateInfo, 500)
+        })
+        
+        return {
+          workbookRef: workbookRefLocal,
+          onSheetChange,
+          onSheetAdd,
+          onSheetDelete,
+          onSheetRename,
+          onLoaded
+        }
+      }
+    })
+    
+    app.mount('#workbook-container')
+    
+    // 全局函数
+    window.addSheet = () => {
+      if (workbookRef) {
+        const name = prompt('请输入工作表名称:')
+        if (name) {
+          workbookRef.addSheet(name)
+        }
+      }
+    }
+    
+    window.duplicateSheet = () => {
+      if (workbookRef) {
+        const wb = workbookRef.getWorkbook()
+        const activeSheet = wb.getActiveSheet()
+        if (activeSheet) {
+          wb.duplicateSheet(activeSheet.metadata.id)
+        }
+      }
+    }
+    
+    window.removeSheet = () => {
+      if (workbookRef) {
+        const wb = workbookRef.getWorkbook()
+        if (wb.getSheetCount() <= 1) {
+          alert('无法删除最后一个工作表')
+          return
+        }
+        const activeSheet = wb.getActiveSheet()
+        if (activeSheet && confirm(`确定要删除工作表 "${activeSheet.metadata.name}" 吗？`)) {
+          workbookRef.removeSheet(activeSheet.metadata.id)
+        }
+      }
+    }
+    
+    window.renameSheet = () => {
+      if (workbookRef) {
+        const wb = workbookRef.getWorkbook()
+        const activeSheet = wb.getActiveSheet()
+        if (activeSheet) {
+          const newName = prompt('请输入新名称:', activeSheet.metadata.name)
+          if (newName && newName !== activeSheet.metadata.name) {
+            workbookRef.renameSheet(activeSheet.metadata.id, newName)
+          }
+        }
+      }
+    }
+    
+    window.testCrossSheet = () => {
+      if (workbookRef) {
+        const wb = workbookRef.getWorkbook()
+        // 切换到汇总表
+        const summarySheet = wb.getSheetByName('汇总表')
+        if (summarySheet) {
+          wb.setActiveSheet(summarySheet.metadata.id)
+          alert('已切换到汇总表，该表包含跨表公式引用示例')
+        }
+      }
+    }
+    
+    window.exportJSON = () => {
+      if (workbookRef) {
+        const json = workbookRef.toJSON()
+        console.log('工作簿 JSON:', json)
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'workbook.json'
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    }
+  </script>
+</body>
+</html>

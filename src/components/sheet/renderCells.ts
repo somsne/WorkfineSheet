@@ -276,6 +276,16 @@ export interface CellsRenderConfig {
     ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
     active: boolean
   }
+  /** 复制区域（蚂蚁线）*/
+  copyRange?: {
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+    visible: boolean
+  }
+  /** 蚂蚁线动画偏移量 */
+  marchingAntsOffset?: number
   dragState: { 
     isDragging: boolean
     startRow: number
@@ -791,7 +801,9 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
   // Draw colored borders for formula references (Excel style)
   if (formulaReferences.length > 0) {
+    console.log('[DEBUG renderCells] Drawing formula references, count:', formulaReferences.length)
     for (const ref of formulaReferences) {
+      console.log('[DEBUG renderCells] Drawing reference:', ref.range, 'startRow:', ref.startRow, 'startCol:', ref.startCol, 'endRow:', ref.endRow, 'endCol:', ref.endCol, 'color:', ref.color)
       const sx = rowHeaderWidth + getColLeft(ref.startCol, sizes, geometryConfig) - viewport.scrollLeft
       const sy = colHeaderHeight + getRowTop(ref.startRow, sizes, geometryConfig) - viewport.scrollTop
       const ex = rowHeaderWidth + getColLeft(ref.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
@@ -799,11 +811,18 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       const width = ex - sx
       const height = ey - sy
       
+      console.log('[DEBUG renderCells] coords: sx=', sx, 'sy=', sy, 'width=', width, 'height=', height, 'canvas w=', w, 'h=', h)
+      
       // Only draw visible references
       if (sx + width > 0 && sx < w && sy + height > 0 && sy < h) {
+        console.log('[DEBUG renderCells] Drawing rect with color:', ref.color)
+        ctx.save()
         ctx.strokeStyle = ref.color
-        ctx.lineWidth = 2
-        ctx.strokeRect(sx + 0.5, sy + 0.5, width - 1, height - 1)
+        ctx.lineWidth = 3  // 加粗便于观察
+        ctx.strokeRect(sx + 1, sy + 1, width - 2, height - 2)
+        ctx.restore()
+      } else {
+        console.log('[DEBUG renderCells] Reference out of view, skipping')
       }
     }
   }
@@ -847,6 +866,34 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       // Draw text
       ctx.fillStyle = '#059669'
       ctx.fillText(rangeText, textX, textY)
+    }
+  }
+  
+  // Draw marching ants (animated dashed border) for copy range
+  // 蚂蚁线层级最高，在所有选择框之上
+  const { copyRange, marchingAntsOffset = 0 } = config
+  if (copyRange && copyRange.visible && copyRange.startRow >= 0) {
+    const sx = rowHeaderWidth + getColLeft(copyRange.startCol, sizes, geometryConfig) - viewport.scrollLeft
+    const sy = colHeaderHeight + getRowTop(copyRange.startRow, sizes, geometryConfig) - viewport.scrollTop
+    const ex = rowHeaderWidth + getColLeft(copyRange.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
+    const ey = colHeaderHeight + getRowTop(copyRange.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+    const width = ex - sx
+    const height = ey - sy
+    
+    // Only draw if visible
+    if (sx + width > rowHeaderWidth && sx < w && sy + height > colHeaderHeight && sy < h) {
+      ctx.save()
+      // 先绘制白色底边，让蚂蚁线更清晰可见
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 2.5
+      ctx.strokeRect(sx + 0.5, sy + 0.5, width - 1, height - 1)
+      // 再绘制墨绿色蚂蚁线
+      ctx.strokeStyle = '#3871E0'
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 4])
+      ctx.lineDashOffset = -marchingAntsOffset
+      ctx.strokeRect(sx + 0.5, sy + 0.5, width - 1, height - 1)
+      ctx.restore()
     }
   }
   

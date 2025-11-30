@@ -103,9 +103,21 @@ export const DEFAULT_CONSTANTS: SheetConstants = {
   RESIZE_HANDLE_SIZE: 4  // 拖动调整的检测区域（分隔线两侧各2px）
 }
 
+/** useSheetState 配置选项 */
+export interface SheetStateOptions {
+  /** 常量配置 */
+  constants?: SheetConstants
+  /** 外部传入的 SheetModel（多工作表模式使用） */
+  externalModel?: SheetModel
+  /** 是否跳过演示数据初始化 */
+  skipDemoData?: boolean
+}
+
 // ==================== Composable ====================
 
-export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
+export function useSheetState(options: SheetStateOptions = {}) {
+  const constants = options.constants ?? DEFAULT_CONSTANTS
+  
   // ==================== DOM 引用 ====================
   const container = ref<HTMLElement | null>(null)
   const gridCanvas = ref<HTMLCanvasElement | null>(null)
@@ -114,12 +126,15 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
   const imeProxy = ref<HTMLTextAreaElement | null>(null)
   
   // ==================== 核心数据模型 ====================
-  const model = new SheetModel()
+  // 如果提供了外部 model，使用外部的；否则创建新的
+  const model = options.externalModel ?? new SheetModel()
   const formulaSheet = new FormulaSheet(model, true) // 启用异步计算
   const undoRedo = new UndoRedoManager(100)
   
-  // 初始化演示数据
-  initializeDemoData(model)
+  // 只有在没有外部 model 且没有跳过演示数据时才初始化演示数据
+  if (!options.externalModel && !options.skipDemoData) {
+    initializeDemoData(model)
+  }
   
   // ==================== 自定义行高和列宽 ====================
   const rowHeights = ref<Map<number, number>>(new Map())
@@ -228,6 +243,8 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     data: InternalClipboardCell[][] | null
     startRow: number
     startCol: number
+    /** 复制时写入系统剪贴板的 TSV 内容（用于比较） */
+    tsvContent: string
     /** 复制区域内的合并单元格信息（相对坐标） */
     mergedRegions: Array<{
       startRow: number
@@ -239,9 +256,29 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     data: null,
     startRow: -1,
     startCol: -1,
+    tsvContent: '',
     mergedRegions: []
   })
   const lastCopyTs = ref(0)
+  
+  // ==================== 蚂蚁线（复制区域高亮） ====================
+  /** 复制区域范围（用于绘制蚂蚁线） */
+  const copyRange = reactive<{
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+    visible: boolean
+  }>({
+    startRow: -1,
+    startCol: -1,
+    endRow: -1,
+    endCol: -1,
+    visible: false
+  })
+  
+  /** 蚂蚁线动画偏移量 */
+  const marchingAntsOffset = ref(0)
   
   // ==================== 公式引用高亮 ====================
   const formulaReferences = ref<FormulaReference[]>([])
@@ -322,10 +359,19 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     }
     
     updateReferencesTimer = window.setTimeout(() => {
+      console.log('[DEBUG updateFormulaReferences] overlay.visible:', overlay.visible)
+      console.log('[DEBUG updateFormulaReferences] overlayInput.value:', !!overlayInput.value)
+      if (overlayInput.value) {
+        console.log('[DEBUG updateFormulaReferences] formulaMode:', (overlayInput.value as any).formulaMode)
+      }
+      
       if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
         const currentValue = (overlayInput.value as any).getCurrentValue?.() || overlay.value
+        console.log('[DEBUG updateFormulaReferences] currentValue:', currentValue)
         formulaReferences.value = parseFormulaReferences(currentValue)
+        console.log('[DEBUG updateFormulaReferences] formulaReferences:', formulaReferences.value)
       } else {
+        console.log('[DEBUG updateFormulaReferences] clearing references')
         formulaReferences.value = []
       }
       updateReferencesTimer = null
@@ -418,6 +464,10 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     // 剪贴板
     internalClipboard,
     lastCopyTs,
+    
+    // 蚂蚁线（复制区域高亮）
+    copyRange,
+    marchingAntsOffset,
     
     // 公式引用
     formulaReferences,

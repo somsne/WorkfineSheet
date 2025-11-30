@@ -7,6 +7,7 @@ import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
 import type { SheetClipboard } from './useSheetClipboard'
+import type { SheetDrawing } from './useSheetDrawing'
 import { extractFormats, applyFormats } from '../formatPainter'
 
 export interface UseSheetKeyboardOptions {
@@ -14,10 +15,11 @@ export interface UseSheetKeyboardOptions {
   geometry: SheetGeometry
   input: SheetInput
   clipboard: SheetClipboard
+  drawing?: SheetDrawing
   onDraw: () => void
 }
 
-export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: UseSheetKeyboardOptions) {
+export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, onDraw }: UseSheetKeyboardOptions) {
   const {
     constants,
     imeProxy,
@@ -29,7 +31,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
   
   const { ensureVisible } = geometry
   const { openOverlay, focusImeProxy } = input
-  const { onCopy, onPaste } = clipboard
+  const { onCopy, clearCopyRange } = clipboard
   
   /**
    * 处理键盘按下事件
@@ -152,13 +154,15 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
       e.preventDefault()
       onCopy()
+      // 启动蚂蚁线动画
+      drawing?.startMarchingAntsAnimation()
       return
     }
     
-    // 粘贴 (Ctrl/Cmd + V)
+    // 粘贴 (Ctrl/Cmd + V) - 不阻止默认行为，让 paste 事件触发
+    // 实际的粘贴处理由 onPaste 事件处理器完成
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-      e.preventDefault()
-      onPaste()
+      // 不调用 e.preventDefault()，让浏览器触发 paste 事件
       return
     }
     
@@ -208,7 +212,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
       return
     }
     
-    // Escape - 退出格式刷或清除选区
+    // Escape - 退出格式刷或清除选区/蚂蚁线
     if (e.key === 'Escape') {
       e.preventDefault()
       
@@ -217,6 +221,13 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
         formatPainter.mode = 'off'
         formatPainter.data = null
         onDraw()
+        return
+      }
+      
+      // 清除蚂蚁线（复制区域）
+      if (state.copyRange.visible) {
+        clearCopyRange()
+        drawing?.stopMarchingAntsAnimation()
         return
       }
       

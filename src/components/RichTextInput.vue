@@ -736,6 +736,8 @@ function adjustSize() {
  * 编辑器样式
  */
 const editorStyle = computed(() => {
+  const verticalAlign = props.cellStyle?.verticalAlign || 'middle'
+  
   const style: Record<string, string> = {
     width: `${autoWidth.value}px`,
     height: `${autoHeight.value}px`,
@@ -749,7 +751,6 @@ const editorStyle = computed(() => {
       : formulaMode.value 
         ? '2px solid #ef4444'
         : '2px solid #3b82f6',
-    margin: '-2px',  // 补偿 border 向外扩展
     outline: 'none',
     backgroundColor: formulaMode.value 
       ? '#fef2f2' 
@@ -761,14 +762,9 @@ const editorStyle = computed(() => {
     caretColor: '#000000',
     // 水平对齐
     textAlign: props.cellStyle?.textAlign || 'left',
-    // 垂直对齐：使用 flexbox 实现
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: props.cellStyle?.verticalAlign === 'top' 
-      ? 'flex-start' 
-      : props.cellStyle?.verticalAlign === 'bottom' 
-        ? 'flex-end' 
-        : 'center',  // middle 是默认值
+    // 垂直对齐：使用 table-cell + vertical-align（不会导致 span 换行）
+    display: 'table-cell',
+    verticalAlign: verticalAlign === 'top' ? 'top' : verticalAlign === 'bottom' ? 'bottom' : 'middle',
   }
   
   // 应用粗体和斜体（公式模式除外）
@@ -826,9 +822,9 @@ watch(
   () => props.formulaReferences,
   () => {
     if (formulaMode.value && props.visible && editorRef) {
-      // 使用当前编辑器的实际文本，而不是 internal.value
-      // 因为在用户快速输入时，internal.value 可能是旧值
-      const currentText = editorRef.innerText
+      // 使用 internal.value，因为 formulaReferences 的 startIndex/endIndex 是基于它计算的
+      // 不要使用 editorRef.innerText，因为它可能与 internal.value 不同步
+      const currentText = internal.value
       
       // 如果有待设置的光标位置（刚插入引用），使用它
       if (pendingCursorPos !== null) {
@@ -999,8 +995,8 @@ defineExpose({
     v-if="visible" 
     :style="{ 
       position: 'absolute', 
-      top: top + 'px', 
-      left: left + 'px', 
+      top: (top - 2) + 'px', 
+      left: (left - 2) + 'px', 
       zIndex: 1000 
     }"
     @mousedown.stop

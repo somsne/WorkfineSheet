@@ -28,7 +28,8 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     viewport, scrollbar,
     selected, selectionRange, dragState, multiSelection,
     overlay, imeState,
-    formulaReferences, hoverState
+    formulaReferences, hoverState,
+    copyRange, marchingAntsOffset
   } = state
   
   const {
@@ -39,6 +40,41 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
   
   // 创建重绘调度器
   const { scheduleRedraw, cancelScheduled } = createRedrawScheduler(() => draw())
+  
+  // 蚂蚁线动画相关
+  let marchingAntsAnimationId: number | null = null
+  const MARCHING_ANTS_SPEED = 0.3 // 每帧移动的像素数
+  
+  /**
+   * 启动蚂蚁线动画
+   */
+  function startMarchingAntsAnimation() {
+    if (marchingAntsAnimationId !== null) return // 避免重复启动
+    
+    function animate() {
+      // 检查是否还有有效的 copyRange，如果没有则停止动画
+      if (!copyRange.visible || copyRange.startRow < 0) {
+        stopMarchingAntsAnimation()
+        return
+      }
+      
+      marchingAntsOffset.value = (marchingAntsOffset.value + MARCHING_ANTS_SPEED) % 8
+      draw() // 重绘以更新蚂蚁线位置
+      marchingAntsAnimationId = requestAnimationFrame(animate)
+    }
+    
+    marchingAntsAnimationId = requestAnimationFrame(animate)
+  }
+  
+  /**
+   * 停止蚂蚁线动画
+   */
+  function stopMarchingAntsAnimation() {
+    if (marchingAntsAnimationId !== null) {
+      cancelAnimationFrame(marchingAntsAnimationId)
+      marchingAntsAnimationId = null
+    }
+  }
   
   // 绘制后回调（用于图片等附加绘制）
   let afterDrawCallback: (() => void) | null = null
@@ -106,6 +142,8 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       selected,
       selectionRange,
       multiSelection,
+      copyRange,
+      marchingAntsOffset: marchingAntsOffset.value,
       dragState,
       formulaReferences: formulaReferences.value,
       sizes: createSizeAccess(),
@@ -233,9 +271,8 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     const w = container.value.clientWidth
     const h = container.value.clientHeight
     
-    // 确保 canvas 有合理的尺寸
+    // 确保 canvas 有合理的尺寸（切换 sheet 时容器尺寸可能暂时为 0）
     if (w < 100 || h < 100) {
-      console.warn('Container too small', w, h)
       return
     }
     
@@ -292,7 +329,11 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     cancelScheduled,
     
     // 绘制后回调设置
-    setAfterDrawCallback
+    setAfterDrawCallback,
+    
+    // 蚂蚁线动画控制
+    startMarchingAntsAnimation,
+    stopMarchingAntsAnimation
   }
 }
 

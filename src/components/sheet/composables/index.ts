@@ -4,7 +4,7 @@
  */
 
 export { useSheetState, DEFAULT_CONSTANTS } from './useSheetState'
-export type { SheetState, SheetConstants, InternalClipboardCell, FormulaReference, ScrollbarState, ContextMenuItem, ContextMenuState, InputDialogState } from './useSheetState'
+export type { SheetState, SheetConstants, SheetStateOptions, InternalClipboardCell, FormulaReference, ScrollbarState, ContextMenuItem, ContextMenuState, InputDialogState } from './useSheetState'
 
 export { useSheetGeometry } from './useSheetGeometry'
 export type { SheetGeometry, UseSheetGeometryOptions } from './useSheetGeometry'

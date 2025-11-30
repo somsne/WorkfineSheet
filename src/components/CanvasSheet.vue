@@ -139,6 +139,8 @@ import {
   useSheetImages
 } from './sheet/composables'
 import { renderFloatingImages } from './sheet/images'
+import type { SheetModel } from '../lib/SheetModel'
+import type { SheetViewState } from '../lib/Workbook'
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
@@ -153,8 +155,27 @@ import FillOptionsMenu from './FillOptionsMenu.vue'
 // @ts-ignore
 import ImagePreview from './ImagePreview.vue'
 
+// ==================== Props ====================
+interface Props {
+  /** 外部传入的 SheetModel（多工作表模式使用） */
+  externalModel?: SheetModel
+  /** 是否跳过演示数据初始化 */
+  skipDemoData?: boolean
+  /** 初始视图状态（多工作表模式切换时恢复） */
+  initialViewState?: SheetViewState
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  externalModel: undefined,
+  skipDemoData: false,
+  initialViewState: undefined
+})
+
 // ==================== 初始化状态 ====================
-const state = useSheetState()
+const state = useSheetState({
+  externalModel: props.externalModel,
+  skipDemoData: props.skipDemoData
+})
 
 // ==================== DOM 引用绑定 ====================
 const containerRef = ref<HTMLElement | null>(null)
@@ -238,7 +259,8 @@ const keyboard = useSheetKeyboard({
   state, 
   geometry, 
   input, 
-  clipboard, 
+  clipboard,
+  drawing,
   onDraw: drawing.draw 
 })
 
@@ -365,6 +387,27 @@ onMounted(() => {
     if (!containerRef.value) return
     console.log('Container size:', containerRef.value.clientWidth, containerRef.value.clientHeight)
     
+    // 恢复初始视图状态（多工作表切换时使用）
+    if (props.initialViewState) {
+      const vs = props.initialViewState
+      state.selected.row = vs.activeCell.row
+      state.selected.col = vs.activeCell.col
+      state.selectionRange.startRow = vs.selectionRange.startRow
+      state.selectionRange.startCol = vs.selectionRange.startCol
+      state.selectionRange.endRow = vs.selectionRange.endRow
+      state.selectionRange.endCol = vs.selectionRange.endCol
+      state.viewport.scrollTop = vs.scrollPosition.scrollTop
+      state.viewport.scrollLeft = vs.scrollPosition.scrollLeft
+    } else {
+      // 默认选中 A1 单元格
+      state.selected.row = 0
+      state.selected.col = 0
+      state.selectionRange.startRow = 0
+      state.selectionRange.startCol = 0
+      state.selectionRange.endRow = 0
+      state.selectionRange.endCol = 0
+    }
+    
     drawing.draw()
     
     // 创建包装后的事件处理器，优先处理图片交互
@@ -418,6 +461,20 @@ onMounted(() => {
       keyboard.onKeyDown(e)
     }
     
+    // paste 事件处理器 - 从剪贴板事件获取文本
+    const wrappedPaste = (e: ClipboardEvent) => {
+      // 如果编辑器正在编辑中，不处理（让编辑器自己处理）
+      if (state.overlay.visible) return
+      
+      // 从 ClipboardEvent 获取文本
+      const text = e.clipboardData?.getData('text/plain') || ''
+      
+      if (text || clipboard.hasInternalClipboard()) {
+        e.preventDefault() // 阻止默认粘贴行为
+        clipboard.onPaste(text || undefined)
+      }
+    }
+    
     const handlers: EventHandlers = {
       onMouseDown: wrappedMouseDown,
       onClick: mouse.onClick,
@@ -426,6 +483,7 @@ onMounted(() => {
       onWheel: mouse.onWheel,
       onMouseUp: wrappedMouseUp,
       onKeyDown: wrappedKeyDown,
+      onPaste: wrappedPaste,
       onResize: drawing.draw,
       onCompositionStart: input.onCompositionStart,
       onGlobalMouseMove: wrappedGlobalMouseMove,
@@ -1140,7 +1198,135 @@ const api = createSheetAPI({
   closeCellImagePreviewFn: () => images.closeCellImagePreview()
 })
 
-defineExpose(api)
+// ==================== 添加视图状态相关方法到 API ====================
+
+/** 获取当前视图状态（用于多工作表切换时保存） */
+function getViewState(): SheetViewState {
+  return {
+    activeCell: { row: state.selected.row, col: state.selected.col },
+    selectionRange: {
+      startRow: state.selectionRange.startRow,
+      startCol: state.selectionRange.startCol,
+      endRow: state.selectionRange.endRow,
+      endCol: state.selectionRange.endCol
+    },
+    scrollPosition: {
+      scrollTop: state.viewport.scrollTop,
+      scrollLeft: state.viewport.scrollLeft
+    }
+  }
+}
+
+/** 设置视图状态（用于多工作表切换时恢复） */
+function setViewState(viewState: SheetViewState) {
+  state.selected.row = viewState.activeCell.row
+  state.selected.col = viewState.activeCell.col
+  state.selectionRange.startRow = viewState.selectionRange.startRow
+  state.selectionRange.startCol = viewState.selectionRange.startCol
+  state.selectionRange.endRow = viewState.selectionRange.endRow
+  state.selectionRange.endCol = viewState.selectionRange.endCol
+  state.viewport.scrollTop = viewState.scrollPosition.scrollTop
+  state.viewport.scrollLeft = viewState.scrollPosition.scrollLeft
+  drawing.draw()
+}
+
+/** 获取格式刷状态 */
+function getFormatPainterState() {
+  return {
+    mode: state.formatPainter.mode,
+    data: state.formatPainter.data
+  }
+}
+
+/** 设置格式刷状态 */
+function setFormatPainterState(formatPainterState: { mode: 'off' | 'single' | 'continuous'; data: any }) {
+  state.formatPainter.mode = formatPainterState.mode
+  state.formatPainter.data = formatPainterState.data
+  drawing.draw()
+}
+
+/** 获取剪贴板状态 */
+function getClipboardState() {
+  return {
+    data: state.internalClipboard.data,
+    startRow: state.internalClipboard.startRow,
+    startCol: state.internalClipboard.startCol,
+    mergedRegions: state.internalClipboard.mergedRegions,
+    tsvContent: state.internalClipboard.tsvContent,
+    copyTs: state.lastCopyTs.value,
+    // 蚂蚁线状态
+    copyRange: state.copyRange.visible ? {
+      startRow: state.copyRange.startRow,
+      startCol: state.copyRange.startCol,
+      endRow: state.copyRange.endRow,
+      endCol: state.copyRange.endCol
+    } : null
+  }
+}
+
+/** 设置剪贴板状态 */
+function setClipboardState(clipboardState: { 
+  data: any; 
+  startRow: number; 
+  startCol: number; 
+  mergedRegions: any[]; 
+  tsvContent?: string;
+  copyTs?: number;
+  copyRange?: { startRow: number; startCol: number; endRow: number; endCol: number } | null
+}) {
+  state.internalClipboard.data = clipboardState.data
+  state.internalClipboard.startRow = clipboardState.startRow
+  state.internalClipboard.startCol = clipboardState.startCol
+  state.internalClipboard.mergedRegions = clipboardState.mergedRegions
+  state.internalClipboard.tsvContent = clipboardState.tsvContent ?? ''
+  // 恢复复制时间戳，确保跨 Sheet 粘贴时剪贴板有效
+  if (clipboardState.copyTs) {
+    state.lastCopyTs.value = clipboardState.copyTs
+  }
+  // 恢复蚂蚁线状态
+  if (clipboardState.copyRange) {
+    state.copyRange.startRow = clipboardState.copyRange.startRow
+    state.copyRange.startCol = clipboardState.copyRange.startCol
+    state.copyRange.endRow = clipboardState.copyRange.endRow
+    state.copyRange.endCol = clipboardState.copyRange.endCol
+    state.copyRange.visible = true
+    // 重新启动蚂蚁线动画
+    drawing.startMarchingAntsAnimation()
+  } else {
+    state.copyRange.visible = false
+  }
+}
+
+/** 是否正在编辑公式 */
+function isEditingFormula(): boolean {
+  return state.overlay.visible && state.overlay.value.startsWith('=')
+}
+
+/** 获取公式编辑状态 */
+function getFormulaEditState() {
+  if (!state.overlay.visible) return null
+  return {
+    row: state.overlay.row,
+    col: state.overlay.col,
+    value: state.overlay.value,
+    mode: state.overlay.mode
+  }
+}
+
+// 扩展 API 对象
+const extendedApi = {
+  ...api,
+  getViewState,
+  setViewState,
+  getFormatPainterState,
+  setFormatPainterState,
+  getClipboardState,
+  setClipboardState,
+  isEditingFormula,
+  getFormulaEditState
+}
+
+defineExpose(extendedApi)
 </script>
 
 <style scoped>

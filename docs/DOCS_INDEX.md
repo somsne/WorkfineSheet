@@ -52,6 +52,9 @@
 - **[CELL_IMAGES.md](./features/CELL_IMAGES.md)** ⭐ 功能说明
 - **[CELL_IMAGE_API.md](./api/CELL_IMAGE_API.md)** - API 参考
 
+### 多工作表
+- **[MULTI_SHEET.md](./features/MULTI_SHEET.md)** ⭐ 功能说明
+
 ---
 
 ## 🐛 问题修复文档

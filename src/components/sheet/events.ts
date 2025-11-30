@@ -17,6 +17,7 @@ export interface EventHandlers {
   // 全局事件
   onMouseUp: (e: MouseEvent) => void
   onKeyDown: (e: KeyboardEvent) => void
+  onPaste: (e: ClipboardEvent) => void
   onResize: () => void
   onCompositionStart: (e: CompositionEvent) => void
   
@@ -55,6 +56,7 @@ export class EventManager {
     // 全局事件
     window.addEventListener('mouseup', handlers.onMouseUp)
     window.addEventListener('keydown', handlers.onKeyDown)
+    window.addEventListener('paste', handlers.onPaste)
     window.addEventListener('resize', handlers.onResize)
     window.addEventListener('compositionstart', handlers.onCompositionStart)
     window.addEventListener('mousemove', handlers.onGlobalMouseMove)
@@ -81,6 +83,7 @@ export class EventManager {
     // 全局事件
     window.removeEventListener('mouseup', this.handlers.onMouseUp)
     window.removeEventListener('keydown', this.handlers.onKeyDown)
+    window.removeEventListener('paste', this.handlers.onPaste)
     window.removeEventListener('resize', this.handlers.onResize)
     window.removeEventListener('compositionstart', this.handlers.onCompositionStart)
     window.removeEventListener('mousemove', this.handlers.onGlobalMouseMove)
