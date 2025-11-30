@@ -40,6 +40,13 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
   // 创建重绘调度器
   const { scheduleRedraw, cancelScheduled } = createRedrawScheduler(() => draw())
   
+  // 绘制后回调（用于图片等附加绘制）
+  let afterDrawCallback: (() => void) | null = null
+  
+  function setAfterDrawCallback(callback: (() => void) | null) {
+    afterDrawCallback = callback
+  }
+  
   /**
    * 获取选择范围的文本表示 (如 "A1:B3", "3行 x 2列")
    */
@@ -258,6 +265,11 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     if (imeState.isComposing && imeState.compositionText && selected.row >= 0 && selected.col >= 0 && !overlay.visible) {
       drawImeCompositionText()
     }
+    
+    // 调用绘制后回调
+    if (afterDrawCallback) {
+      afterDrawCallback()
+    }
   }
   
   return {
@@ -273,7 +285,10 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     
     // 重绘调度
     scheduleRedraw,
-    cancelScheduled
+    cancelScheduled,
+    
+    // 绘制后回调设置
+    setAfterDrawCallback
   }
 }
 

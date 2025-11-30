@@ -240,6 +240,24 @@
 
     <div class="separator"></div>
 
+    <!-- 插入图片 -->
+    <button 
+      @click="triggerImageUpload" 
+      class="style-btn" 
+      title="插入图片"
+    >
+      🖼️
+    </button>
+    <input 
+      ref="imageInput" 
+      type="file" 
+      accept="image/*" 
+      style="display: none;" 
+      @change="handleImageUpload"
+    />
+
+    <div class="separator"></div>
+
     <!-- 单元格格式 -->
     <div class="format-dropdown">
       <button 
@@ -733,6 +751,28 @@ function doMergeCells() {
 function doUnmergeCells() {
   props.api.unmergeSelection()
   showMergeMenu.value = false
+}
+
+// 图片上传相关
+const imageInput = ref<HTMLInputElement | null>(null)
+
+function triggerImageUpload() {
+  imageInput.value?.click()
+}
+
+async function handleImageUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  
+  try {
+    await props.api.insertImage(file)
+  } catch (error) {
+    console.error('插入图片失败:', error)
+  }
+  
+  // 清除 input 以便能再次选择同一文件
+  input.value = ''
 }
 
 function applyFormat(formatType: CellFormatType) {

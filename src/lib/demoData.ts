@@ -5,6 +5,9 @@
 import type { SheetModel } from './SheetModel'
 import type { CellFormat } from '../components/sheet/types'
 
+// 示例图片 - 一个简单的表格图标 (SVG 转 Base64)
+const DEMO_IMAGE_DATA_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIiB2aWV3Qm94PSIwIDAgMTIwIDEyMCI+CiAgPCEtLSDog4zmma/lnIYgLS0+CiAgPGNpcmNsZSBjeD0iNjAiIGN5PSI2MCIgcj0iNTUiIGZpbGw9IiMzYjgyZjYiLz4KICA8IS0tIOihqOagvOWbvuaghyAtLT4KICA8cmVjdCB4PSIyNSIgeT0iMjUiIHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IndoaXRlIi8+CiAgPCEtLSDooajmoLznur/mnaEgLS0+CiAgPGxpbmUgeDE9IjI1IiB5MT0iNDUiIHgyPSI5NSIgeTI9IjQ1IiBzdHJva2U9IiNlMmU4ZjAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxsaW5lIHgxPSIyNSIgeTE9IjY1IiB4Mj0iOTUiIHkyPSI2NSIgc3Ryb2tlPSIjZTJlOGYwIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8bGluZSB4MT0iNTAiIHkxPSIyNSIgeDI9IjUwIiB5Mj0iOTUiIHN0cm9rZT0iI2UyZThmMCIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPCEtLSDnhJ/lip/moIforrAgLS0+CiAgPGNpcmNsZSBjeD0iMzciIGN5PSI1NSIgcj0iNiIgZmlsbD0iIzIyYzU1ZSIvPgogIDxwYXRoIGQ9Ik0zNCA1NUwzNiA1N0w0MCA1MiIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+CiAgPCEtLSDmlbDlrZfmoIforrAgLS0+CiAgPHRleHQgeD0iNzIiIHk9IjU4IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjM2I4MmY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4xMjM8L3RleHQ+CiAgPCEtLSDlupXpg6jmloflrZcgLS0+CiAgPHRleHQgeD0iNjAiIHk9IjgyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM2NGI1ZjYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlNoZWV0PC90ZXh0Pgo8L3N2Zz4='
+
 /**
  * Initialize the sheet with demo data showcasing various cell styles
  */
@@ -730,6 +733,9 @@ function initializeFormatExamples(model: SheetModel): void {
 
   // ===== F32～N49：扩展格式示例区域 =====
   initializeExtendedFormatExamples(model)
+  
+  // ===== 浮动图片演示 =====
+  initializeDemoImage(model)
 }
 
 /**
@@ -1228,4 +1234,23 @@ function initializeMergeCellsDemo(model: SheetModel): void {
       })
     }
   }
+}
+
+/**
+ * Initialize demo floating image
+ */
+function initializeDemoImage(model: SheetModel): void {
+  // 在 V3 位置 (0-indexed: row=2, col=21) 添加示例图片
+  // 使用较大的尺寸让图片更醒目
+  model.addFloatingImage({
+    id: 'demo-image-1',
+    src: DEMO_IMAGE_DATA_URL,
+    anchorCell: { row: 2, col: 21 }, // V3 单元格
+    offsetX: 10,
+    offsetY: 10,
+    width: 150,
+    height: 150,
+    zIndex: 1,
+    name: 'WorkfineSheet Logo'
+  })
 }

@@ -44,6 +44,10 @@
 - **[FORMAT_API.md](./api/FORMAT_API.md)** - API 参考
 - **[FORMAT_GUIDE.md](./guides/FORMAT_GUIDE.md)** - 使用指南
 
+### 浮动图片
+- **[FLOATING_IMAGES.md](./features/FLOATING_IMAGES.md)** ⭐ 功能说明
+- **[IMAGE_API.md](./api/IMAGE_API.md)** - API 参考
+
 ---
 
 ## 🐛 问题修复文档

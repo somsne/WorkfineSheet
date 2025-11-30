@@ -3,7 +3,7 @@
     <!-- 样式工具栏 -->
     <StyleToolbar v-if="api" :api="api" :current-selection="state.selected" :selection-range="state.selectionRange" />
     
-    <div ref="containerRef" class="sheet-container" @contextmenu="mouse.onContextMenu">
+    <div ref="containerRef" class="sheet-container" @contextmenu="handleContextMenuWrapper">
       <canvas ref="gridCanvasRef" class="grid-canvas"></canvas>
       <canvas ref="contentCanvasRef" class="content-canvas"></canvas>
       
@@ -125,8 +125,10 @@ import {
   useRowColOperations,
   useSheetKeyboard,
   useSheetMouse,
-  useFillHandle
+  useFillHandle,
+  useSheetImages
 } from './sheet/composables'
+import { renderFloatingImages } from './sheet/images'
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
@@ -237,6 +239,54 @@ const mouse = useSheetMouse({
   fillHandle
 })
 
+// 9. 图片处理
+const images = useSheetImages({
+  model: state.model,
+  undoRedo: state.undoRedo,
+  viewport: state.viewport,
+  getSizes: () => geometry.createSizeAccess(),
+  getGeometryConfig: () => geometry.createGeometryConfig(),
+  getContainerWidth: () => state.container.value?.clientWidth ?? 0,
+  getContainerHeight: () => state.container.value?.clientHeight ?? 0,
+  getContainer: () => state.container.value,
+  totalRows: state.constants.DEFAULT_ROWS,
+  totalCols: state.constants.DEFAULT_COLS,
+  requestDraw: () => {
+    drawing.draw()
+  }
+})
+
+// 绘制图片的辅助函数
+function drawImages() {
+  if (!state.contentCanvas.value) return
+  const ctx = state.contentCanvas.value.getContext('2d')
+  if (!ctx) return
+  
+  const allImages = state.model.getAllFloatingImages()
+  if (allImages.length === 0) return
+  
+  renderFloatingImages(
+    ctx,
+    allImages,
+    state.viewport,
+    geometry.createSizeAccess(),
+    geometry.createGeometryConfig(),
+    state.container.value?.clientWidth ?? 0,
+    state.container.value?.clientHeight ?? 0,
+    images.imageLoader,
+    images.selectedImageId.value,
+    // 图片加载完成后触发重绘
+    () => {
+      requestAnimationFrame(() => {
+        drawing.draw()
+      })
+    }
+  )
+}
+
+// 设置绘制后回调（用于绘制图片）
+drawing.setAfterDrawCallback(drawImages)
+
 // ==================== IME KeyDown 包装 ====================
 function handleImeKeyDown(e: KeyboardEvent) {
   input.onImeKeyDown(e, { ensureVisible: geometry.ensureVisible })
@@ -262,6 +312,38 @@ state.formulaSheet.onCellStateChange((_row, _col, cellState) => {
 // ==================== 事件管理 ====================
 const eventManager = createEventManager()
 
+// 处理右键菜单，支持图片右键菜单
+function handleContextMenuWrapper(e: MouseEvent) {
+  const x = e.offsetX
+  const y = e.offsetY
+  
+  // 检查是否右键点击了图片
+  const clickedImage = images.getImageAtPoint(x, y)
+  if (clickedImage) {
+    e.preventDefault()
+    // 选中该图片
+    images.selectedImageId.value = clickedImage.id
+    drawing.draw()
+    
+    // 显示图片右键菜单
+    state.contextMenu.x = e.clientX
+    state.contextMenu.y = e.clientY
+    state.contextMenu.items = [
+      { label: '上移一层', action: () => images.bringSelectedImageForward() },
+      { label: '下移一层', action: () => images.sendSelectedImageBackward() },
+      { label: '置于顶层', action: () => images.bringSelectedImageToFront() },
+      { label: '置于底层', action: () => images.sendSelectedImageToBack() },
+      { label: '', action: () => {}, divider: true },
+      { label: '删除图片', action: () => images.deleteSelectedImage() }
+    ]
+    state.contextMenu.visible = true
+    return
+  }
+  
+  // 否则使用默认的右键菜单处理
+  mouse.onContextMenu(e)
+}
+
 onMounted(() => {
   window.requestAnimationFrame(() => {
     syncRefs()
@@ -271,17 +353,59 @@ onMounted(() => {
     
     drawing.draw()
     
+    // 创建包装后的事件处理器，优先处理图片交互
+    const wrappedMouseDown = (e: MouseEvent) => {
+      // 先尝试图片交互
+      if (images.handleImageMouseDown(e)) return
+      // 否则使用默认处理
+      mouse.onMouseDown(e)
+    }
+    
+    const wrappedMouseMove = (e: MouseEvent) => {
+      // 更新光标样式（如果在图片控制点或图片上）
+      const imageCursor = images.getImageCursor(e.offsetX, e.offsetY)
+      if (imageCursor && containerRef.value) {
+        containerRef.value.style.cursor = imageCursor
+        // 图片区域不需要调用默认处理器（避免被覆盖）
+        return
+      }
+      
+      // 处理图片拖拽/调整大小
+      if (images.handleImageMouseMove(e)) return
+      // 否则使用默认处理
+      mouse.onMouseMove(e)
+    }
+    
+    const wrappedMouseUp = (_e: MouseEvent) => {
+      images.handleImageMouseUp()
+      mouse.onMouseUp()
+    }
+    
+    const wrappedGlobalMouseMove = (e: MouseEvent) => {
+      // 处理图片拖拽/调整大小（鼠标可能移出容器）
+      if (images.handleGlobalImageMouseMove(e)) return
+      // 否则使用默认处理
+      mouse.onGlobalMouseMove(e)
+    }
+    
+    const wrappedKeyDown = (e: KeyboardEvent) => {
+      // 先尝试图片键盘事件
+      if (images.handleImageKeyDown(e)) return
+      // 否则使用默认处理
+      keyboard.onKeyDown(e)
+    }
+    
     const handlers: EventHandlers = {
-      onMouseDown: mouse.onMouseDown,
+      onMouseDown: wrappedMouseDown,
       onClick: mouse.onClick,
       onDoubleClick: mouse.onDoubleClick,
-      onMouseMove: mouse.onMouseMove,
+      onMouseMove: wrappedMouseMove,
       onWheel: mouse.onWheel,
-      onMouseUp: mouse.onMouseUp,
-      onKeyDown: keyboard.onKeyDown,
+      onMouseUp: wrappedMouseUp,
+      onKeyDown: wrappedKeyDown,
       onResize: drawing.draw,
       onCompositionStart: input.onCompositionStart,
-      onGlobalMouseMove: mouse.onGlobalMouseMove,
+      onGlobalMouseMove: wrappedGlobalMouseMove,
       onGlobalMouseUp: mouse.onGlobalMouseUp
     }
     eventManager.register(containerRef.value, handlers)
@@ -676,7 +800,35 @@ const api = createSheetAPI({
   undoFn: () => state.undoRedo.undo(),
   redoFn: () => state.undoRedo.redo(),
   canUndoFn: () => state.undoRedo.canUndo(),
-  canRedoFn: () => state.undoRedo.canRedo()
+  canRedoFn: () => state.undoRedo.canRedo(),
+  
+  // 图片相关
+  insertImageFn: (file: File) => images.insertImage(file),
+  insertImageFromUrlFn: (url: string, width?: number, height?: number) => images.insertImageFromUrl(url, width, height),
+  deleteImageFn: (imageId: string) => {
+    const image = state.model.getFloatingImage(imageId)
+    if (image) {
+      state.model.deleteFloatingImage(imageId)
+      if (images.selectedImageId.value === imageId) {
+        images.selectedImageId.value = null
+      }
+    }
+  },
+  getAllImagesFn: () => {
+    return state.model.getAllFloatingImages().map(img => ({
+      id: img.id,
+      src: img.src,
+      width: img.width,
+      height: img.height,
+      anchorRow: img.anchorRow,
+      anchorCol: img.anchorCol
+    }))
+  },
+  getSelectedImageIdFn: () => images.selectedImageId.value,
+  selectImageFn: (imageId: string) => {
+    images.selectedImageId.value = imageId
+  },
+  clearImageSelectionFn: () => images.clearImageSelection()
 })
 
 defineExpose(api)

@@ -1,5 +1,5 @@
 import type { FormulaMetadata } from './FormulaMetadata'
-import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo } from '../components/sheet/types'
+import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo, FloatingImage } from '../components/sheet/types'
 import { DEFAULT_CELL_STYLE, DEFAULT_CELL_FORMAT } from '../components/sheet/types'
 
 export type CellKey = string
@@ -34,6 +34,12 @@ export class SheetModel {
   // 合并单元格反向索引：快速查找某个单元格属于哪个合并区域
   // Key: "row,col" → "startRow,startCol"
   private mergedCellIndex: Map<CellKey, CellKey> = new Map()
+  
+  // 浮动图片存储
+  private floatingImages: Map<string, FloatingImage> = new Map()
+  
+  // 下一个图片 z-index
+  private nextImageZIndex: number = 1
 
   getCell(r: number, c: number): Cell | null {
     const k = keyFor(r, c)
@@ -755,18 +761,236 @@ export class SheetModel {
     this.mergedCellIndex.clear()
   }
   
+  // ==================== 浮动图片管理方法 ====================
+
+  /**
+   * 添加浮动图片
+   * @param imageData 图片数据（不含 id 和 zIndex）
+   * @returns 图片 ID
+   */
+  addFloatingImage(imageData: Omit<FloatingImage, 'id' | 'zIndex'>): string {
+    const id = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const image: FloatingImage = {
+      ...imageData,
+      id,
+      zIndex: this.nextImageZIndex++
+    }
+    this.floatingImages.set(id, image)
+    return id
+  }
+
+  /**
+   * 获取浮动图片
+   */
+  getFloatingImage(id: string): FloatingImage | undefined {
+    return this.floatingImages.get(id)
+  }
+
+  /**
+   * 更新浮动图片
+   */
+  updateFloatingImage(id: string, updates: Partial<FloatingImage>): void {
+    const image = this.floatingImages.get(id)
+    if (image) {
+      // 不允许更改 id
+      const { id: _id, ...rest } = updates
+      this.floatingImages.set(id, { ...image, ...rest })
+    }
+  }
+
+  /**
+   * 删除浮动图片
+   */
+  deleteFloatingImage(id: string): boolean {
+    return this.floatingImages.delete(id)
+  }
+
+  /**
+   * 恢复浮动图片（用于撤销/重做，保留原始 id 和 zIndex）
+   */
+  restoreFloatingImage(image: FloatingImage): void {
+    this.floatingImages.set(image.id, { ...image })
+    // 确保 nextImageZIndex 不会与恢复的图片冲突
+    if (image.zIndex >= this.nextImageZIndex) {
+      this.nextImageZIndex = image.zIndex + 1
+    }
+  }
+
+  /**
+   * 获取所有浮动图片（按 zIndex 排序，从下到上）
+   */
+  getAllFloatingImages(): FloatingImage[] {
+    return Array.from(this.floatingImages.values())
+      .filter(img => !img.hidden)
+      .sort((a, b) => a.zIndex - b.zIndex)
+  }
+
+  /**
+   * 获取浮动图片数量
+   */
+  getFloatingImageCount(): number {
+    return this.floatingImages.size
+  }
+
+  /**
+   * 将图片移到最上层
+   */
+  bringImageToFront(id: string): void {
+    const image = this.floatingImages.get(id)
+    if (image) {
+      image.zIndex = this.nextImageZIndex++
+    }
+  }
+
+  /**
+   * 将图片移到最下层
+   */
+  sendImageToBack(id: string): void {
+    const image = this.floatingImages.get(id)
+    if (!image) return
+    
+    // 找出最小 zIndex
+    let minZ = Infinity
+    for (const img of this.floatingImages.values()) {
+      if (img.zIndex < minZ) minZ = img.zIndex
+    }
+    
+    // 设置为比最小值还小 1
+    image.zIndex = minZ - 1
+  }
+
+  /**
+   * 将图片上移一层
+   */
+  bringImageForward(id: string): void {
+    const image = this.floatingImages.get(id)
+    if (!image) return
+    
+    // 找出比当前 zIndex 大的最小值
+    let nextZ: number | null = null
+    let nextImage: FloatingImage | null = null
+    
+    for (const img of this.floatingImages.values()) {
+      if (img.id !== id && img.zIndex > image.zIndex) {
+        if (nextZ === null || img.zIndex < nextZ) {
+          nextZ = img.zIndex
+          nextImage = img
+        }
+      }
+    }
+    
+    // 交换 zIndex
+    if (nextImage) {
+      const temp = image.zIndex
+      image.zIndex = nextImage.zIndex
+      nextImage.zIndex = temp
+    }
+  }
+
+  /**
+   * 将图片下移一层
+   */
+  sendImageBackward(id: string): void {
+    const image = this.floatingImages.get(id)
+    if (!image) return
+    
+    // 找出比当前 zIndex 小的最大值
+    let prevZ: number | null = null
+    let prevImage: FloatingImage | null = null
+    
+    for (const img of this.floatingImages.values()) {
+      if (img.id !== id && img.zIndex < image.zIndex) {
+        if (prevZ === null || img.zIndex > prevZ) {
+          prevZ = img.zIndex
+          prevImage = img
+        }
+      }
+    }
+    
+    // 交换 zIndex
+    if (prevImage) {
+      const temp = image.zIndex
+      image.zIndex = prevImage.zIndex
+      prevImage.zIndex = temp
+    }
+  }
+
+  /**
+   * 根据锚点位置调整图片（插入行时）
+   */
+  adjustImagesForRowInsert(row: number, count: number = 1): void {
+    for (const image of this.floatingImages.values()) {
+      if (image.anchorRow >= row) {
+        image.anchorRow += count
+      }
+    }
+  }
+
+  /**
+   * 根据锚点位置调整图片（删除行时）
+   */
+  adjustImagesForRowDelete(row: number, count: number = 1): void {
+    const toDelete: string[] = []
+    for (const image of this.floatingImages.values()) {
+      if (image.anchorRow >= row && image.anchorRow < row + count) {
+        // 锚点行被删除，删除图片
+        toDelete.push(image.id)
+      } else if (image.anchorRow >= row + count) {
+        // 锚点行在删除区域之后，上移
+        image.anchorRow -= count
+      }
+    }
+    toDelete.forEach(id => this.floatingImages.delete(id))
+  }
+
+  /**
+   * 根据锚点位置调整图片（插入列时）
+   */
+  adjustImagesForColInsert(col: number, count: number = 1): void {
+    for (const image of this.floatingImages.values()) {
+      if (image.anchorCol >= col) {
+        image.anchorCol += count
+      }
+    }
+  }
+
+  /**
+   * 根据锚点位置调整图片（删除列时）
+   */
+  adjustImagesForColDelete(col: number, count: number = 1): void {
+    const toDelete: string[] = []
+    for (const image of this.floatingImages.values()) {
+      if (image.anchorCol >= col && image.anchorCol < col + count) {
+        // 锚点列被删除，删除图片
+        toDelete.push(image.id)
+      } else if (image.anchorCol >= col + count) {
+        // 锚点列在删除区域之后，左移
+        image.anchorCol -= count
+      }
+    }
+    toDelete.forEach(id => this.floatingImages.delete(id))
+  }
+
   /**
    * 创建模型快照（用于撤销操作）
    * @returns 模型状态快照
    */
   createSnapshot(): ModelSnapshot {
+    // 深拷贝浮动图片
+    const imagesCopy = new Map<string, FloatingImage>()
+    for (const [id, img] of this.floatingImages.entries()) {
+      imagesCopy.set(id, { ...img })
+    }
+    
     return {
       cells: new Map(this.cells),
       cellStyles: new Map(this.cellStyles),
       cellBorders: new Map(this.cellBorders),
       cellFormats: new Map(this.cellFormats),
       mergedRegions: new Map(this.mergedRegions),
-      mergedCellIndex: new Map(this.mergedCellIndex)
+      mergedCellIndex: new Map(this.mergedCellIndex),
+      floatingImages: imagesCopy,
+      nextImageZIndex: this.nextImageZIndex
     }
   }
   
@@ -781,6 +1005,17 @@ export class SheetModel {
     this.cellFormats = new Map(snapshot.cellFormats)
     this.mergedRegions = new Map(snapshot.mergedRegions)
     this.mergedCellIndex = new Map(snapshot.mergedCellIndex)
+    
+    // 恢复浮动图片
+    if (snapshot.floatingImages) {
+      this.floatingImages = new Map()
+      for (const [id, img] of snapshot.floatingImages.entries()) {
+        this.floatingImages.set(id, { ...img })
+      }
+    }
+    if (snapshot.nextImageZIndex !== undefined) {
+      this.nextImageZIndex = snapshot.nextImageZIndex
+    }
   }
 }
 
@@ -794,4 +1029,6 @@ export interface ModelSnapshot {
   cellFormats: Map<CellKey, CellFormat>
   mergedRegions: Map<CellKey, MergedRegion>
   mergedCellIndex: Map<CellKey, CellKey>
+  floatingImages?: Map<string, FloatingImage>
+  nextImageZIndex?: number
 }

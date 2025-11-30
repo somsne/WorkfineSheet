@@ -38,17 +38,17 @@ function handleEscape(e: KeyboardEvent) {
 watch(() => props.visible, (visible) => {
   if (visible) {
     nextTick(() => {
-      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('click', handleClickOutside)
       document.addEventListener('keydown', handleEscape)
     })
   } else {
-    document.removeEventListener('mousedown', handleClickOutside)
+    document.removeEventListener('click', handleClickOutside)
     document.removeEventListener('keydown', handleEscape)
   }
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('mousedown', handleClickOutside)
+  document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleEscape)
 })
 
@@ -66,12 +66,14 @@ function handleItemClick(item: MenuItem) {
     ref="menuRef"
     class="context-menu"
     :style="{ left: x + 'px', top: y + 'px' }"
+    @mousedown.stop
+    @contextmenu.stop.prevent
   >
     <div
       v-for="(item, index) in items"
       :key="index"
       :class="['menu-item', { disabled: item.disabled, divider: item.divider }]"
-      @click="handleItemClick(item)"
+      @click.stop="handleItemClick(item)"
     >
       {{ item.label }}
     </div>

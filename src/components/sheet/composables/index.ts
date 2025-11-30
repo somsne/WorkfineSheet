@@ -29,3 +29,6 @@ export type { SheetMouse, UseSheetMouseOptions } from './useSheetMouse'
 
 export { useFillHandle } from './useFillHandle'
 export type { FillHandleComposable, UseFillHandleOptions } from './useFillHandle'
+
+export { useSheetImages } from './useSheetImages'
+export type { UseSheetImagesOptions, UseSheetImagesReturn, SimpleImageSelectionState } from './useSheetImages'

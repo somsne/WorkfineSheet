@@ -451,9 +451,63 @@ export interface UndoRedoAPI {
 }
 
 /**
+ * 图片 API
+ */
+export interface ImageAPI {
+  /**
+   * 从文件插入图片
+   * @param file 图片文件
+   * @returns 图片 ID，失败返回 null
+   */
+  insertImage(file: File): Promise<string | null>
+  
+  /**
+   * 从 URL 插入图片
+   * @param url 图片 URL
+   * @param width 可选的初始宽度
+   * @param height 可选的初始高度
+   * @returns 图片 ID，失败返回 null
+   */
+  insertImageFromUrl(url: string, width?: number, height?: number): Promise<string | null>
+  
+  /**
+   * 删除图片
+   * @param imageId 图片 ID
+   */
+  deleteImage(imageId: string): void
+  
+  /**
+   * 获取所有图片
+   */
+  getAllImages(): Array<{
+    id: string
+    src: string
+    width: number
+    height: number
+    anchorRow: number
+    anchorCol: number
+  }>
+  
+  /**
+   * 获取选中的图片 ID
+   */
+  getSelectedImageId(): string | null
+  
+  /**
+   * 选中图片
+   */
+  selectImage(imageId: string): void
+  
+  /**
+   * 清除图片选择
+   */
+  clearImageSelection(): void
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI {
   /**
    * 刷新绘制
    */
@@ -601,6 +655,15 @@ export function createSheetAPI(context: {
   redoFn: () => boolean
   canUndoFn: () => boolean
   canRedoFn: () => boolean
+  
+  // 图片相关
+  insertImageFn?: (file: File) => Promise<string | null>
+  insertImageFromUrlFn?: (url: string, width?: number, height?: number) => Promise<string | null>
+  deleteImageFn?: (imageId: string) => void
+  getAllImagesFn?: () => Array<{ id: string; src: string; width: number; height: number; anchorRow: number; anchorCol: number }>
+  getSelectedImageIdFn?: () => string | null
+  selectImageFn?: (imageId: string) => void
+  clearImageSelectionFn?: () => void
 }): SheetAPI {
   return {
     // 行高列宽
@@ -1039,6 +1102,72 @@ export function createSheetAPI(context: {
     },
     
     canUndo: context.canUndoFn,
-    canRedo: context.canRedoFn
+    canRedo: context.canRedoFn,
+    
+    // ==================== 图片 API ====================
+    
+    async insertImage(file: File): Promise<string | null> {
+      if (!context.insertImageFn) {
+        console.warn('Image API not available')
+        return null
+      }
+      const result = await context.insertImageFn(file)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    async insertImageFromUrl(url: string, width?: number, height?: number): Promise<string | null> {
+      if (!context.insertImageFromUrlFn) {
+        console.warn('Image API not available')
+        return null
+      }
+      const result = await context.insertImageFromUrlFn(url, width, height)
+      if (result) {
+        context.draw()
+      }
+      return result
+    },
+    
+    deleteImage(imageId: string): void {
+      if (!context.deleteImageFn) {
+        console.warn('Image API not available')
+        return
+      }
+      context.deleteImageFn(imageId)
+      context.draw()
+    },
+    
+    getAllImages(): Array<{ id: string; src: string; width: number; height: number; anchorRow: number; anchorCol: number }> {
+      if (!context.getAllImagesFn) {
+        return []
+      }
+      return context.getAllImagesFn()
+    },
+    
+    getSelectedImageId(): string | null {
+      if (!context.getSelectedImageIdFn) {
+        return null
+      }
+      return context.getSelectedImageIdFn()
+    },
+    
+    selectImage(imageId: string): void {
+      if (!context.selectImageFn) {
+        console.warn('Image API not available')
+        return
+      }
+      context.selectImageFn(imageId)
+      context.draw()
+    },
+    
+    clearImageSelection(): void {
+      if (!context.clearImageSelectionFn) {
+        return
+      }
+      context.clearImageSelectionFn()
+      context.draw()
+    }
   }
 }

@@ -600,3 +600,180 @@ export const DEFAULT_FILL_HANDLE_STATE: FillHandleState = {
   previewRange: null,
   sourceRange: null
 }
+
+// ==================== 浮动图片 ====================
+
+/**
+ * 浮动图片数据结构
+ * 图片锚定在某个单元格上，滚动时跟随单元格移动
+ */
+export interface FloatingImage {
+  /** 唯一标识 */
+  id: string
+  
+  /** 图片源 (Data URL 或 Object URL) */
+  src: string
+  
+  /** 原始图片尺寸 */
+  naturalWidth: number
+  naturalHeight: number
+  
+  // ========== 锚点定位 ==========
+  /** 锚定单元格行（左上角） */
+  anchorRow: number
+  /** 锚定单元格列（左上角） */
+  anchorCol: number
+  /** 锚点内 X 偏移（相对于锚定单元格左上角的像素偏移） */
+  offsetX: number
+  /** 锚点内 Y 偏移（相对于锚定单元格左上角的像素偏移） */
+  offsetY: number
+  
+  // ========== 尺寸 ==========
+  /** 显示宽度 (像素) */
+  width: number
+  /** 显示高度 (像素) */
+  height: number
+  /** 是否锁定宽高比 */
+  lockAspectRatio: boolean
+  
+  // ========== 样式 ==========
+  /** 旋转角度 (度，0-360) */
+  rotation: number
+  /** 透明度 (0-1) */
+  opacity: number
+  /** 边框样式 */
+  border?: ImageBorder
+  /** 圆角 (像素) */
+  borderRadius?: number
+  /** 阴影 */
+  shadow?: ImageShadow
+  
+  // ========== 层级 ==========
+  /** 层级顺序 (越大越靠上) */
+  zIndex: number
+  
+  // ========== 状态 ==========
+  /** 是否锁定（防止编辑） */
+  locked: boolean
+  /** 是否隐藏 */
+  hidden: boolean
+}
+
+/**
+ * 图片边框样式
+ */
+export interface ImageBorder {
+  width: number
+  color: string
+  style: 'solid' | 'dashed' | 'dotted'
+}
+
+/**
+ * 图片阴影样式
+ */
+export interface ImageShadow {
+  offsetX: number
+  offsetY: number
+  blur: number
+  color: string
+}
+
+/**
+ * 调整大小控制点类型
+ */
+export type ResizeHandle = 
+  | 'nw' | 'n' | 'ne'   // 上排: 左上、上中、右上
+  | 'w'  | 'e'          // 中排: 左中、右中
+  | 'sw' | 's' | 'se'   // 下排: 左下、下中、右下
+
+/**
+ * 图片选择状态
+ */
+export interface ImageSelectionState {
+  /** 选中的图片 ID 列表 */
+  selectedIds: string[]
+  /** 是否正在拖拽移动 */
+  isDragging: boolean
+  /** 是否正在调整大小 */
+  isResizing: boolean
+  /** 调整大小的控制点 */
+  resizeHandle: ResizeHandle | null
+  /** 拖拽起始位置 */
+  dragStart: { x: number; y: number } | null
+  /** 原始图片状态（用于撤销） */
+  originalState: FloatingImage[] | null
+}
+
+/**
+ * 默认图片选择状态
+ */
+export const DEFAULT_IMAGE_SELECTION_STATE: ImageSelectionState = {
+  selectedIds: [],
+  isDragging: false,
+  isResizing: false,
+  resizeHandle: null,
+  dragStart: null,
+  originalState: null
+}
+
+/**
+ * 图片在视口中的计算位置
+ */
+export interface ImagePosition {
+  /** 视口中的 X 坐标 */
+  x: number
+  /** 视口中的 Y 坐标 */
+  y: number
+  /** 显示宽度 */
+  width: number
+  /** 显示高度 */
+  height: number
+  /** 是否在可见区域内 */
+  visible: boolean
+}
+
+/**
+ * 图片渲染配置
+ */
+export interface ImageRenderConfig {
+  containerWidth: number
+  containerHeight: number
+  viewport: Viewport
+  geometryConfig: GeometryConfig
+  sizes: SizeAccess
+  images: FloatingImage[]
+  selectedIds: string[]
+  isResizing: boolean
+  resizeHandle: ResizeHandle | null
+}
+
+/**
+ * 控制点位置信息
+ */
+export interface HandlePosition {
+  type: ResizeHandle
+  x: number
+  y: number
+}
+
+/**
+ * 图片配置常量
+ */
+export const IMAGE_CONFIG = {
+  /** 控制点大小 */
+  HANDLE_SIZE: 8,
+  /** 控制点边框宽度 */
+  HANDLE_BORDER_WIDTH: 1,
+  /** 选择框颜色 */
+  SELECTION_COLOR: '#1a73e8',
+  /** 选择框线宽 */
+  SELECTION_LINE_WIDTH: 2,
+  /** 控制点填充色 */
+  HANDLE_FILL_COLOR: '#ffffff',
+  /** 控制点悬停检测范围 */
+  HANDLE_HIT_AREA: 10,
+  /** 最小图片尺寸 */
+  MIN_SIZE: 20,
+  /** 默认插入尺寸（最大边） */
+  DEFAULT_MAX_SIZE: 400
+} as const
