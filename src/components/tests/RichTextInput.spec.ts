@@ -88,8 +88,9 @@ describe('RichTextInput 组件', () => {
       expect(container.exists()).toBe(true)
       
       const style = container.attributes('style')
-      expect(style).toContain('top: 150px')
-      expect(style).toContain('left: 250px')
+      // 组件内部有 -2px 的偏移调整
+      expect(style).toContain('top: 148px')
+      expect(style).toContain('left: 248px')
     })
   })
 
