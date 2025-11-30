@@ -286,6 +286,15 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     targetCol: -1
   })
   
+  // ==================== 格式刷状态 ====================
+  const formatPainter = reactive<{
+    mode: 'off' | 'single' | 'continuous'
+    data: import('../formatPainter').FormatPainterData | null
+  }>({
+    mode: 'off',
+    data: null
+  })
+  
   // ==================== 输入对话框状态 ====================
   const inputDialog = reactive<InputDialogState>({
     visible: false,
@@ -417,6 +426,7 @@ export function useSheetState(constants: SheetConstants = DEFAULT_CONSTANTS) {
     
     // UI 状态
     contextMenu,
+    formatPainter,
     inputDialog,
     calculationProgress,
     

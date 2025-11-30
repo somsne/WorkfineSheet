@@ -505,9 +505,39 @@ export interface ImageAPI {
 }
 
 /**
+ * 格式刷 API
+ */
+export interface FormatPainterAPI {
+  /**
+   * 获取格式刷模式
+   */
+  getFormatPainterMode(): 'off' | 'single' | 'continuous'
+  
+  /**
+   * 启动格式刷（单次模式）
+   */
+  startFormatPainter(): void
+  
+  /**
+   * 启动格式刷（连续模式）
+   */
+  startFormatPainterContinuous(): void
+  
+  /**
+   * 停止格式刷
+   */
+  stopFormatPainter(): void
+  
+  /**
+   * 应用格式到当前选区
+   */
+  applyFormatPainter(): void
+}
+
+/**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI {
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI, FormatPainterAPI {
   /**
    * 刷新绘制
    */
@@ -664,6 +694,13 @@ export function createSheetAPI(context: {
   getSelectedImageIdFn?: () => string | null
   selectImageFn?: (imageId: string) => void
   clearImageSelectionFn?: () => void
+  
+  // 格式刷相关
+  getFormatPainterModeFn?: () => 'off' | 'single' | 'continuous'
+  startFormatPainterFn?: () => void
+  startFormatPainterContinuousFn?: () => void
+  stopFormatPainterFn?: () => void
+  applyFormatPainterFn?: () => void
 }): SheetAPI {
   return {
     // 行高列宽
@@ -1167,6 +1204,47 @@ export function createSheetAPI(context: {
         return
       }
       context.clearImageSelectionFn()
+      context.draw()
+    },
+    
+    // ==================== 格式刷 API ====================
+    
+    getFormatPainterMode(): 'off' | 'single' | 'continuous' {
+      if (!context.getFormatPainterModeFn) {
+        return 'off'
+      }
+      return context.getFormatPainterModeFn()
+    },
+    
+    startFormatPainter(): void {
+      if (!context.startFormatPainterFn) {
+        console.warn('Format painter API not available')
+        return
+      }
+      context.startFormatPainterFn()
+    },
+    
+    startFormatPainterContinuous(): void {
+      if (!context.startFormatPainterContinuousFn) {
+        console.warn('Format painter API not available')
+        return
+      }
+      context.startFormatPainterContinuousFn()
+    },
+    
+    stopFormatPainter(): void {
+      if (!context.stopFormatPainterFn) {
+        return
+      }
+      context.stopFormatPainterFn()
+    },
+    
+    applyFormatPainter(): void {
+      if (!context.applyFormatPainterFn) {
+        console.warn('Format painter API not available')
+        return
+      }
+      context.applyFormatPainterFn()
       context.draw()
     }
   }

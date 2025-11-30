@@ -116,6 +116,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import type { CellFormat, CellStyle, CellBorder } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
 import { createSheetAPI } from './sheet/api'
+import { extractFormats, applyFormats } from './sheet/formatPainter'
 import {
   useSheetState,
   useSheetGeometry,
@@ -952,7 +953,147 @@ const api = createSheetAPI({
   selectImageFn: (imageId: string) => {
     images.selectedImageId.value = imageId
   },
-  clearImageSelectionFn: () => images.clearImageSelection()
+  clearImageSelectionFn: () => images.clearImageSelection(),
+  
+  // 格式刷相关
+  getFormatPainterModeFn: () => state.formatPainter.mode,
+  startFormatPainterFn: () => {
+    // 获取当前选区
+    const { startRow, startCol, endRow, endCol } = state.selectionRange
+    if (startRow < 0 || startCol < 0) {
+      // 没有选区时使用当前单元格
+      if (state.selected.row < 0 || state.selected.col < 0) return
+      const r = state.selected.row
+      const c = state.selected.col
+      
+      // 提取格式
+      state.formatPainter.data = extractFormats(
+        r, c, r, c,
+        (row, col) => state.model.getCellStyle(row, col),
+        (row, col) => state.model.getCellBorder(row, col),
+        (row, col) => state.model.getCellFormat(row, col),
+        {
+          getMergedRegion: (row, col) => state.model.getMergedRegion(row, col)
+        }
+      )
+    } else {
+      const maxRows = state.constants.DEFAULT_ROWS
+      const maxCols = state.constants.DEFAULT_COLS
+      const isFullRow = startCol === 0 && endCol === maxCols - 1
+      const isFullColumn = startRow === 0 && endRow === maxRows - 1
+      
+      // 提取格式
+      state.formatPainter.data = extractFormats(
+        startRow, startCol, endRow, endCol,
+        (row, col) => state.model.getCellStyle(row, col),
+        (row, col) => state.model.getCellBorder(row, col),
+        (row, col) => state.model.getCellFormat(row, col),
+        {
+          isFullRow,
+          isFullColumn,
+          getRowStyle: (row) => state.model.getRowStyle(row),
+          getColStyle: (col) => state.model.getColStyle(col),
+          getRowFormat: (row) => state.model.getRowFormat(row),
+          getColFormat: (col) => state.model.getColFormat(col),
+          getMergedRegion: (row, col) => state.model.getMergedRegion(row, col)
+        }
+      )
+    }
+    state.formatPainter.mode = 'single'
+  },
+  startFormatPainterContinuousFn: () => {
+    // 与单次模式相同，但设置为连续模式
+    const { startRow, startCol, endRow, endCol } = state.selectionRange
+    if (startRow < 0 || startCol < 0) {
+      if (state.selected.row < 0 || state.selected.col < 0) return
+      const r = state.selected.row
+      const c = state.selected.col
+      
+      state.formatPainter.data = extractFormats(
+        r, c, r, c,
+        (row, col) => state.model.getCellStyle(row, col),
+        (row, col) => state.model.getCellBorder(row, col),
+        (row, col) => state.model.getCellFormat(row, col),
+        {
+          getMergedRegion: (row, col) => state.model.getMergedRegion(row, col)
+        }
+      )
+    } else {
+      const maxRows = state.constants.DEFAULT_ROWS
+      const maxCols = state.constants.DEFAULT_COLS
+      const isFullRow = startCol === 0 && endCol === maxCols - 1
+      const isFullColumn = startRow === 0 && endRow === maxRows - 1
+      
+      state.formatPainter.data = extractFormats(
+        startRow, startCol, endRow, endCol,
+        (row, col) => state.model.getCellStyle(row, col),
+        (row, col) => state.model.getCellBorder(row, col),
+        (row, col) => state.model.getCellFormat(row, col),
+        {
+          isFullRow,
+          isFullColumn,
+          getRowStyle: (row) => state.model.getRowStyle(row),
+          getColStyle: (col) => state.model.getColStyle(col),
+          getRowFormat: (row) => state.model.getRowFormat(row),
+          getColFormat: (col) => state.model.getColFormat(col),
+          getMergedRegion: (row, col) => state.model.getMergedRegion(row, col)
+        }
+      )
+    }
+    state.formatPainter.mode = 'continuous'
+  },
+  stopFormatPainterFn: () => {
+    state.formatPainter.mode = 'off'
+    state.formatPainter.data = null
+  },
+  applyFormatPainterFn: () => {
+    if (!state.formatPainter.data || state.formatPainter.mode === 'off') return
+    
+    // 获取目标选区
+    let targetStartRow: number, targetStartCol: number, targetEndRow: number, targetEndCol: number
+    
+    const { startRow, startCol, endRow, endCol } = state.selectionRange
+    if (startRow >= 0 && startCol >= 0) {
+      targetStartRow = startRow
+      targetStartCol = startCol
+      targetEndRow = endRow
+      targetEndCol = endCol
+    } else if (state.selected.row >= 0 && state.selected.col >= 0) {
+      targetStartRow = state.selected.row
+      targetStartCol = state.selected.col
+      targetEndRow = state.selected.row
+      targetEndCol = state.selected.col
+    } else {
+      return
+    }
+    
+    // 应用格式
+    applyFormats(
+      state.formatPainter.data,
+      targetStartRow, targetStartCol, targetEndRow, targetEndCol,
+      (row, col, style) => state.model.setCellStyle(row, col, style),
+      (row, col, border) => state.model.setCellBorder(row, col, border),
+      (row, col) => state.model.clearCellBorder(row, col),
+      (row, col, format) => state.model.setCellFormat(row, col, format),
+      {
+        setRowStyle: (row, style) => state.model.setRowStyle(row, style),
+        setColStyle: (col, style) => state.model.setColStyle(col, style),
+        setRowFormat: (row, format) => state.model.setRowFormat(row, format),
+        setColFormat: (col, format) => state.model.setColFormat(col, format),
+        getMergedRegion: (row, col) => state.model.getMergedRegion(row, col),
+        mergeCells: (r1, c1, r2, c2) => state.model.mergeCells(r1, c1, r2, c2),
+        unmergeCells: (row, col) => state.model.unmergeCells(row, col) !== null
+      }
+    )
+    
+    // 如果是单次模式，应用后退出
+    if (state.formatPainter.mode === 'single') {
+      state.formatPainter.mode = 'off'
+      state.formatPainter.data = null
+    }
+    
+    drawing.draw()
+  }
 })
 
 defineExpose(api)

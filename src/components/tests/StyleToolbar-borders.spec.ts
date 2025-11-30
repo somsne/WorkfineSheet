@@ -27,7 +27,13 @@ describe('StyleToolbar - 边框功能', () => {
       undo: vi.fn(() => false),
       redo: vi.fn(() => false),
       canUndo: vi.fn(() => false),
-      canRedo: vi.fn(() => false)
+      canRedo: vi.fn(() => false),
+      // 格式刷相关
+      getFormatPainterMode: vi.fn(() => 'off'),
+      startFormatPainter: vi.fn(),
+      startFormatPainterContinuous: vi.fn(),
+      stopFormatPainter: vi.fn(),
+      applyFormatPainter: vi.fn()
     } as unknown as SheetAPI
   })
 

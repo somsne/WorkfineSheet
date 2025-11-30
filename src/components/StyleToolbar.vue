@@ -23,6 +23,19 @@
 
     <div class="separator"></div>
 
+    <!-- 格式刷 -->
+    <button 
+      @click="toggleFormatPainter"
+      @dblclick="toggleFormatPainterContinuous"
+      class="style-btn format-painter-btn" 
+      :class="{ active: formatPainterMode !== 'off' }"
+      :title="formatPainterTitle"
+    >
+      <span class="format-painter-icon">🖌️</span>
+    </button>
+
+    <div class="separator"></div>
+
     <!-- 字体选择 -->
     <select v-model="fontFamily" @change="applyFontFamily" class="font-select">
       <!-- macOS 系统字体 -->
@@ -414,6 +427,48 @@ const modKey = isMac ? '⌘' : 'Ctrl'
 const canUndo = ref(false)
 const canRedo = ref(false)
 
+// 格式刷状态
+const formatPainterMode = ref<'off' | 'single' | 'continuous'>('off')
+const formatPainterTitle = computed(() => {
+  if (formatPainterMode.value === 'off') {
+    return '格式刷 (单击启动，双击连续模式)'
+  } else if (formatPainterMode.value === 'single') {
+    return '格式刷 (单次模式 - 点击目标应用格式)'
+  } else {
+    return '格式刷 (连续模式 - 按 ESC 退出)'
+  }
+})
+
+// 格式刷操作
+function toggleFormatPainter() {
+  if (formatPainterMode.value !== 'off') {
+    // 已激活，关闭它
+    props.api.stopFormatPainter()
+    formatPainterMode.value = 'off'
+  } else {
+    // 未激活，启动单次模式
+    props.api.startFormatPainter()
+    formatPainterMode.value = props.api.getFormatPainterMode()
+  }
+}
+
+function toggleFormatPainterContinuous() {
+  if (formatPainterMode.value === 'continuous') {
+    // 已在连续模式，关闭它
+    props.api.stopFormatPainter()
+    formatPainterMode.value = 'off'
+  } else {
+    // 启动连续模式
+    props.api.startFormatPainterContinuous()
+    formatPainterMode.value = props.api.getFormatPainterMode()
+  }
+}
+
+// 更新格式刷状态
+function updateFormatPainterState() {
+  formatPainterMode.value = props.api.getFormatPainterMode()
+}
+
 // 计算撤销还原按钮的提示文字
 const undoTitle = computed(() => `撤销 (${modKey}+Z)`)
 const redoTitle = computed(() => isMac ? `还原 (${modKey}+Shift+Z)` : `还原 (${modKey}+Y)`)
@@ -475,15 +530,19 @@ const handleClickOutside = (e: MouseEvent) => {
   }
 }
 
-// 定时器 ID，用于更新撤销还原状态
+// 定时器 ID，用于更新撤销还原状态和格式刷状态
 let undoRedoTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   // 初始化撤销还原状态
   updateUndoRedoState()
-  // 定期更新撤销还原状态（因为操作可能来自快捷键）
-  undoRedoTimer = setInterval(updateUndoRedoState, 200)
+  updateFormatPainterState()
+  // 定期更新撤销还原状态和格式刷状态（因为操作可能来自快捷键）
+  undoRedoTimer = setInterval(() => {
+    updateUndoRedoState()
+    updateFormatPainterState()
+  }, 200)
 })
 
 onBeforeUnmount(() => {
@@ -1010,6 +1069,28 @@ onMounted(() => {
 .redo-icon {
   font-size: 16px;
   font-weight: bold;
+}
+
+.format-painter-btn {
+  position: relative;
+}
+
+.format-painter-btn.active {
+  background: var(--btn-active-bg, #e3f2fd) !important;
+  border-color: var(--btn-active-border, #2196f3) !important;
+}
+
+.format-painter-btn.active .format-painter-icon {
+  animation: painter-pulse 1s ease-in-out infinite;
+}
+
+@keyframes painter-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.format-painter-icon {
+  font-size: 14px;
 }
 
 .color-picker {

@@ -244,6 +244,42 @@
           <div class="benchmark-status" id="status-autoRowHeight">等待测试</div>
         </div>
       </div>
+      
+      <div class="benchmark-item" data-benchmark="formatExtract">
+        <div class="benchmark-icon interaction">📋</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">格式刷 - 格式提取</div>
+          <div class="benchmark-desc">提取 100×100 区域的样式/边框/格式</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-formatExtract"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-formatExtract">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="formatApply">
+        <div class="benchmark-icon interaction">🎨</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">格式刷 - 格式应用</div>
+          <div class="benchmark-desc">应用格式到 100×100 区域</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-formatApply"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-formatApply">等待测试</div>
+        </div>
+      </div>
+      
+      <div class="benchmark-item" data-benchmark="formatTile">
+        <div class="benchmark-icon formula">🔄</div>
+        <div class="benchmark-info">
+          <div class="benchmark-name">格式刷 - 平铺填充</div>
+          <div class="benchmark-desc">10×10 格式平铺到 200×200 区域</div>
+          <div class="progress-bar"><div class="progress-bar-fill" id="progress-formatTile"></div></div>
+        </div>
+        <div class="benchmark-result">
+          <div class="benchmark-status" id="status-formatTile">等待测试</div>
+        </div>
+      </div>
     </div>
     
     <div class="summary" id="summary" style="display: none;">
@@ -274,6 +310,7 @@
     import { FormulaSheet } from '../src/lib/FormulaSheet.ts'
     import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from '../src/components/sheet/geometry.ts'
     import { detectFillPattern, generateFillValues, adjustFormulaReferences, calculateFillHandlePosition } from '../src/components/sheet/fillHandle.ts'
+    import { extractFormats, applyFormats } from '../src/components/sheet/formatPainter.ts'
     
     // 基准值定义 (毫秒)
     const baselines = {
@@ -290,7 +327,10 @@
       fillPattern: { excellent: 50, good: 150, average: 300, count: 10000 },
       fillGenerate: { excellent: 100, good: 300, average: 600, count: 10000 },
       fillFormula: { excellent: 50, good: 150, average: 300, count: 10000 },
-      autoRowHeight: { excellent: 100, good: 300, average: 600, count: 2000 }
+      autoRowHeight: { excellent: 100, good: 300, average: 600, count: 2000 },
+      formatExtract: { excellent: 50, good: 150, average: 300, count: 10000 },
+      formatApply: { excellent: 100, good: 300, average: 600, count: 10000 },
+      formatTile: { excellent: 200, good: 600, average: 1200, count: 40000 }
     }
     
     // 渲染配置
@@ -873,6 +913,137 @@
       return time
     }
     
+    // 格式刷 - 格式提取测试
+    async function benchmarkFormatExtract() {
+      updateStatus('formatExtract', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.formatExtract.count
+      const size = 100 // 100x100
+      const model = new SheetModel()
+      
+      // 准备带样式的数据
+      const styles = [
+        { bold: true },
+        { italic: true, color: '#ff0000' },
+        { backgroundColor: '#ffcccc', textAlign: 'center' }
+      ]
+      
+      const borders = [
+        { top: { style: 'thin', color: '#000000' } },
+        { left: { style: 'medium', color: '#ff0000' }, right: { style: 'medium', color: '#ff0000' } }
+      ]
+      
+      const formats = [
+        { type: 'number', decimals: 2 },
+        { type: 'percentage', decimals: 1 }
+      ]
+      
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          model.setValue(r, c, `R${r}C${c}`)
+          model.setCellStyle(r, c, styles[(r + c) % styles.length])
+          model.setCellBorder(r, c, borders[(r + c) % borders.length])
+          model.setCellFormat(r, c, formats[(r + c) % formats.length])
+        }
+      }
+      
+      const start = performance.now()
+      const data = extractFormats(
+        0, 0, size - 1, size - 1,
+        (r, c) => model.getCellStyle(r, c),
+        (r, c) => model.getCellBorder(r, c),
+        (r, c) => model.getCellFormat(r, c)
+      )
+      const time = performance.now() - start
+      
+      // 保存供后续测试使用
+      window._benchmarkFormatData = data
+      window._benchmarkFormatModel = model
+      
+      updateStatus('formatExtract', 'done', time)
+      return time
+    }
+    
+    // 格式刷 - 格式应用测试
+    async function benchmarkFormatApply() {
+      updateStatus('formatApply', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const count = baselines.formatApply.count
+      const size = 100 // 100x100
+      const formatData = window._benchmarkFormatData
+      
+      if (!formatData) {
+        // 如果没有提取数据，先提取
+        await benchmarkFormatExtract()
+      }
+      
+      const targetModel = new SheetModel()
+      
+      const start = performance.now()
+      applyFormats(
+        window._benchmarkFormatData,
+        0, 0, size - 1, size - 1,
+        (r, c, style) => targetModel.setCellStyle(r, c, style),
+        (r, c, border) => targetModel.setCellBorder(r, c, border),
+        (r, c) => targetModel.clearCellBorder(r, c),
+        (r, c, format) => targetModel.setCellFormat(r, c, format)
+      )
+      const time = performance.now() - start
+      
+      updateStatus('formatApply', 'done', time)
+      return time
+    }
+    
+    // 格式刷 - 平铺填充测试
+    async function benchmarkFormatTile() {
+      updateStatus('formatTile', 'running')
+      await new Promise(r => setTimeout(r, 50))
+      
+      const sourceSize = 10
+      const targetSize = 200 // 平铺到 200x200
+      const count = targetSize * targetSize
+      
+      // 准备小区域源数据
+      const sourceModel = new SheetModel()
+      const styles = [
+        { bold: true },
+        { italic: true, backgroundColor: '#ffeecc' }
+      ]
+      
+      for (let r = 0; r < sourceSize; r++) {
+        for (let c = 0; c < sourceSize; c++) {
+          sourceModel.setValue(r, c, `Cell`)
+          sourceModel.setCellStyle(r, c, styles[(r + c) % styles.length])
+        }
+      }
+      
+      // 提取源格式
+      const formatData = extractFormats(
+        0, 0, sourceSize - 1, sourceSize - 1,
+        (r, c) => sourceModel.getCellStyle(r, c),
+        (r, c) => sourceModel.getCellBorder(r, c),
+        (r, c) => sourceModel.getCellFormat(r, c)
+      )
+      
+      const targetModel = new SheetModel()
+      
+      const start = performance.now()
+      applyFormats(
+        formatData,
+        0, 0, targetSize - 1, targetSize - 1,
+        (r, c, style) => targetModel.setCellStyle(r, c, style),
+        (r, c, border) => targetModel.setCellBorder(r, c, border),
+        (r, c) => targetModel.clearCellBorder(r, c),
+        (r, c, format) => targetModel.setCellFormat(r, c, format)
+      )
+      const time = performance.now() - start
+      
+      updateStatus('formatTile', 'done', time)
+      return time
+    }
+    
     // 运行所有测试
     window.runAllBenchmarks = async function() {
       const btn = document.getElementById('runBtn')
@@ -907,6 +1078,9 @@
       await benchmarkFillGenerate()
       await benchmarkFillFormula()
       await benchmarkAutoRowHeight()
+      await benchmarkFormatExtract()
+      await benchmarkFormatApply()
+      await benchmarkFormatTile()
       
       const totalTime = performance.now() - startTime
       

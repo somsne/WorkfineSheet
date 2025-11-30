@@ -7,6 +7,7 @@ import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
 import type { SheetClipboard } from './useSheetClipboard'
+import { extractFormats, applyFormats } from '../formatPainter'
 
 export interface UseSheetKeyboardOptions {
   state: SheetState
@@ -22,7 +23,8 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
     imeProxy,
     model, undoRedo,
     selected, selectionRange,
-    overlay
+    overlay,
+    formatPainter
   } = state
   
   const { ensureVisible } = geometry
@@ -57,6 +59,90 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
       e.preventDefault()
       if (undoRedo.redo()) {
+        onDraw()
+      }
+      return
+    }
+    
+    // 复制格式 (Ctrl/Cmd + Shift + C) - 必须在普通复制之前检查
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault()
+      if (selected.row >= 0 && selected.col >= 0) {
+        // 确定源区域
+        let startRow: number, startCol: number, endRow: number, endCol: number
+        if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
+          startRow = selectionRange.startRow
+          startCol = selectionRange.startCol
+          endRow = selectionRange.endRow
+          endCol = selectionRange.endCol
+        } else {
+          startRow = selected.row
+          startCol = selected.col
+          endRow = selected.row
+          endCol = selected.col
+        }
+        
+        const isFullRow = startCol === 0 && endCol === constants.DEFAULT_COLS - 1
+        const isFullColumn = startRow === 0 && endRow === constants.DEFAULT_ROWS - 1
+        
+        const data = extractFormats(
+          startRow, startCol, endRow, endCol,
+          (row, col) => model.getCellStyle(row, col),
+          (row, col) => model.getCellBorder(row, col),
+          (row, col) => model.getCellFormat(row, col),
+          {
+            isFullRow,
+            isFullColumn,
+            getRowStyle: (row) => model.getRowStyle(row),
+            getColStyle: (col) => model.getColStyle(col),
+            getRowFormat: (row) => model.getRowFormat(row),
+            getColFormat: (col) => model.getColFormat(col),
+            getMergedRegion: (row, col) => model.getMergedRegion(row, col)
+          }
+        )
+        formatPainter.data = data
+        formatPainter.mode = 'single'
+        onDraw()
+      }
+      return
+    }
+    
+    // 粘贴格式 (Ctrl/Cmd + Shift + V) - 必须在普通粘贴之前检查
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
+      e.preventDefault()
+      if (formatPainter.data && selected.row >= 0 && selected.col >= 0) {
+        // 确定目标区域
+        let targetStartRow: number, targetStartCol: number, targetEndRow: number, targetEndCol: number
+        if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
+          targetStartRow = selectionRange.startRow
+          targetStartCol = selectionRange.startCol
+          targetEndRow = selectionRange.endRow
+          targetEndCol = selectionRange.endCol
+        } else {
+          targetStartRow = selected.row
+          targetStartCol = selected.col
+          targetEndRow = selected.row
+          targetEndCol = selected.col
+        }
+        
+        applyFormats(
+          formatPainter.data,
+          targetStartRow, targetStartCol, targetEndRow, targetEndCol,
+          (row, col, style) => model.setCellStyle(row, col, style),
+          (row, col, border) => model.setCellBorder(row, col, border),
+          (row, col) => model.clearCellBorder(row, col),
+          (row, col, format) => model.setCellFormat(row, col, format),
+          {
+            setRowStyle: (row, style) => model.setRowStyle(row, style),
+            setColStyle: (col, style) => model.setColStyle(col, style),
+            setRowFormat: (row, format) => model.setRowFormat(row, format),
+            setColFormat: (col, format) => model.setColFormat(col, format),
+            getMergedRegion: (row, col) => model.getMergedRegion(row, col),
+            mergeCells: (r1, c1, r2, c2) => model.mergeCells(r1, c1, r2, c2),
+            unmergeCells: (row, col) => model.unmergeCells(row, col) !== null
+          }
+        )
+        // 粘贴格式后不退出模式，可以连续粘贴
         onDraw()
       }
       return
@@ -122,9 +208,18 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, onDraw }: 
       return
     }
     
-    // Escape - 清除选区
+    // Escape - 退出格式刷或清除选区
     if (e.key === 'Escape') {
       e.preventDefault()
+      
+      // 如果格式刷激活，先退出格式刷
+      if (formatPainter.mode !== 'off') {
+        formatPainter.mode = 'off'
+        formatPainter.data = null
+        onDraw()
+        return
+      }
+      
       state.clearSelectionRange()
       state.clearDragState()
       onDraw()

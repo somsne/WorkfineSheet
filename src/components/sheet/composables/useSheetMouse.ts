@@ -13,6 +13,7 @@ import {
 import { handleWheel, handleScrollbarDrag, startVerticalDrag, startHorizontalDrag, endDrag } from '../scrollbar'
 import { handleDoubleClick as handleDoubleClickHelper, isClickInsideOverlay } from '../overlay'
 import { handleContextMenu, handleInputDialogConfirm as handleInputDialogConfirmHelper, type ContextMenuConfig } from '../uiMenus'
+import { applyFormats } from '../formatPainter'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
@@ -40,7 +41,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     resizeState, hoverState,
     rowHeights, colWidths, manualRowHeights,
     formulaReferences,
-    contextMenu, inputDialog
+    contextMenu, inputDialog,
+    formatPainter
   } = state
   
   const { 
@@ -520,6 +522,85 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       state.clearDragState()
       
       onDraw()
+      return
+    }
+    
+    // 格式刷模式处理
+    if (formatPainter.mode !== 'off' && formatPainter.data) {
+      // 从 dragState 获取目标选区（因为 selectionRange 还没更新）
+      let targetStartRow: number, targetStartCol: number, targetEndRow: number, targetEndCol: number
+      let isSingleCellTarget = false
+      
+      if (dragState.isDragging) {
+        // 从拖拽状态获取目标位置
+        targetStartRow = Math.min(dragState.startRow, dragState.currentRow)
+        targetStartCol = Math.min(dragState.startCol, dragState.currentCol)
+        targetEndRow = Math.max(dragState.startRow, dragState.currentRow)
+        targetEndCol = Math.max(dragState.startCol, dragState.currentCol)
+        
+        // 检查是否是单击（非拖拽）- 起点和终点相同
+        isSingleCellTarget = (dragState.startRow === dragState.currentRow && 
+                             dragState.startCol === dragState.currentCol)
+      } else if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
+        targetStartRow = selectionRange.startRow
+        targetStartCol = selectionRange.startCol
+        targetEndRow = selectionRange.endRow
+        targetEndCol = selectionRange.endCol
+        isSingleCellTarget = (targetStartRow === targetEndRow && targetStartCol === targetEndCol)
+      } else if (selected.row >= 0 && selected.col >= 0) {
+        targetStartRow = selected.row
+        targetStartCol = selected.col
+        targetEndRow = selected.row
+        targetEndCol = selected.col
+        isSingleCellTarget = true
+      } else {
+        state.clearDragState()
+        onDraw()
+        return
+      }
+      
+      // Excel 行为：如果目标是单个单元格，以该单元格为锚点扩展到源区域大小
+      if (isSingleCellTarget && (formatPainter.data.rows > 1 || formatPainter.data.cols > 1)) {
+        targetEndRow = targetStartRow + formatPainter.data.rows - 1
+        targetEndCol = targetStartCol + formatPainter.data.cols - 1
+      }
+      
+      // 应用格式
+      applyFormats(
+        formatPainter.data,
+        targetStartRow, targetStartCol, targetEndRow, targetEndCol,
+        (row, col, style) => model.setCellStyle(row, col, style),
+        (row, col, border) => model.setCellBorder(row, col, border),
+        (row, col) => model.clearCellBorder(row, col),
+        (row, col, format) => model.setCellFormat(row, col, format),
+        {
+          setRowStyle: (row, style) => model.setRowStyle(row, style),
+          setColStyle: (col, style) => model.setColStyle(col, style),
+          setRowFormat: (row, format) => model.setRowFormat(row, format),
+          setColFormat: (col, format) => model.setColFormat(col, format),
+          getMergedRegion: (row, col) => model.getMergedRegion(row, col),
+          mergeCells: (r1, c1, r2, c2) => model.mergeCells(r1, c1, r2, c2),
+          unmergeCells: (row, col) => model.unmergeCells(row, col) !== null
+        }
+      )
+      
+      // 更新选区到目标位置
+      selected.row = targetStartRow
+      selected.col = targetStartCol
+      selectionRange.startRow = targetStartRow
+      selectionRange.startCol = targetStartCol
+      selectionRange.endRow = targetEndRow
+      selectionRange.endCol = targetEndCol
+      
+      // 如果是单次模式，应用后退出
+      if (formatPainter.mode === 'single') {
+        formatPainter.mode = 'off'
+        formatPainter.data = null
+      }
+      
+      state.clearDragState()
+      onDraw()
+      focusImeProxy()
       return
     }
     
