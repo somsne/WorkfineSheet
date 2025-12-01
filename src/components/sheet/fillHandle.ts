@@ -33,6 +33,15 @@ export function calculateFillHandlePosition(config: FillHandlePositionConfig): F
   const { selectionRange, viewport, geometryConfig, sizes, canvasWidth, canvasHeight } = config
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
   
+  // 如果选区无效（为 -1），不显示填充柄
+  if (selectionRange.startRow < 0 || selectionRange.startCol < 0 ||
+      selectionRange.endRow < 0 || selectionRange.endCol < 0) {
+    return {
+      ...DEFAULT_FILL_HANDLE_STATE,
+      visible: false
+    }
+  }
+  
   // 获取选区右下角单元格的位置
   const endRow = selectionRange.endRow
   const endCol = selectionRange.endCol

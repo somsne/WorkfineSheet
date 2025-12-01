@@ -5,6 +5,7 @@
 
 import { nextTick, watch } from 'vue'
 import { openOverlay as openOverlayHelper, closeOverlay, getNextCellAfterSave } from '../overlay'
+import { parseFormulaReferences } from '../references'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 
@@ -59,8 +60,20 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
    * 打开编辑器覆盖层
    */
   function openOverlay(row: number, col: number, initialValue: string, mode: 'edit' | 'typing' = 'edit') {
+    console.log('[useSheetInput] openOverlay', { row, col, initialValue, mode })
     const overlayState = openOverlayHelper(row, col, initialValue, mode, viewport, createSizeAccess(), createGeometryConfig())
     Object.assign(overlay, overlayState)
+    console.log('[useSheetInput] openOverlay: overlay.visible =', overlay.visible)
+    
+    // 🔧 关键修复：如果初始值是公式，立即初始化公式引用
+    // 这样编辑已有公式的单元格时，高亮边框会立即显示
+    if (initialValue.startsWith('=')) {
+      formulaReferences.value = parseFormulaReferences(initialValue)
+      console.log('[useSheetInput] openOverlay: 初始化公式引用', formulaReferences.value)
+    } else {
+      formulaReferences.value = []
+    }
+    
     onDraw()
   }
   
@@ -68,6 +81,12 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
    * 保存编辑内容
    */
   function onOverlaySave(val: string) {
+    console.log('[useSheetInput] onOverlaySave', { 
+      val, 
+      overlayRow: overlay.row, 
+      overlayCol: overlay.col,
+      overlayVisible: overlay.visible
+    })
     const row = overlay.row
     const col = overlay.col
     const oldValue = formulaSheet.getDisplayValue(row, col)
@@ -119,6 +138,12 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     
     // 使用覆盖层模块计算下一个单元格位置
     const nextCell = getNextCellAfterSave(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
+    console.log('[useSheetInput] onOverlaySave: 保存完成，移动到下一个单元格', {
+      fromRow: row,
+      fromCol: col,
+      toRow: nextCell.row,
+      toCol: nextCell.col
+    })
     selected.row = nextCell.row
     selected.col = nextCell.col
     
@@ -392,8 +417,19 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
    * composition start 事件（用于 window 级别）
    */
   function onCompositionStart(e: CompositionEvent) {
+    // 如果是 IME 代理的事件，跳过（会由 onImeCompositionStart 处理）
     if (e.target === imeProxy.value) {
       return
+    }
+    
+    // 如果事件来自其他输入元素（如 FormulaBar），不处理
+    const target = e.target as HTMLElement
+    if (target) {
+      const tagName = target.tagName.toLowerCase()
+      const isContentEditable = target.isContentEditable
+      if (tagName === 'input' || tagName === 'textarea' || isContentEditable) {
+        return
+      }
     }
     
     if (!overlay.visible) {

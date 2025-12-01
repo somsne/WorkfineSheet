@@ -123,6 +123,7 @@ export function useSheetState(options: SheetStateOptions = {}) {
   const gridCanvas = ref<HTMLCanvasElement | null>(null)
   const contentCanvas = ref<HTMLCanvasElement | null>(null)
   const overlayInput = ref<any>(null)
+  const formulaBarInput = ref<any>(null)  // FormulaBar 组件引用
   const imeProxy = ref<HTMLTextAreaElement | null>(null)
   
   // ==================== 核心数据模型 ====================
@@ -365,11 +366,36 @@ export function useSheetState(options: SheetStateOptions = {}) {
         console.log('[DEBUG updateFormulaReferences] formulaMode:', (overlayInput.value as any).formulaMode)
       }
       
-      if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
-        const currentValue = (overlayInput.value as any).getCurrentValue?.() || overlay.value
-        console.log('[DEBUG updateFormulaReferences] currentValue:', currentValue)
-        formulaReferences.value = parseFormulaReferences(currentValue)
-        console.log('[DEBUG updateFormulaReferences] formulaReferences:', formulaReferences.value)
+      // 检查焦点在哪个组件
+      const activeElement = document.activeElement as HTMLElement | null
+      const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
+      
+      if (overlay.visible && overlayInput.value) {
+        let currentValue: string
+        
+        // 根据焦点位置决定从哪个组件获取值
+        if (isFormulaBarFocused) {
+          // 焦点在 FormulaBar，使用 overlay.value（由 FormulaBar emit 更新）
+          currentValue = overlay.value
+          console.log('[DEBUG updateFormulaReferences] FormulaBar focused, using overlay.value:', currentValue)
+        } else {
+          // 焦点在 RichTextInput 或其他地方，从 RichTextInput 获取值
+          currentValue = (overlayInput.value as any).getCurrentValue?.() || overlay.value
+          console.log('[DEBUG updateFormulaReferences] currentValue from RichTextInput:', currentValue)
+          
+          // 同步 RichTextInput 的值到 overlay.value
+          if (currentValue !== overlay.value) {
+            console.log('[DEBUG updateFormulaReferences] 同步值到 overlay.value:', currentValue)
+            overlay.value = currentValue
+          }
+        }
+        
+        // 更新公式引用（只有公式模式才需要）
+        const isFormulaMode = currentValue?.startsWith('=') ?? false
+        if (isFormulaMode) {
+          formulaReferences.value = parseFormulaReferences(currentValue)
+          console.log('[DEBUG updateFormulaReferences] formulaReferences:', formulaReferences.value)
+        }
       } else {
         console.log('[DEBUG updateFormulaReferences] clearing references')
         formulaReferences.value = []
@@ -428,6 +454,7 @@ export function useSheetState(options: SheetStateOptions = {}) {
     gridCanvas,
     contentCanvas,
     overlayInput,
+    formulaBarInput,
     imeProxy,
     
     // 核心数据模型

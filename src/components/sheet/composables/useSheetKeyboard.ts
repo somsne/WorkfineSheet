@@ -37,6 +37,17 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
    * 处理键盘按下事件
    */
   function onKeyDown(e: KeyboardEvent) {
+    // 如果事件来自其他输入元素（如 FormulaBar 的名称框或公式输入），不处理
+    const target = e.target as HTMLElement
+    if (target && target !== imeProxy.value) {
+      const tagName = target.tagName.toLowerCase()
+      const isContentEditable = target.isContentEditable
+      // 如果是 input、textarea 或 contenteditable 元素，让它们自己处理键盘事件
+      if (tagName === 'input' || tagName === 'textarea' || isContentEditable) {
+        return
+      }
+    }
+    
     // 如果焦点在 IME 代理上，只处理特殊键
     if (e.target === imeProxy.value) {
       const specialKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Escape', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', 'F2', 'Delete', 'Backspace']

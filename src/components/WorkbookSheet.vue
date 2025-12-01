@@ -203,6 +203,17 @@ function syncSheetData() {
     // 恢复格式刷状态
     if (crossSheetFormatPainter.value.mode !== 'off' && crossSheetFormatPainter.value.data) {
       canvasSheetRef.value.setFormatPainterState?.(crossSheetFormatPainter.value)
+      
+      // 对于 single 模式，恢复后立即清除跨 Sheet 状态
+      // 这样格式刷只能应用一次（在目标 Sheet 上）
+      // continuous 模式则保持，允许在多个 Sheet 间连续应用
+      if (crossSheetFormatPainter.value.mode === 'single') {
+        crossSheetFormatPainter.value = {
+          mode: 'off',
+          data: null,
+          sourceSheetId: null
+        }
+      }
     }
     
     // 恢复剪贴板状态
@@ -234,10 +245,20 @@ function saveCurrentSheetState() {
   
   // 保存格式刷状态（跨 Sheet 共享）
   const formatPainterState = canvasSheetRef.value.getFormatPainterState?.()
-  if (formatPainterState && formatPainterState.mode !== 'off') {
-    crossSheetFormatPainter.value = {
-      ...formatPainterState,
-      sourceSheetId: currentSheetId
+  if (formatPainterState) {
+    if (formatPainterState.mode !== 'off') {
+      // 格式刷激活状态，保存到跨 Sheet 状态
+      crossSheetFormatPainter.value = {
+        ...formatPainterState,
+        sourceSheetId: currentSheetId
+      }
+    } else {
+      // 格式刷已关闭（可能是 single 模式应用后自动关闭），清除跨 Sheet 状态
+      crossSheetFormatPainter.value = {
+        mode: 'off',
+        data: null,
+        sourceSheetId: null
+      }
     }
   }
   
@@ -501,6 +522,68 @@ function setRangeStyle(startRow: number, startCol: number, endRow: number, endCo
   canvasSheetRef.value?.setRangeStyle?.(startRow, startCol, endRow, endCol, style)
 }
 
+// ==================== 样式快捷方法 ====================
+
+/** 设置粗体 */
+function setBold(row: number, col: number, bold: boolean) {
+  canvasSheetRef.value?.setBold?.(row, col, bold)
+}
+
+/** 设置斜体 */
+function setItalic(row: number, col: number, italic: boolean) {
+  canvasSheetRef.value?.setItalic?.(row, col, italic)
+}
+
+/** 设置下划线 */
+function setUnderline(row: number, col: number, underline: boolean | 'single' | 'double') {
+  canvasSheetRef.value?.setUnderline?.(row, col, underline)
+}
+
+/** 设置删除线 */
+function setStrikethrough(row: number, col: number, strikethrough: boolean) {
+  canvasSheetRef.value?.setStrikethrough?.(row, col, strikethrough)
+}
+
+/** 设置字体 */
+function setFontFamily(row: number, col: number, fontFamily: string) {
+  canvasSheetRef.value?.setFontFamily?.(row, col, fontFamily)
+}
+
+/** 设置字号 */
+function setFontSize(row: number, col: number, fontSize: number) {
+  canvasSheetRef.value?.setFontSize?.(row, col, fontSize)
+}
+
+/** 设置字体颜色 */
+function setTextColor(row: number, col: number, color: string) {
+  canvasSheetRef.value?.setTextColor?.(row, col, color)
+}
+
+/** 设置背景色 */
+function setBackgroundColor(row: number, col: number, color: string) {
+  canvasSheetRef.value?.setBackgroundColor?.(row, col, color)
+}
+
+/** 设置水平对齐 */
+function setTextAlign(row: number, col: number, align: 'left' | 'center' | 'right') {
+  canvasSheetRef.value?.setTextAlign?.(row, col, align)
+}
+
+/** 设置垂直对齐 */
+function setVerticalAlign(row: number, col: number, align: 'top' | 'middle' | 'bottom') {
+  canvasSheetRef.value?.setVerticalAlign?.(row, col, align)
+}
+
+/** 设置自动换行 */
+function setWrapText(row: number, col: number, wrap: boolean) {
+  canvasSheetRef.value?.setWrapText?.(row, col, wrap)
+}
+
+/** 设置文字旋转角度 */
+function setTextRotation(row: number, col: number, rotation: number) {
+  canvasSheetRef.value?.setTextRotation?.(row, col, rotation)
+}
+
 /** 获取单元格边框 */
 function getCellBorder(row: number, col: number) {
   return canvasSheetRef.value?.getCellBorder?.(row, col)
@@ -531,6 +614,21 @@ function clearAllBorders(startRow: number, startCol: number, endRow: number, end
   canvasSheetRef.value?.clearAllBorders?.(startRow, startCol, endRow, endCol)
 }
 
+/** 设置范围边框（所有单元格全边框） */
+function setRangeBorder(startRow: number, startCol: number, endRow: number, endCol: number, border: any) {
+  canvasSheetRef.value?.setRangeBorder?.(startRow, startCol, endRow, endCol, border)
+}
+
+/** 设置范围外边框（只设置最外层） */
+function setRangeOuterBorder(startRow: number, startCol: number, endRow: number, endCol: number, edge: any) {
+  canvasSheetRef.value?.setRangeOuterBorder?.(startRow, startCol, endRow, endCol, edge)
+}
+
+/** 清除范围边框 */
+function clearRangeBorder(startRow: number, startCol: number, endRow: number, endCol: number) {
+  canvasSheetRef.value?.clearRangeBorder?.(startRow, startCol, endRow, endCol)
+}
+
 /** 获取单元格格式 */
 function getCellFormat(row: number, col: number) {
   return canvasSheetRef.value?.getCellFormat?.(row, col)
@@ -546,6 +644,16 @@ function clearCellFormat(row: number, col: number) {
   canvasSheetRef.value?.clearCellFormat?.(row, col)
 }
 
+/** 批量设置范围格式 */
+function setRangeFormat(startRow: number, startCol: number, endRow: number, endCol: number, format: any) {
+  canvasSheetRef.value?.setRangeFormat?.(startRow, startCol, endRow, endCol, format)
+}
+
+/** 获取格式化后的显示值 */
+function getFormattedValue(row: number, col: number): string {
+  return canvasSheetRef.value?.getFormattedValue?.(row, col) ?? ''
+}
+
 /** 合并单元格 */
 function mergeCells(startRow: number, startCol: number, endRow: number, endCol: number) {
   canvasSheetRef.value?.mergeCells?.(startRow, startCol, endRow, endCol)
@@ -556,6 +664,41 @@ function unmergeCells(row: number, col: number) {
   canvasSheetRef.value?.unmergeCells?.(row, col)
 }
 
+/** 检查是否可以合并指定范围 */
+function canMerge(startRow: number, startCol: number, endRow: number, endCol: number): boolean {
+  return canvasSheetRef.value?.canMerge?.(startRow, startCol, endRow, endCol) ?? false
+}
+
+/** 获取单元格的合并信息 */
+function getMergedCellInfo(row: number, col: number) {
+  return canvasSheetRef.value?.getMergedCellInfo?.(row, col) ?? { isMerged: false, isHidden: false }
+}
+
+/** 获取包含指定单元格的合并区域 */
+function getMergedRegion(row: number, col: number) {
+  return canvasSheetRef.value?.getMergedRegion?.(row, col) ?? null
+}
+
+/** 获取所有合并区域 */
+function getAllMergedRegions() {
+  return canvasSheetRef.value?.getAllMergedRegions?.() ?? []
+}
+
+/** 检查合并操作是否会丢失数据 */
+function hasDataToLose(startRow: number, startCol: number, endRow: number, endCol: number): boolean {
+  return canvasSheetRef.value?.hasDataToLose?.(startRow, startCol, endRow, endCol) ?? false
+}
+
+/** 合并当前选择范围 */
+function mergeSelection(): boolean {
+  return canvasSheetRef.value?.mergeSelection?.() ?? false
+}
+
+/** 取消当前选择范围内的所有合并 */
+function unmergeSelection() {
+  canvasSheetRef.value?.unmergeSelection?.()
+}
+
 /** 撤销 */
 function undo() {
   canvasSheetRef.value?.undo?.()
@@ -564,6 +707,16 @@ function undo() {
 /** 重做 */
 function redo() {
   canvasSheetRef.value?.redo?.()
+}
+
+/** 检查是否可以撤销 */
+function canUndo(): boolean {
+  return canvasSheetRef.value?.canUndo?.() ?? false
+}
+
+/** 检查是否可以重做 */
+function canRedo(): boolean {
+  return canvasSheetRef.value?.canRedo?.() ?? false
 }
 
 /** 刷新绘制 */
@@ -651,6 +804,122 @@ function getShowGridLines(): boolean {
   return canvasSheetRef.value?.getShowGridLines?.() ?? true
 }
 
+// ==================== 冻结 API ====================
+
+/** 设置冻结行数 */
+function setFrozenRows(count: number) {
+  canvasSheetRef.value?.setFrozenRows?.(count)
+}
+
+/** 获取冻结行数 */
+function getFrozenRows(): number {
+  return canvasSheetRef.value?.getFrozenRows?.() ?? 0
+}
+
+/** 设置冻结列数 */
+function setFrozenColumns(count: number) {
+  canvasSheetRef.value?.setFrozenColumns?.(count)
+}
+
+/** 获取冻结列数 */
+function getFrozenColumns(): number {
+  return canvasSheetRef.value?.getFrozenColumns?.() ?? 0
+}
+
+// ==================== 图片 API ====================
+
+/** 从文件插入图片 */
+function insertImage(file: File): Promise<string | null> {
+  return canvasSheetRef.value?.insertImage?.(file) ?? Promise.resolve(null)
+}
+
+/** 从 URL 插入图片 */
+function insertImageFromUrl(url: string, width?: number, height?: number): Promise<string | null> {
+  return canvasSheetRef.value?.insertImageFromUrl?.(url, width, height) ?? Promise.resolve(null)
+}
+
+/** 删除图片 */
+function deleteImage(imageId: string) {
+  canvasSheetRef.value?.deleteImage?.(imageId)
+}
+
+/** 获取所有图片 */
+function getAllImages() {
+  return canvasSheetRef.value?.getAllImages?.() ?? []
+}
+
+/** 获取选中的图片 ID */
+function getSelectedImageId(): string | null {
+  return canvasSheetRef.value?.getSelectedImageId?.() ?? null
+}
+
+/** 选中图片 */
+function selectImage(imageId: string) {
+  canvasSheetRef.value?.selectImage?.(imageId)
+}
+
+/** 清除图片选择 */
+function clearImageSelection() {
+  canvasSheetRef.value?.clearImageSelection?.()
+}
+
+// ==================== 单元格图片 API ====================
+
+/** 从文件插入单元格图片 */
+function insertCellImage(file: File, row?: number, col?: number): Promise<string | null> {
+  return canvasSheetRef.value?.insertCellImage?.(file, row, col) ?? Promise.resolve(null)
+}
+
+/** 从 URL 插入单元格图片 */
+function insertCellImageFromUrl(url: string, row?: number, col?: number): Promise<string | null> {
+  return canvasSheetRef.value?.insertCellImageFromUrl?.(url, row, col) ?? Promise.resolve(null)
+}
+
+/** 获取单元格的所有图片 */
+function getCellImages(row: number, col: number) {
+  return canvasSheetRef.value?.getCellImages?.(row, col) ?? []
+}
+
+/** 获取单元格当前显示的图片 */
+function getCellDisplayImage(row: number, col: number) {
+  return canvasSheetRef.value?.getCellDisplayImage?.(row, col) ?? null
+}
+
+/** 获取单元格图片数量 */
+function getCellImageCount(row: number, col: number): number {
+  return canvasSheetRef.value?.getCellImageCount?.(row, col) ?? 0
+}
+
+/** 移除单元格的某张图片 */
+function removeCellImage(row: number, col: number, imageId: string) {
+  canvasSheetRef.value?.removeCellImage?.(row, col, imageId)
+}
+
+/** 清除单元格的所有图片 */
+function clearCellImages(row: number, col: number) {
+  canvasSheetRef.value?.clearCellImages?.(row, col)
+}
+
+/** 更新单元格图片的对齐方式 */
+function updateCellImageAlignment(row: number, col: number, imageId: string, horizontalAlign?: any, verticalAlign?: any) {
+  canvasSheetRef.value?.updateCellImageAlignment?.(row, col, imageId, horizontalAlign, verticalAlign)
+}
+
+/** 为当前选中单元格插入图片 */
+function insertImageToSelection(file: File, horizontalAlign?: any, verticalAlign?: any): Promise<string | null> {
+  return canvasSheetRef.value?.insertImageToSelection?.(file, horizontalAlign, verticalAlign) ?? Promise.resolve(null)
+}
+
+/** 打开单元格图片预览 */
+function openCellImagePreview(row: number, col: number) {
+  canvasSheetRef.value?.openCellImagePreview?.(row, col)
+}
+
+/** 关闭单元格图片预览 */
+function closeCellImagePreview() {
+  canvasSheetRef.value?.closeCellImagePreview?.()
+}
+
 /** 激活格式刷（单次模式） */
 function startFormatPainter() {
   canvasSheetRef.value?.startFormatPainter?.()
@@ -669,6 +938,11 @@ function stopFormatPainter() {
 /** 获取格式刷模式 */
 function getFormatPainterMode(): 'off' | 'single' | 'continuous' {
   return canvasSheetRef.value?.getFormatPainterMode?.() ?? 'off'
+}
+
+/** 应用格式到当前选区 */
+function applyFormatPainter() {
+  canvasSheetRef.value?.applyFormatPainter?.()
 }
 
 // 暴露 API
@@ -707,6 +981,19 @@ defineExpose({
   setCellStyle,
   clearCellStyle,
   setRangeStyle,
+  // 样式快捷方法
+  setBold,
+  setItalic,
+  setUnderline,
+  setStrikethrough,
+  setFontFamily,
+  setFontSize,
+  setTextColor,
+  setBackgroundColor,
+  setTextAlign,
+  setVerticalAlign,
+  setWrapText,
+  setTextRotation,
   
   // 边框
   getCellBorder,
@@ -715,19 +1002,33 @@ defineExpose({
   setAllBorders,
   setOuterBorder,
   clearAllBorders,
+  setRangeBorder,
+  setRangeOuterBorder,
+  clearRangeBorder,
   
   // 格式
   getCellFormat,
   setCellFormat,
   clearCellFormat,
+  setRangeFormat,
+  getFormattedValue,
   
   // 合并
   mergeCells,
   unmergeCells,
+  canMerge,
+  getMergedCellInfo,
+  getMergedRegion,
+  getAllMergedRegions,
+  hasDataToLose,
+  mergeSelection,
+  unmergeSelection,
   
   // 撤销/重做
   undo,
   redo,
+  canUndo,
+  canRedo,
   
   // 绘制
   redraw,
@@ -756,11 +1057,40 @@ defineExpose({
   setShowGridLines,
   getShowGridLines,
   
+  // 冻结
+  setFrozenRows,
+  getFrozenRows,
+  setFrozenColumns,
+  getFrozenColumns,
+  
+  // 图片
+  insertImage,
+  insertImageFromUrl,
+  deleteImage,
+  getAllImages,
+  getSelectedImageId,
+  selectImage,
+  clearImageSelection,
+  
+  // 单元格图片
+  insertCellImage,
+  insertCellImageFromUrl,
+  getCellImages,
+  getCellDisplayImage,
+  getCellImageCount,
+  removeCellImage,
+  clearCellImages,
+  updateCellImageAlignment,
+  insertImageToSelection,
+  openCellImagePreview,
+  closeCellImagePreview,
+  
   // 格式刷
   startFormatPainter,
   startFormatPainterContinuous,
   stopFormatPainter,
-  getFormatPainterMode
+  getFormatPainterMode,
+  applyFormatPainter
 })
 </script>
 

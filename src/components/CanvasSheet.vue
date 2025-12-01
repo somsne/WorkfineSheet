@@ -3,6 +3,25 @@
     <!-- 样式工具栏 -->
     <StyleToolbar v-if="api" :api="api" :current-selection="state.selected" :selection-range="state.selectionRange" :multi-selection="state.multiSelection" />
     
+    <!-- 公式栏 -->
+    <FormulaBar
+      ref="formulaBarRef"
+      :row="formulaBarRow"
+      :col="formulaBarCol"
+      :end-row="formulaBarEndRow"
+      :end-col="formulaBarEndCol"
+      :cell-value="formulaBarCellValue"
+      :is-editing="formulaBarIsEditing"
+      :editing-value="formulaBarEditingValue"
+      :formula-references="state.richTextFormulaReferences.value"
+      @navigate="handleFormulaBarNavigate"
+      @select-range="handleFormulaBarSelectRange"
+      @start-edit="handleFormulaBarStartEdit"
+      @confirm="handleFormulaBarConfirm"
+      @cancel="handleFormulaBarCancel"
+      @input="handleFormulaBarInput"
+    />
+    
     <div ref="containerRef" class="sheet-container" @contextmenu="handleContextMenuWrapper">
       <canvas ref="gridCanvasRef" class="grid-canvas"></canvas>
       <canvas ref="contentCanvasRef" class="content-canvas"></canvas>
@@ -121,7 +140,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
 import { createSheetAPI } from './sheet/api'
@@ -146,6 +165,8 @@ import type { SheetViewState } from '../lib/Workbook'
 import RichTextInput from './RichTextInput.vue'
 // @ts-ignore
 import StyleToolbar from './StyleToolbar.vue'
+// @ts-ignore
+import FormulaBar from './sheet/FormulaBar.vue'
 // @ts-ignore
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
@@ -182,6 +203,7 @@ const containerRef = ref<HTMLElement | null>(null)
 const gridCanvasRef = ref<HTMLCanvasElement | null>(null)
 const contentCanvasRef = ref<HTMLCanvasElement | null>(null)
 const overlayInputRef = ref<any>(null)
+const formulaBarRef = ref<any>(null)
 const imeProxyRef = ref<HTMLTextAreaElement | null>(null)
 
 // 将 DOM 引用同步到 state
@@ -190,6 +212,7 @@ function syncRefs() {
   state.gridCanvas.value = gridCanvasRef.value
   state.contentCanvas.value = contentCanvasRef.value
   state.overlayInput.value = overlayInputRef.value
+  state.formulaBarInput.value = formulaBarRef.value
   state.imeProxy.value = imeProxyRef.value
 }
 
@@ -1313,6 +1336,137 @@ function getFormulaEditState() {
   }
 }
 
+// ==================== 公式栏支持方法 ====================
+
+/** 获取当前选区 */
+function getSelectionRange() {
+  return state.selectionRange
+}
+
+/** 选择单元格 */
+function selectCell(row: number, col: number) {
+  state.selected.row = row
+  state.selected.col = col
+  state.selectionRange.startRow = row
+  state.selectionRange.startCol = col
+  state.selectionRange.endRow = row
+  state.selectionRange.endCol = col
+  
+  // 确保单元格可见（滚动到视图）
+  geometry.ensureVisible(row, col)
+  
+  drawing.draw()
+}
+
+/** 选择范围 */
+function selectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
+  state.selected.row = startRow
+  state.selected.col = startCol
+  state.selectionRange.startRow = startRow
+  state.selectionRange.startCol = startCol
+  state.selectionRange.endRow = endRow
+  state.selectionRange.endCol = endCol
+  
+  // 确保起始单元格可见
+  geometry.ensureVisible(startRow, startCol)
+  
+  drawing.draw()
+}
+
+/** 开始编辑当前单元格 */
+function startEditingCurrentCell() {
+  const row = state.selected.row
+  const col = state.selected.col
+  console.log('[CanvasSheet] startEditingCurrentCell', { row, col })
+  const value = state.formulaSheet.getDisplayValue(row, col) ?? ''
+  
+  console.log('[CanvasSheet] 调用 openOverlay', { row, col, value })
+  input.openOverlay(row, col, value, 'edit')
+}
+
+/** 确认编辑 */
+function confirmEditing() {
+  console.log('[CanvasSheet] confirmEditing', { overlayVisible: state.overlay.visible })
+  if (state.overlay.visible) {
+    input.onOverlaySave(state.overlay.value)
+  }
+}
+
+/** 取消编辑 */
+function cancelEditing() {
+  console.log('[CanvasSheet] cancelEditing', { overlayVisible: state.overlay.visible })
+  if (state.overlay.visible) {
+    input.onOverlayCancel()
+  }
+}
+
+/** 设置编辑中的值 */
+function setEditingValue(value: string) {
+  if (state.overlay.visible) {
+    state.overlay.value = value
+  }
+}
+
+// ==================== 公式栏 Computed ====================
+
+/** 公式栏 - 当前行 */
+const formulaBarRow = computed(() => state.selectionRange.startRow)
+
+/** 公式栏 - 当前列 */
+const formulaBarCol = computed(() => state.selectionRange.startCol)
+
+/** 公式栏 - 结束行 */
+const formulaBarEndRow = computed(() => state.selectionRange.endRow)
+
+/** 公式栏 - 结束列 */
+const formulaBarEndCol = computed(() => state.selectionRange.endCol)
+
+/** 公式栏 - 单元格值 */
+const formulaBarCellValue = computed(() => {
+  const row = state.selectionRange.startRow
+  const col = state.selectionRange.startCol
+  return state.model.getValue(row, col) ?? ''
+})
+
+/** 公式栏 - 是否编辑中 */
+const formulaBarIsEditing = computed(() => state.overlay.visible)
+
+/** 公式栏 - 编辑中的值 */
+const formulaBarEditingValue = computed(() => state.overlay.value)
+
+// ==================== 公式栏事件处理 ====================
+
+/** 公式栏 - 导航到单元格 */
+function handleFormulaBarNavigate(row: number, col: number) {
+  selectCell(row, col)
+}
+
+/** 公式栏 - 选择范围 */
+function handleFormulaBarSelectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
+  selectRange(startRow, startCol, endRow, endCol)
+}
+
+/** 公式栏 - 开始编辑 */
+function handleFormulaBarStartEdit() {
+  console.log('[CanvasSheet] handleFormulaBarStartEdit 被调用')
+  startEditingCurrentCell()
+}
+
+/** 公式栏 - 确认 */
+function handleFormulaBarConfirm() {
+  confirmEditing()
+}
+
+/** 公式栏 - 取消 */
+function handleFormulaBarCancel() {
+  cancelEditing()
+}
+
+/** 公式栏 - 输入变化 */
+function handleFormulaBarInput(value: string) {
+  setEditingValue(value)
+}
+
 // 扩展 API 对象
 const extendedApi = {
   ...api,
@@ -1323,7 +1477,15 @@ const extendedApi = {
   getClipboardState,
   setClipboardState,
   isEditingFormula,
-  getFormulaEditState
+  getFormulaEditState,
+  // 公式栏支持
+  getSelectionRange,
+  selectCell,
+  selectRange,
+  startEditingCurrentCell,
+  confirmEditing,
+  cancelEditing,
+  setEditingValue
 }
 
 defineExpose(extendedApi)

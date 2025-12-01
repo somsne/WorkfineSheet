@@ -34,7 +34,7 @@ export interface UseSheetMouseOptions {
 export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle }: UseSheetMouseOptions) {
   const {
     constants,
-    container, overlayInput,
+    container, overlayInput, formulaBarInput,
     model, formulaSheet,
     viewport, scrollbar,
     selected, selectionRange, dragState, multiSelection,
@@ -87,7 +87,26 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理点击事件
    */
   function onClick(e: MouseEvent) {
+    console.log('[useSheetMouse] onClick', {
+      target: e.target,
+      detail: e.detail,
+      overlayVisible: overlay.visible,
+      selectedRow: selected.row,
+      selectedCol: selected.col
+    })
     if (!container.value) return
+    
+    // 如果正在编辑，不处理点击（避免干扰编辑器）
+    if (overlay.visible) {
+      console.log('[useSheetMouse] onClick: overlay visible, 返回')
+      return
+    }
+    
+    // 如果是双击的第二次点击，不处理，让 dblclick 处理
+    if (e.detail === 2) {
+      console.log('[useSheetMouse] onClick: detail === 2, 返回')
+      return
+    }
     
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -153,6 +172,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     // 忽略右键按下，由 contextmenu 事件处理
     if (e.button === 2) return
+    
+    // 如果是双击的第二次点击（detail === 2），不处理，让 dblclick 处理
+    if (e.detail === 2) return
     
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -249,6 +271,16 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 点击左上角
     if (x < constants.ROW_HEADER_WIDTH && y < constants.COL_HEADER_HEIGHT) return
     
+    // 检查是否在 FormulaBar 公式编辑模式
+    const activeElement = document.activeElement as HTMLElement | null
+    const isFormulaBarActive = activeElement?.closest('.formula-bar') !== null
+    const formulaBarInstance = formulaBarInput.value as any
+    
+    if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
+      console.log('[DEBUG onMouseDown] FormulaBar is active and in formula mode, preventing default')
+      e.preventDefault()
+    }
+    
     // 检查编辑框
     if (overlay.visible && overlayInput.value) {
       console.log('[DEBUG onMouseDown] overlay visible, checking formulaMode...')
@@ -309,6 +341,11 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理双击事件
    */
   function onDoubleClick(e: MouseEvent) {
+    console.log('[useSheetMouse] onDoubleClick', {
+      target: e.target,
+      detail: e.detail,
+      overlayVisible: overlay.visible
+    })
     if (!container.value) return
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -321,10 +358,13 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     }
     
     const { shouldOpen } = handleDoubleClickHelper(x, y, createGeometryConfig())
+    console.log('[useSheetMouse] onDoubleClick: shouldOpen =', shouldOpen)
     if (!shouldOpen) return
     
     let col = getColAtX(x)
     let row = getRowAtY(y)
+    
+    console.log('[useSheetMouse] onDoubleClick: 准备打开编辑器', { row, col })
     
     const mergedRegion = model.getMergedRegion(row, col)
     if (mergedRegion) {
@@ -335,6 +375,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     selected.row = row
     selected.col = col
     const editValue = formulaSheet.getDisplayValue(row, col)
+    console.log('[useSheetMouse] onDoubleClick: 调用 openOverlay', { row, col, editValue })
     openOverlay(row, col, editValue, 'edit')
   }
   
@@ -502,34 +543,71 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       return
     }
     
-    // 公式模式特殊处理
+    // 公式模式特殊处理 - 支持 RichTextInput 和 FormulaBar
     console.log('[DEBUG onMouseUp] checking formula mode...')
     console.log('[DEBUG onMouseUp] overlay.visible:', overlay.visible)
     console.log('[DEBUG onMouseUp] overlayInput.value:', !!overlayInput.value)
-    if (overlayInput.value) {
-      console.log('[DEBUG onMouseUp] formulaMode:', (overlayInput.value as any).formulaMode)
-      console.log('[DEBUG onMouseUp] isInSelectableState:', (overlayInput.value as any).isInSelectableState)
-      console.log('[DEBUG onMouseUp] hasTextSelection:', (overlayInput.value as any).hasTextSelection)
+    console.log('[DEBUG onMouseUp] formulaBarInput.value:', !!formulaBarInput.value)
+    
+    // 检查是否在公式编辑模式（RichTextInput 或 FormulaBar）
+    const overlayInputInstance = overlayInput.value as any
+    const formulaBarInstance = formulaBarInput.value as any
+    
+    // 判断当前活动的编辑器是哪个
+    const activeElement = document.activeElement as HTMLElement | null
+    const isFormulaBarActive = activeElement?.closest('.formula-bar') !== null
+    
+    // 选择活动的编辑器实例
+    let activeEditor: any = null
+    let isFormulaMode = false
+    
+    if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
+      activeEditor = formulaBarInstance
+      isFormulaMode = true
+      console.log('[DEBUG onMouseUp] FormulaBar is active and in formula mode')
+    } else if (overlay.visible && overlayInputInstance?.formulaMode) {
+      activeEditor = overlayInputInstance
+      isFormulaMode = true
+      console.log('[DEBUG onMouseUp] RichTextInput is active and in formula mode')
     }
-    if (overlay.visible && overlayInput.value && (overlayInput.value as any).formulaMode) {
-      const clickedSelf = (dragState.startRow === overlay.row && dragState.startCol === overlay.col)
+    
+    if (activeEditor && isFormulaMode) {
+      const isSelectable = activeEditor?.isInSelectableState ?? false
+      const hasSelection = activeEditor?.hasTextSelection ?? false
       
-      if (clickedSelf) {
-        return
+      console.log('[DEBUG onMouseUp] activeEditor:', activeEditor)
+      console.log('[DEBUG onMouseUp] isSelectable:', isSelectable, 'hasSelection:', hasSelection)
+      console.log('[DEBUG onMouseUp] activeEditor.isInSelectableState:', activeEditor?.isInSelectableState)
+      console.log('[DEBUG onMouseUp] activeEditor.getCurrentValue():', activeEditor?.getCurrentValue?.())
+      
+      // 如果是 FormulaBar 模式，检查点击的是否是正在编辑的单元格
+      if (isFormulaBarActive) {
+        // FormulaBar 模式：overlay 可能不可见，使用 selected 来判断
+        const clickedSelf = (dragState.startRow === selected.row && dragState.startCol === selected.col)
+        if (clickedSelf) {
+          state.clearDragState()
+          return
+        }
+      } else {
+        // RichTextInput 模式
+        const clickedSelf = (dragState.startRow === overlay.row && dragState.startCol === overlay.col)
+        if (clickedSelf) {
+          return
+        }
       }
       
-      const overlayInputInstance = overlayInput.value as any
-      const isSelectable = overlayInputInstance?.isInSelectableState ?? false
-      const hasSelection = overlayInputInstance?.hasTextSelection ?? false
-      
-      console.log('[DEBUG onMouseUp] isSelectable:', isSelectable, 'hasSelection:', hasSelection)
-      
       if (!isSelectable && !hasSelection) {
-        const currentValue = overlayInputInstance?.getCurrentValue?.() ?? ''
+        // 不在可选择状态，保存并退出编辑
+        const currentValue = activeEditor?.getCurrentValue?.() ?? ''
         
-        formulaSheet.setValue(overlay.row, overlay.col, currentValue)
+        if (overlay.visible) {
+          formulaSheet.setValue(overlay.row, overlay.col, currentValue)
+          overlay.visible = false
+        } else {
+          // FormulaBar 模式，保存到当前选中的单元格
+          formulaSheet.setValue(selected.row, selected.col, currentValue)
+        }
         
-        overlay.visible = false
         formulaReferences.value = []
         
         selected.row = dragState.startRow
@@ -559,26 +637,29 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         )
       }
       
+      let newText = ''
       if (isActualDrag) {
         const startAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
         const endAddr = formulaSheet.getCellAddress(dragState.currentRow, dragState.currentCol)
-        ;(overlayInput.value as any).insertRangeReference(startAddr, endAddr)
+        newText = activeEditor.insertRangeReference(startAddr, endAddr)
       } else if (startRegion && (startRegion.endRow > startRegion.startRow || startRegion.endCol > startRegion.startCol)) {
         const startAddr = formulaSheet.getCellAddress(startRegion.startRow, startRegion.startCol)
         const endAddr = formulaSheet.getCellAddress(startRegion.endRow, startRegion.endCol)
-        ;(overlayInput.value as any).insertRangeReference(startAddr, endAddr)
+        newText = activeEditor.insertRangeReference(startAddr, endAddr)
       } else {
         const cellAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
-        ;(overlayInput.value as any).insertCellReference(cellAddr)
+        newText = activeEditor.insertCellReference(cellAddr)
       }
       
-      // 插入引用后立即更新公式引用高亮（不等待定时器）
-      const currentValue = (overlayInput.value as any).getCurrentValue?.() || ''
-      formulaReferences.value = parseFormulaReferences(currentValue)
+      // 插入引用后立即更新公式引用高亮（使用返回的新文本）
+      const valueForParsing = newText || activeEditor.getCurrentValue?.() || ''
+      formulaReferences.value = parseFormulaReferences(valueForParsing)
       console.log('[DEBUG onMouseUp] Updated formulaReferences immediately:', formulaReferences.value)
       
-      selected.row = overlay.row
-      selected.col = overlay.col
+      if (!isFormulaBarActive) {
+        selected.row = overlay.row
+        selected.col = overlay.col
+      }
       state.clearSelectionRange()
       state.clearDragState()
       

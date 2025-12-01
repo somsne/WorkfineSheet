@@ -61,8 +61,9 @@ export function parseFormulaReferences(formula: string): FormulaReference[] {
   // Match range references (A1:B3) and single cell references (A1)
   // Support absolute references $A$1 / $A1 / A$1
   const rangeRegex = /(\$?[A-Za-z]+\$?\d+):(\$?[A-Za-z]+\$?\d+)/g
-  // Use word boundaries to avoid false matches
-  const cellRegex = /(^|[^A-Za-z0-9$])(\$?[A-Za-z]+\$?\d+)(?=[^A-Za-z0-9]|$)/g
+  // 单元格引用正则：必须完整匹配数字部分，不能在数字中间断开
+  // 使用前向和后向断言确保不匹配 B12 中的 B1
+  const cellRegex = /(^|[^A-Za-z0-9$])(\$?[A-Za-z]+\$?\d+)(?![A-Za-z0-9])/g
   
   let colorIndex = 0
   

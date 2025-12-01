@@ -73,18 +73,40 @@ function setEditorRef(el: any) {
 
 // 初始化编辑器内容
 function initializeEditor() {
+  console.log('[RichTextInput] initializeEditor 开始', {
+    editorRef: !!editorRef,
+    activeElement: document.activeElement,
+    activeElementClass: (document.activeElement as HTMLElement)?.className
+  })
   if (!editorRef) return
   
   isInitialized = true  // 标记已初始化
   internal.value = props.value ?? ''
   updateEditorContent(internal.value, false)
   
+  // 检查焦点是否在 FormulaBar 中
+  // 如果是，说明用户从 FormulaBar 启动编辑，不要抢夺焦点
+  const activeElement = document.activeElement as HTMLElement | null
+  const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
+  
+  console.log('[RichTextInput] initializeEditor 检查焦点', {
+    activeElement: activeElement?.tagName,
+    activeElementClass: activeElement?.className,
+    isFormulaBarFocused
+  })
+  
   // 在测试环境中，focus 和 setCursorPosition 可能会失败
   try {
-    editorRef.focus()
-    const len = internal.value.length
-    setCursorPosition(len)
-    cursorPos.value = len
+    // 只有在焦点不在 FormulaBar 时才聚焦
+    if (!isFormulaBarFocused) {
+      console.log('[RichTextInput] initializeEditor: 聚焦编辑器')
+      editorRef.focus()
+      const len = internal.value.length
+      setCursorPosition(len)
+      cursorPos.value = len
+    } else {
+      console.log('[RichTextInput] initializeEditor: FormulaBar 有焦点，跳过聚焦')
+    }
     
     // 初始化时更新可选择状态（对于输入 = 进入公式模式的情况）
     updateSelectableState()
@@ -311,6 +333,10 @@ function updateEditorContent(text: string, preserveCursor: boolean = true) {
   // 关键：在 IME 组合期间不更新编辑器内容，否则会中断输入法
   if (isComposing.value) return
   
+  // 检查焦点是否在 FormulaBar 中，如果是则不设置光标（避免抢夺焦点）
+  const activeElement = document.activeElement as HTMLElement | null
+  const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
+  
   const currentPos = preserveCursor ? getCursorPosition() : text.length
   const html = generateFormulaHtml(text)
   
@@ -319,9 +345,12 @@ function updateEditorContent(text: string, preserveCursor: boolean = true) {
     editorRef.innerHTML = html
   }
   
-  nextTick(() => {
-    setCursorPosition(currentPos)
-  })
+  // 只有在 RichTextInput 有焦点或应该有焦点时才设置光标位置
+  if (!isFormulaBarFocused) {
+    nextTick(() => {
+      setCursorPosition(currentPos)
+    })
+  }
 }
 
 // ==================== 事件处理 ====================
@@ -576,10 +605,29 @@ function handleCompositionEnd(e: CompositionEvent) {
 /**
  * 失焦事件
  */
-function handleBlur() {
+function handleBlur(e: FocusEvent) {
+  console.log('[RichTextInput] handleBlur', {
+    relatedTarget: e.relatedTarget,
+    isCancelling: isCancelling.value,
+    formulaMode: formulaMode.value,
+    internalValue: internal.value.substring(0, 50)
+  })
   if (isCancelling.value) return
   if (formulaMode.value) return // 公式模式不自动保存
   
+  // 检查焦点是否转移到 FormulaBar（公式栏）
+  // 如果是，不触发保存，让 FormulaBar 接管编辑
+  const relatedTarget = e.relatedTarget as HTMLElement | null
+  if (relatedTarget) {
+    // 检查是否是 FormulaBar 的输入区域
+    const isFormulaBar = relatedTarget.closest('.formula-bar') !== null
+    if (isFormulaBar) {
+      console.log('[RichTextInput] handleBlur: 焦点转移到 FormulaBar，不触发保存')
+      return
+    }
+  }
+  
+  console.log('[RichTextInput] handleBlur: 发送 save 事件')
   emit('save', internal.value)
 }
 
@@ -817,11 +865,63 @@ watch(
   }
 )
 
+// 🔧 监听 props.value 变化，同步来自 FormulaBar 的输入
+watch(
+  () => props.value,
+  (newValue) => {
+    // 只有当编辑器可见时才处理
+    if (!props.visible || !editorRef) return
+    
+    // 检查焦点是否在 FormulaBar 中
+    const activeElement = document.activeElement as HTMLElement | null
+    const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
+    
+    // 如果焦点在 FormulaBar，更新 internal.value 和 DOM（但不设置光标，避免抢夺焦点）
+    if (isFormulaBarFocused) {
+      if (newValue !== internal.value) {
+        console.log('[RichTextInput] watch props.value: FormulaBar 有焦点，更新内容但不设置光标')
+        internal.value = newValue
+        // 更新 DOM 显示（不设置光标）
+        const html = generateFormulaHtml(newValue)
+        if (editorRef.innerHTML !== html) {
+          editorRef.innerHTML = html
+        }
+      }
+      return
+    }
+    
+    // 如果焦点在 RichTextInput，跳过（用户正在输入）
+    const hasFocus = document.activeElement === editorRef
+    if (hasFocus) {
+      console.log('[RichTextInput] watch props.value: RichTextInput 有焦点，跳过同步')
+      return
+    }
+    
+    // 焦点在其他地方，同步值
+    if (newValue !== internal.value) {
+      console.log('[RichTextInput] watch props.value: 同步值', { 
+        oldValue: internal.value, 
+        newValue 
+      })
+      internal.value = newValue
+      updateEditorContent(newValue, false)
+    }
+  }
+)
+
 // 监听公式引用变化，重新渲染彩色文本
 watch(
   () => props.formulaReferences,
   () => {
     if (formulaMode.value && props.visible && editorRef) {
+      // 如果焦点在 FormulaBar 中，不要更新内容（让 FormulaBar 自己处理）
+      const activeElement = document.activeElement as HTMLElement | null
+      const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
+      if (isFormulaBarFocused) {
+        console.log('[RichTextInput] watch formulaReferences: FormulaBar 有焦点，跳过更新')
+        return
+      }
+      
       // 使用 internal.value，因为 formulaReferences 的 startIndex/endIndex 是基于它计算的
       // 不要使用 editorRef.innerText，因为它可能与 internal.value 不同步
       const currentText = internal.value
@@ -922,9 +1022,10 @@ function findReferenceToReplace(): { start: number; end: number; ref: string } |
 
 /**
  * 插入单元格引用
+ * @returns 返回插入后的完整文本，用于立即更新 formulaReferences
  */
-function insertCellReference(cellAddress: string) {
-  if (!formulaMode.value || !editorRef) return
+function insertCellReference(cellAddress: string): string {
+  if (!formulaMode.value || !editorRef) return ''
   
   const currentText = internal.value
   
@@ -970,19 +1071,22 @@ function insertCellReference(cellAddress: string) {
   })
   
   emit('input-change')
+  
+  return newText
 }
 
 /**
  * 插入区域引用
  */
-function insertRangeReference(startAddr: string, endAddr: string) {
-  insertCellReference(`${startAddr}:${endAddr}`)
+function insertRangeReference(startAddr: string, endAddr: string): string {
+  return insertCellReference(`${startAddr}:${endAddr}`)
 }
 
 defineExpose({
-  formulaMode,
-  isInSelectableState,
-  hasTextSelection,
+  // 使用 getter 确保返回最新值
+  get formulaMode() { return formulaMode.value },
+  get isInSelectableState() { return isInSelectableState.value },
+  get hasTextSelection() { return hasTextSelection.value },
   insertCellReference,
   insertRangeReference,
   getCurrentValue: () => internal.value,
