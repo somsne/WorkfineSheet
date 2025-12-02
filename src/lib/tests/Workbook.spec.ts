@@ -4,6 +4,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Workbook } from '../Workbook'
 
+// Mock initializeDemoData 以避免在测试中加载演示数据
+vi.mock('../demoData', () => ({
+  initializeDemoData: vi.fn()
+}))
+
 describe('Workbook', () => {
   let workbook: Workbook
 
