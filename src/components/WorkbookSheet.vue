@@ -7,6 +7,7 @@
       :current-selection="currentSelection" 
       :selection-range="selectionRange" 
       :multi-selection="multiSelection" 
+      :undo-redo-manager="workbookUndoRedo"
     />
     
     <!-- 公式栏（Workbook 层级） -->
@@ -36,6 +37,7 @@
         ref="canvasSheetRef"
         :key="activeSheetId"
         :external-model="activeSheetData.model"
+        :external-undo-redo="workbookUndoRedo"
         :skip-demo-data="true"
         :initial-view-state="activeSheetData.viewState"
         :clipboard="workbookClipboard"
@@ -68,6 +70,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Workbook, type WorkbookEventType, type WorkbookEvent, type SheetInfo } from '../lib/Workbook'
+import { UndoRedoManager } from '../lib/UndoRedoManager'
 import type { WorkbookClipboard } from './sheet/types'
 // @ts-ignore
 import CanvasSheet from './CanvasSheet.vue'
@@ -106,6 +109,9 @@ const emit = defineEmits<{
 
 /** 工作簿实例 */
 const workbook = ref(new Workbook())
+
+/** 工作簿级别的撤销/重做管理器（所有 Sheet 共享） */
+const workbookUndoRedo = new UndoRedoManager(100)
 
 /** DOM 引用 */
 const mainRef = ref<HTMLElement | null>(null)
@@ -308,12 +314,45 @@ const formulaEditState = ref<{
 onMounted(() => {
   initWorkbook()
   setupEventListeners()
+  // 在捕获阶段监听键盘事件，以便在 CanvasSheet 处理之前拦截 undo/redo
+  document.addEventListener('keydown', handleGlobalKeyDown, true)
 })
 
 onBeforeUnmount(() => {
   // 清理事件监听器
   cleanupEventListeners()
+  document.removeEventListener('keydown', handleGlobalKeyDown, true)
 })
+
+/**
+ * 全局键盘事件处理（捕获阶段）
+ * 拦截所有撤销/重做快捷键，统一在 WorkbookSheet 中处理选区跳转
+ */
+function handleGlobalKeyDown(e: KeyboardEvent) {
+  // 只处理 Ctrl/Cmd + Z (撤销) 和 Ctrl/Cmd + Y / Ctrl/Cmd + Shift + Z (重做)
+  const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey
+  const isRedo = (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))
+  
+  if (!isUndo && !isRedo) return
+  
+  // 检查是否有可撤销/重做的操作
+  const targetSheetId = isUndo 
+    ? workbookUndoRedo.peekUndoSheetId() 
+    : workbookUndoRedo.peekRedoSheetId()
+  
+  // 如果没有可撤销/重做的操作，不拦截
+  if (!targetSheetId) return
+  
+  // 拦截所有撤销/重做操作，统一处理选区跳转
+  e.preventDefault()
+  e.stopPropagation()
+  
+  if (isUndo) {
+    undo()
+  } else {
+    redo()
+  }
+}
 
 /** 初始化工作簿 */
 function initWorkbook() {
@@ -479,6 +518,8 @@ function handleSheetRename(sheetId: string, newName: string) {
 function handleSheetDelete(sheetId: string) {
   try {
     workbook.value.removeSheet(sheetId)
+    // 删除 Sheet 后清空撤销/重做栈，因为相关操作已无效
+    workbookUndoRedo.clear()
   } catch (error) {
     console.error('删除失败:', error)
   }
@@ -587,7 +628,12 @@ function addSheet(name?: string, insertIndex?: number): string {
 
 /** 删除工作表 */
 function removeSheet(sheetId: string): boolean {
-  return workbook.value.removeSheet(sheetId)
+  const result = workbook.value.removeSheet(sheetId)
+  if (result) {
+    // 删除 Sheet 后清空撤销/重做栈，因为相关操作已无效
+    workbookUndoRedo.clear()
+  }
+  return result
 }
 
 /** 重命名工作表 */
@@ -851,14 +897,112 @@ function unmergeSelection() {
   canvasSheetRef.value?.unmergeSelection?.()
 }
 
-/** 撤销 */
+/** 
+ * 撤销
+ * 自动切换到操作所在的 Sheet 并选中受影响区域
+ */
 function undo() {
-  canvasSheetRef.value?.undo?.()
+  // 获取即将撤销的操作信息
+  const targetSheetId = workbookUndoRedo.peekUndoSheetId()
+  
+  // 先执行撤销操作（数据层立即生效）
+  const action = workbookUndoRedo.undo()
+  if (!action) return
+  
+  // 如果操作在不同 Sheet，切换过去
+  if (targetSheetId && targetSheetId !== activeSheetId.value) {
+    // 先保存当前 Sheet 状态
+    saveCurrentSheetState()
+    
+    // 在切换之前，更新目标 Sheet 的 viewState（包含选区信息）
+    // 这样新挂载的 CanvasSheet 会使用更新后的选区
+    if (action.undoSelection) {
+      const targetViewState = workbook.value.getSheetViewState(targetSheetId)
+      if (targetViewState) {
+        workbook.value.saveSheetViewState(targetSheetId, {
+          ...targetViewState,
+          activeCell: { 
+            row: action.undoSelection.startRow, 
+            col: action.undoSelection.startCol 
+          },
+          selectionRange: {
+            startRow: action.undoSelection.startRow,
+            startCol: action.undoSelection.startCol,
+            endRow: action.undoSelection.endRow,
+            endCol: action.undoSelection.endCol
+          }
+        })
+      }
+    }
+    
+    // 切换到目标 Sheet
+    workbook.value.setActiveSheet(targetSheetId)
+  } else {
+    // 同一 Sheet，直接选中并重绘
+    if (action.undoSelection && canvasSheetRef.value) {
+      canvasSheetRef.value.selectRange?.(
+        action.undoSelection.startRow,
+        action.undoSelection.startCol,
+        action.undoSelection.endRow,
+        action.undoSelection.endCol
+      )
+    }
+    canvasSheetRef.value?.redraw?.()
+  }
 }
 
-/** 重做 */
+/** 
+ * 重做
+ * 自动切换到操作所在的 Sheet 并选中受影响区域
+ */
 function redo() {
-  canvasSheetRef.value?.redo?.()
+  // 获取即将重做的操作信息
+  const targetSheetId = workbookUndoRedo.peekRedoSheetId()
+  
+  // 先执行重做操作（数据层立即生效）
+  const action = workbookUndoRedo.redo()
+  if (!action) return
+  
+  // 如果操作在不同 Sheet，切换过去
+  if (targetSheetId && targetSheetId !== activeSheetId.value) {
+    // 先保存当前 Sheet 状态
+    saveCurrentSheetState()
+    
+    // 在切换之前，更新目标 Sheet 的 viewState（包含选区信息）
+    // 这样新挂载的 CanvasSheet 会使用更新后的选区
+    if (action.redoSelection) {
+      const targetViewState = workbook.value.getSheetViewState(targetSheetId)
+      if (targetViewState) {
+        workbook.value.saveSheetViewState(targetSheetId, {
+          ...targetViewState,
+          activeCell: { 
+            row: action.redoSelection.startRow, 
+            col: action.redoSelection.startCol 
+          },
+          selectionRange: {
+            startRow: action.redoSelection.startRow,
+            startCol: action.redoSelection.startCol,
+            endRow: action.redoSelection.endRow,
+            endCol: action.redoSelection.endCol
+          }
+        })
+      }
+    }
+    
+    // 切换到目标 Sheet
+    workbook.value.setActiveSheet(targetSheetId)
+  } else {
+    // 同一 Sheet，直接选中并重绘
+    if (action.redoSelection && canvasSheetRef.value) {
+      canvasSheetRef.value.selectRange?.(
+        action.redoSelection.startRow,
+        action.redoSelection.startCol,
+        action.redoSelection.endRow,
+        action.redoSelection.endCol
+      )
+    }
+    canvasSheetRef.value?.redraw?.()
+  }
 }
 
 /** 检查是否可以撤销 */

@@ -47,6 +47,8 @@ export interface UseFillHandleOptions {
   getFormulaSheet: () => FormulaSheet
   /** 获取撤销管理器 */
   getUndoRedoManager: () => UndoRedoManager
+  /** 获取当前 Sheet ID（用于 UndoRedo 操作记录） */
+  getSheetId?: () => string | undefined
   /** 总行数 */
   totalRows: number
   /** 总列数 */
@@ -100,6 +102,7 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     getModel,
     getFormulaSheet,
     getUndoRedoManager,
+    getSheetId,
     totalRows,
     totalCols,
     scheduleRedraw,
@@ -276,28 +279,6 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     // 清除公式缓存
     formulaSheet.clearFormulaCache()
     
-    // 注册撤销操作
-    undoRedoManager.execute({
-      name: '清除',
-      redo: () => {
-        for (let r = clearArea.startRow; r <= clearArea.endRow; r++) {
-          for (let c = clearArea.startCol; c <= clearArea.endCol; c++) {
-            model.setValue(r, c, '')
-          }
-        }
-        formulaSheet.clearFormulaCache()
-        scheduleRedraw()
-      },
-      undo: () => {
-        for (const [key, value] of oldValues) {
-          const [r, c] = key.split(',').map(Number)
-          model.setValue(r!, c!, value)
-        }
-        formulaSheet.clearFormulaCache()
-        scheduleRedraw()
-      }
-    })
-    
     // 计算新的选择范围（保留区域 = 源区域 - 清除区域）
     let newSelectionRange: SelectionRange
     
@@ -334,6 +315,33 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
         endCol: sourceRange.endCol
       }
     }
+    
+    // 注册撤销操作（包含选区信息）
+    undoRedoManager.execute({
+      name: '清除',
+      sheetId: getSheetId?.(),
+      // 撤销后选中原来的源区域
+      undoSelection: { ...sourceRange },
+      // 重做后选中新的保留区域
+      redoSelection: { ...newSelectionRange },
+      redo: () => {
+        for (let r = clearArea.startRow; r <= clearArea.endRow; r++) {
+          for (let c = clearArea.startCol; c <= clearArea.endCol; c++) {
+            model.setValue(r, c, '')
+          }
+        }
+        formulaSheet.clearFormulaCache()
+        scheduleRedraw()
+      },
+      undo: () => {
+        for (const [key, value] of oldValues) {
+          const [r, c] = key.split(',').map(Number)
+          model.setValue(r!, c!, value)
+        }
+        formulaSheet.clearFormulaCache()
+        scheduleRedraw()
+      }
+    })
     
     updateSelectionRange(newSelectionRange)
   }
@@ -502,9 +510,22 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     // 清除公式缓存
     formulaSheet.clearFormulaCache()
     
-    // 注册撤销操作
+    // 计算填充后的新选区
+    const newSelectionRange: SelectionRange = {
+      startRow: Math.min(sourceRange.startRow, previewRange.startRow),
+      startCol: Math.min(sourceRange.startCol, previewRange.startCol),
+      endRow: Math.max(sourceRange.endRow, previewRange.endRow),
+      endCol: Math.max(sourceRange.endCol, previewRange.endCol)
+    }
+    
+    // 注册撤销操作（包含选区信息）
     undoRedoManager.execute({
       name: '填充',
+      sheetId: getSheetId?.(),
+      // 撤销后选中原来的源区域
+      undoSelection: { ...sourceRange },
+      // 重做后选中新的扩展选区
+      redoSelection: { ...newSelectionRange },
       redo: () => {
         for (const [key, value] of newValues) {
           const [r, c] = key.split(',').map(Number)
@@ -565,13 +586,6 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
       }
     })
     
-    // 扩展选择范围到包含填充区域
-    const newSelectionRange: SelectionRange = {
-      startRow: Math.min(sourceRange.startRow, previewRange.startRow),
-      startCol: Math.min(sourceRange.startCol, previewRange.startCol),
-      endRow: Math.max(sourceRange.endRow, previewRange.endRow),
-      endCol: Math.max(sourceRange.endCol, previewRange.endCol)
-    }
     updateSelectionRange(newSelectionRange)
   }
   

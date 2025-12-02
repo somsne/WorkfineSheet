@@ -35,6 +35,11 @@ import { getRowTop, getColLeft, getRowHeight, getColWidth } from '../geometry'
 export interface UseSheetImagesOptions {
   model: SheetModel
   undoRedo: UndoRedoManager
+  /** 可选的 UndoRedo 执行器，如果提供则使用它而不是 undoRedo（用于添加 sheetId） */
+  undoRedoExecutor?: {
+    execute(action: { name: string; undo: () => void; redo: () => void }): void
+    record(action: { name: string; undo: () => void; redo: () => void }): void
+  }
   /** 视口状态（reactive 对象） */
   viewport: Viewport
   /** 获取尺寸访问器的函数 */
@@ -107,6 +112,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
   const {
     model,
     undoRedo,
+    undoRedoExecutor,
     viewport,
     getSizes,
     getGeometryConfig,
@@ -117,6 +123,9 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     totalCols,
     requestDraw
   } = options
+  
+  // 使用传入的执行器或默认的 undoRedo
+  const undoRedoExec = undoRedoExecutor ?? undoRedo
 
   // 图片加载器
   const imageLoader = new ImageLoader()
@@ -441,7 +450,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
             offsetY: newAnchor.offsetY
           }
 
-          undoRedo.execute({
+          undoRedoExec.execute({
             name: '移动图片',
             redo: () => {
               model.updateFloatingImage(image.id, {
@@ -467,7 +476,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
           const oldImage = { ...dragStartImage }
           const newImage = { ...image }
 
-          undoRedo.execute({
+          undoRedoExec.execute({
             name: '调整图片大小',
             redo: () => {
               model.updateFloatingImage(image.id, {
@@ -538,7 +547,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       const newOffsetX = oldOffsetX + deltaX
       const newOffsetY = oldOffsetY + deltaY
 
-      undoRedo.execute({
+      undoRedoExec.execute({
         name: '移动图片',
         redo: () => {
           model.updateFloatingImage(image.id, { offsetX: newOffsetX, offsetY: newOffsetY })
@@ -610,7 +619,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       const fullImageData = model.getFloatingImage(imageId)!
 
       // 记录撤销操作（图片已经添加，使用 record 而非 execute）
-      undoRedo.record({
+      undoRedoExec.record({
         name: '插入图片',
         redo: () => {
           model.restoreFloatingImage(fullImageData)
@@ -695,7 +704,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       const fullImageData = model.getFloatingImage(imageId)!
 
       // 记录撤销操作（图片已经添加，使用 record 而非 execute）
-      undoRedo.record({
+      undoRedoExec.record({
         name: '插入图片',
         redo: () => {
           model.restoreFloatingImage(fullImageData)
@@ -734,7 +743,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     const deletedImage = { ...image }
     const imageId = selectedImageId.value
 
-    undoRedo.execute({
+    undoRedoExec.execute({
       name: '删除图片',
       redo: () => {
         model.deleteFloatingImage(imageId)
@@ -782,7 +791,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       const targetId = targetImage.id
       const newZIndex = targetImage.zIndex
 
-      undoRedo.execute({
+      undoRedoExec.execute({
         name: '上移一层',
         redo: () => {
           model.bringImageForward(image.id)
@@ -819,7 +828,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       const targetId = targetImage.id
       const newZIndex = targetImage.zIndex
 
-      undoRedo.execute({
+      undoRedoExec.execute({
         name: '下移一层',
         redo: () => {
           model.sendImageBackward(image.id)
@@ -846,7 +855,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
 
     const oldZIndex = image.zIndex
 
-    undoRedo.execute({
+    undoRedoExec.execute({
       name: '置于顶层',
       redo: () => {
         model.bringImageToFront(image.id)
@@ -870,7 +879,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
 
     const oldZIndex = image.zIndex
 
-    undoRedo.execute({
+    undoRedoExec.execute({
       name: '置于底层',
       redo: () => {
         model.sendImageToBack(image.id)
@@ -919,7 +928,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       if (!addedImage) return null
 
       // 记录撤销操作
-      undoRedo.record({
+      undoRedoExec.record({
         name: '插入单元格图片',
         redo: () => {
           model.addCellImage(row, col, { ...imageData, id: imageId, timestamp: addedImage.timestamp } as any)
@@ -968,7 +977,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
       if (!addedImage) return null
 
       // 记录撤销操作
-      undoRedo.record({
+      undoRedoExec.record({
         name: '插入单元格图片',
         redo: () => {
           model.addCellImage(row, col, { ...imageData, id: imageId, timestamp: addedImage.timestamp } as any)
@@ -995,7 +1004,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     const removedImage = model.removeCellImage(row, col, imageId)
     if (!removedImage) return
 
-    undoRedo.record({
+    undoRedoExec.record({
       name: '删除单元格图片',
       redo: () => {
         model.removeCellImage(row, col, imageId)
@@ -1024,7 +1033,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     const removedImages = model.clearCellImages(row, col)
     if (removedImages.length === 0) return
 
-    undoRedo.record({
+    undoRedoExec.record({
       name: '清除单元格图片',
       redo: () => {
         model.clearCellImages(row, col)
@@ -1065,7 +1074,7 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     const oldHAlign = image.horizontalAlign
     const oldVAlign = image.verticalAlign
 
-    undoRedo.execute({
+    undoRedoExec.execute({
       name: '更新图片对齐',
       redo: () => {
         model.updateCellImageAlignment(row, col, imageId, horizontalAlign, verticalAlign)

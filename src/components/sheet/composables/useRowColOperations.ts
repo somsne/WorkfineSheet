@@ -20,9 +20,14 @@ export interface UseRowColOperationsOptions {
   state: SheetState
   geometry: SheetGeometry
   onDraw: () => void
+  /** 可选的 UndoRedo 执行器，如果提供则使用它而不是 state.undoRedo（用于添加 sheetId） */
+  undoRedoExecutor?: {
+    execute(action: { name: string; undo: () => void; redo: () => void }): void
+    record(action: { name: string; undo: () => void; redo: () => void }): void
+  }
 }
 
-export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperationsOptions) {
+export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor }: UseRowColOperationsOptions) {
   const {
     constants,
     model, formulaSheet, undoRedo,
@@ -33,6 +38,9 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
     saveRowHeightsSnapshot, restoreRowHeights,
     saveColWidthsSnapshot, restoreColWidths
   } = state
+  
+  // 使用传入的执行器或默认的 undoRedo
+  const undoRedoExec = undoRedoExecutor ?? undoRedo
   
   const { getRowHeight, getColWidth } = geometry
   
@@ -76,7 +84,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `在第 ${row + 1} 行上方插入 ${count} 行`
       : `在第 ${row + 1} 行上方插入行`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
@@ -117,7 +125,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `在第 ${row + 1} 行下方插入 ${count} 行`
       : `在第 ${row + 1} 行下方插入行`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
@@ -157,7 +165,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `删除第 ${row + 1} - ${row + count} 行`
       : `删除第 ${row + 1} 行`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
@@ -205,7 +213,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `在第 ${col + 1} 列左侧插入 ${count} 列`
       : `在第 ${col + 1} 列左侧插入列`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
@@ -244,7 +252,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `在第 ${col + 1} 列右侧插入 ${count} 列`
       : `在第 ${col + 1} 列右侧插入列`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
@@ -285,7 +293,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
       ? `删除第 ${col + 1} - ${col + count} 列`
       : `删除第 ${col + 1} 列`
     
-    undoRedo.record({
+    undoRedoExec.record({
       name: actionName,
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)

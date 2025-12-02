@@ -9,13 +9,21 @@ import { parseFormulaReferences } from '../references'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 
+/** UndoRedo 执行器接口（支持自定义包装器） */
+interface UndoRedoExecutor {
+  execute(action: { name: string; undo: () => void; redo: () => void }): void
+  record(action: { name: string; undo: () => void; redo: () => void }): void
+}
+
 export interface UseSheetInputOptions {
   state: SheetState
   geometry: SheetGeometry
   onDraw: () => void
+  /** 可选的 UndoRedo 执行器，如果提供则使用它而不是 state.undoRedo */
+  undoRedoExecutor?: UndoRedoExecutor
 }
 
-export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions) {
+export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: UseSheetInputOptions) {
   const {
     constants,
     overlayInput, imeProxy,
@@ -27,6 +35,9 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
     rowHeights, manualRowHeights, model,
     copyRange, internalClipboard, lastCopyTs
   } = state
+  
+  // 使用传入的执行器或默认的 state.undoRedo
+  const undoRedoExec = undoRedoExecutor ?? undoRedo
   
   const { createSizeAccess, createGeometryConfig, getRowHeight, getColWidth, getRowTop, getColLeft } = geometry
   
@@ -95,7 +106,7 @@ export function useSheetInput({ state, geometry, onDraw }: UseSheetInputOptions)
       // 如果修改了复制区域内的单元格，清除蚂蚁线
       checkAndClearCopyRange(row, col)
       
-      undoRedo.execute({
+      undoRedoExec.execute({
         name: `Edit cell (${row}, ${col})`,
         undo: () => {
           formulaSheet.setValue(row, col, oldValue)

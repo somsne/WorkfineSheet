@@ -128,6 +128,7 @@ import { renderFloatingImages } from './sheet/images'
 import type { SheetModel } from '../lib/SheetModel'
 import type { SheetViewState } from '../lib/Workbook'
 import type { WorkbookClipboard } from './sheet/types'
+import type { UndoRedoManager } from '../lib/UndoRedoManager'
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
@@ -142,18 +143,21 @@ import ImagePreview from './ImagePreview.vue'
 interface Props {
   /** 外部传入的 SheetModel（多工作表模式使用） */
   externalModel?: SheetModel
+  /** 外部传入的 UndoRedoManager（多工作表模式使用，所有 Sheet 共享） */
+  externalUndoRedo?: UndoRedoManager
   /** 是否跳过演示数据初始化 */
   skipDemoData?: boolean
   /** 初始视图状态（多工作表模式切换时恢复） */
   initialViewState?: SheetViewState
   /** 外部剪贴板（Workbook 层级管理，可选） */
   clipboard?: WorkbookClipboard | null
-  /** 当前 Sheet ID（用于判断蚂蚁线显示） */
+  /** 当前 Sheet ID（用于判断蚂蚁线显示和 UndoRedo 操作记录） */
   sheetId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   externalModel: undefined,
+  externalUndoRedo: undefined,
   skipDemoData: false,
   initialViewState: undefined,
   clipboard: undefined,
@@ -193,8 +197,73 @@ const emit = defineEmits<{
 // ==================== 初始化状态 ====================
 const state = useSheetState({
   externalModel: props.externalModel,
+  externalUndoRedo: props.externalUndoRedo,
   skipDemoData: props.skipDemoData
 })
+
+// ==================== UndoRedo 包装器（自动添加 sheetId 和选区）====================
+
+/** 受影响区域信息 */
+interface AffectedRange {
+  startRow: number
+  startCol: number
+  endRow: number
+  endCol: number
+}
+
+/** 包装后的 UndoRedo 操作类型 */
+interface WrappedUndoRedoAction {
+  name: string
+  undo: () => void
+  redo: () => void
+  /** 撤销后应选中的区域（如果未提供，将使用执行时的当前选区） */
+  undoSelection?: AffectedRange
+  /** 重做后应选中的区域（如果未提供，将使用执行时的当前选区） */
+  redoSelection?: AffectedRange
+}
+
+/**
+ * 获取当前选区作为 AffectedRange
+ */
+function getCurrentSelectionRange(): AffectedRange {
+  return {
+    startRow: state.selectionRange.startRow,
+    startCol: state.selectionRange.startCol,
+    endRow: state.selectionRange.endRow,
+    endCol: state.selectionRange.endCol
+  }
+}
+
+/**
+ * 包装 undoRedo 操作，自动添加当前 sheetId 和选区信息
+ * 这样所有操作都会记录它所属的 Sheet，以及撤销/重做后应该选中的区域
+ */
+const undoRedoWithSheetId = {
+  execute(action: WrappedUndoRedoAction) {
+    // 如果没有提供选区信息，使用当前选区
+    const currentSelection = getCurrentSelectionRange()
+    const sheetId = props.sheetId || undefined
+    state.undoRedo.execute({
+      ...action,
+      sheetId,
+      // 撤销后选中操作前的选区（通常就是当前选区）
+      undoSelection: action.undoSelection ?? currentSelection,
+      // 重做后也选中同样的区域
+      redoSelection: action.redoSelection ?? currentSelection
+    })
+  },
+  record(action: WrappedUndoRedoAction) {
+    // 如果没有提供选区信息，使用当前选区
+    const currentSelection = getCurrentSelectionRange()
+    const sheetId = props.sheetId || undefined
+    state.undoRedo.record({
+      ...action,
+      sheetId,
+      undoSelection: action.undoSelection ?? currentSelection,
+      redoSelection: action.redoSelection ?? currentSelection
+    })
+  }
+}
 
 // ==================== DOM 引用绑定 ====================
 const containerRef = ref<HTMLElement | null>(null)
@@ -235,6 +304,7 @@ const fillHandle = useFillHandle({
   getModel: () => state.model,
   getFormulaSheet: () => state.formulaSheet,
   getUndoRedoManager: () => state.undoRedo,
+  getSheetId: () => props.sheetId || undefined,
   totalRows: state.constants.DEFAULT_ROWS,
   totalCols: state.constants.DEFAULT_COLS,
   scheduleRedraw: () => scheduleRedrawFn(),
@@ -253,11 +323,12 @@ const drawing = useSheetDrawing({ state, geometry, fillHandle })
 drawFn = drawing.draw
 scheduleRedrawFn = drawing.scheduleRedraw
 
-// 4. 输入处理
+// 4. 输入处理（使用带 sheetId 的 undoRedo 包装器）
 const input = useSheetInput({ 
   state, 
   geometry, 
-  onDraw: drawing.draw 
+  onDraw: drawing.draw,
+  undoRedoExecutor: undoRedoWithSheetId
 })
 
 // 5. 剪贴板（支持外部剪贴板模式）
@@ -282,11 +353,12 @@ const clipboard = useSheetClipboard({
   }
 })
 
-// 6. 行列操作
+// 6. 行列操作（使用带 sheetId 的 undoRedo 包装器）
 const rowColOps = useRowColOperations({ 
   state, 
   geometry, 
-  onDraw: drawing.draw 
+  onDraw: drawing.draw,
+  undoRedoExecutor: undoRedoWithSheetId
 })
 
 // 7. 键盘处理
@@ -310,10 +382,11 @@ const mouse = useSheetMouse({
   fillHandle
 })
 
-// 9. 图片处理
+// 9. 图片处理（使用带 sheetId 的 undoRedo 包装器）
 const images = useSheetImages({
   model: state.model,
   undoRedo: state.undoRedo,
+  undoRedoExecutor: undoRedoWithSheetId,
   viewport: state.viewport,
   getSizes: () => geometry.createSizeAccess(),
   getGeometryConfig: () => geometry.createGeometryConfig(),
@@ -728,7 +801,7 @@ const api = createSheetAPI({
   getCellStyleFn: (row: number, col: number) => state.model.getCellStyle(row, col),
   setCellStyleFn: (row: number, col: number, style) => {
     const oldStyle = { ...state.model.getCellStyle(row, col) }
-    state.undoRedo.execute({
+    undoRedoWithSheetId.execute({
       name: `设置单元格样式 (${row}, ${col})`,
       undo: () => {
         state.model.clearCellStyle(row, col)
@@ -746,7 +819,7 @@ const api = createSheetAPI({
   clearCellStyleFn: (row: number, col: number) => {
     const oldStyle = { ...state.model.getCellStyle(row, col) }
     if (Object.keys(oldStyle).length > 0) {
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `清除单元格样式 (${row}, ${col})`,
         undo: () => {
           state.model.setCellStyle(row, col, oldStyle)
@@ -775,7 +848,7 @@ const api = createSheetAPI({
         oldColStyles.push({ col: c, style: state.model.getColStyle(c) })
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置列样式 (${startCol}-${endCol})`,
         undo: () => {
           for (const { col, style: oldStyle } of oldColStyles) {
@@ -800,7 +873,7 @@ const api = createSheetAPI({
         oldRowStyles.push({ row: r, style: state.model.getRowStyle(r) })
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置行样式 (${startRow}-${endRow})`,
         undo: () => {
           for (const { row, style: oldStyle } of oldRowStyles) {
@@ -827,7 +900,7 @@ const api = createSheetAPI({
         }
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置区域样式 (${startRow},${startCol})-(${endRow},${endCol})`,
         undo: () => {
           for (const { row, col, style: oldStyle } of oldStyles) {
@@ -850,7 +923,7 @@ const api = createSheetAPI({
   getCellBorderFn: (row: number, col: number) => state.model.getCellBorder(row, col),
   setCellBorderFn: (row: number, col: number, border) => {
     const oldBorder = state.model.getCellBorder(row, col)
-    state.undoRedo.execute({
+    undoRedoWithSheetId.execute({
       name: `设置单元格边框 (${row}, ${col})`,
       undo: () => {
         state.model.clearCellBorder(row, col)
@@ -868,7 +941,7 @@ const api = createSheetAPI({
   clearCellBorderFn: (row: number, col: number) => {
     const oldBorder = state.model.getCellBorder(row, col)
     if (oldBorder) {
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `清除单元格边框 (${row}, ${col})`,
         undo: () => {
           state.model.setCellBorder(row, col, oldBorder)
@@ -889,7 +962,7 @@ const api = createSheetAPI({
       }
     }
     
-    state.undoRedo.execute({
+    undoRedoWithSheetId.execute({
       name: `设置区域边框 (${startRow},${startCol})-(${endRow},${endCol})`,
       undo: () => {
         for (const { row, col, border: oldBorder } of oldBorders) {
@@ -914,7 +987,7 @@ const api = createSheetAPI({
       }
     }
     
-    state.undoRedo.execute({
+    undoRedoWithSheetId.execute({
       name: `设置区域外边框 (${startRow},${startCol})-(${endRow},${endCol})`,
       undo: () => {
         for (const { row, col, border: oldBorder } of oldBorders) {
@@ -943,7 +1016,7 @@ const api = createSheetAPI({
     }
     
     if (oldBorders.length > 0) {
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `清除区域边框 (${startRow},${startCol})-(${endRow},${endCol})`,
         undo: () => {
           for (const { row, col, border } of oldBorders) {
@@ -978,7 +1051,7 @@ const api = createSheetAPI({
   getCellFormatFn: (row: number, col: number) => state.formulaSheet.getCellFormat(row, col),
   setCellFormatFn: (row: number, col: number, format) => {
     const oldFormat = state.model.getCellFormat(row, col)
-    state.undoRedo.execute({
+    undoRedoWithSheetId.execute({
       name: `设置单元格格式 (${row}, ${col})`,
       undo: () => {
         if (oldFormat) {
@@ -997,7 +1070,7 @@ const api = createSheetAPI({
   clearCellFormatFn: (row: number, col: number) => {
     const oldFormat = state.model.getCellFormat(row, col)
     if (oldFormat) {
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `清除单元格格式 (${row}, ${col})`,
         undo: () => {
           state.model.setCellFormat(row, col, oldFormat)
@@ -1026,7 +1099,7 @@ const api = createSheetAPI({
         oldColFormats.push({ col: c, format: state.model.getColFormat(c) })
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置列格式 (${startCol}-${endCol})`,
         undo: () => {
           for (const { col, format: oldFormat } of oldColFormats) {
@@ -1051,7 +1124,7 @@ const api = createSheetAPI({
         oldRowFormats.push({ row: r, format: state.model.getRowFormat(r) })
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置行格式 (${startRow}-${endRow})`,
         undo: () => {
           for (const { row, format: oldFormat } of oldRowFormats) {
@@ -1078,7 +1151,7 @@ const api = createSheetAPI({
         }
       }
       
-      state.undoRedo.execute({
+      undoRedoWithSheetId.execute({
         name: `设置区域格式 (${startRow},${startCol})-(${endRow},${endCol})`,
         undo: () => {
           for (const { row, col, format: oldFormat } of oldFormats) {
@@ -1121,7 +1194,7 @@ const api = createSheetAPI({
     
     state.formulaSheet.clearFormulaCache()
     
-    state.undoRedo.record({
+    undoRedoWithSheetId.record({
       name: `合并单元格 (${startRow},${startCol})-(${endRow},${endCol})`,
       undo: () => {
         state.model.unmergeCells(startRow, startCol)
@@ -1151,7 +1224,7 @@ const api = createSheetAPI({
     state.model.unmergeCells(row, col)
     state.formulaSheet.clearFormulaCache()
     
-    state.undoRedo.record({
+    undoRedoWithSheetId.record({
       name: `取消合并 (${region.startRow},${region.startCol})-(${region.endRow},${region.endCol})`,
       undo: () => {
         state.model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
@@ -1180,8 +1253,8 @@ const api = createSheetAPI({
     state.model.hasDataToLose(startRow, startCol, endRow, endCol),
   
   // 撤销还原相关
-  undoFn: () => state.undoRedo.undo(),
-  redoFn: () => state.undoRedo.redo(),
+  undoFn: () => state.undoRedo.undo() !== null,
+  redoFn: () => state.undoRedo.redo() !== null,
   canUndoFn: () => state.undoRedo.canUndo(),
   canRedoFn: () => state.undoRedo.canRedo(),
   
@@ -1509,6 +1582,7 @@ function selectCell(row: number, col: number) {
 
 /** 选择范围 */
 function selectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
+  // 更新选区状态
   state.selected.row = startRow
   state.selected.col = startCol
   state.selectionRange.startRow = startRow
@@ -1516,10 +1590,17 @@ function selectRange(startRow: number, startCol: number, endRow: number, endCol:
   state.selectionRange.endRow = endRow
   state.selectionRange.endCol = endCol
   
-  // 确保起始单元格可见
-  geometry.ensureVisible(startRow, startCol)
-  
-  drawing.draw()
+  // 确保起始单元格可见并绘制
+  // 如果 container 尚未就绪（Sheet 切换后），等待一帧后重试
+  if (!state.container.value) {
+    requestAnimationFrame(() => {
+      geometry.ensureVisible(startRow, startCol)
+      drawing.draw()
+    })
+  } else {
+    geometry.ensureVisible(startRow, startCol)
+    drawing.draw()
+  }
   // watch 会自动发射选区变化事件
 }
 

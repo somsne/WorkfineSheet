@@ -425,6 +425,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { SheetAPI } from './sheet/api'
 import type { CellStyle, BorderStyle, CellFormatType } from './sheet/types'
 import { isMac, isWindows, isLinux, DEFAULT_FONT_FAMILY } from './sheet/defaultFont'
+import type { UndoRedoManager } from '../lib/UndoRedoManager'
 
 const props = defineProps<{
   api: SheetAPI
@@ -434,6 +435,8 @@ const props = defineProps<{
     ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
     active: boolean
   }
+  /** 可选的 UndoRedoManager，如果提供则监听变化来更新状态，否则使用轮询 */
+  undoRedoManager?: UndoRedoManager
 }>()
 
 // 使用导入的 OS 检测结果
@@ -689,19 +692,35 @@ const handleClickOutside = (e: MouseEvent) => {
   }
 }
 
-// 定时器 ID，用于更新撤销还原状态和格式刷状态
+// 定时器 ID，用于更新撤销还原状态和格式刷状态（仅当没有提供 undoRedoManager 时使用）
 let undoRedoTimer: ReturnType<typeof setInterval> | null = null
+
+// 注册监听器时的取消函数
+let removeUndoRedoListener: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   // 初始化撤销还原状态
   updateUndoRedoState()
   updateFormatPainterState()
-  // 定期更新撤销还原状态和格式刷状态（因为操作可能来自快捷键）
-  undoRedoTimer = setInterval(() => {
-    updateUndoRedoState()
-    updateFormatPainterState()
-  }, 200)
+  
+  // 如果提供了 undoRedoManager，使用监听器来更新状态（更高效）
+  // 否则使用定时器轮询（向后兼容）
+  if (props.undoRedoManager) {
+    removeUndoRedoListener = props.undoRedoManager.addChangeListener(() => {
+      updateUndoRedoState()
+    })
+    // 格式刷状态仍需要轮询（没有监听机制）
+    undoRedoTimer = setInterval(() => {
+      updateFormatPainterState()
+    }, 200)
+  } else {
+    // 无监听器时，定期更新撤销还原状态和格式刷状态（因为操作可能来自快捷键）
+    undoRedoTimer = setInterval(() => {
+      updateUndoRedoState()
+      updateFormatPainterState()
+    }, 200)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -709,6 +728,10 @@ onBeforeUnmount(() => {
   if (undoRedoTimer) {
     clearInterval(undoRedoTimer)
     undoRedoTimer = null
+  }
+  if (removeUndoRedoListener) {
+    removeUndoRedoListener()
+    removeUndoRedoListener = null
   }
 })
 

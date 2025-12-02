@@ -109,6 +109,8 @@ export interface SheetStateOptions {
   constants?: SheetConstants
   /** 外部传入的 SheetModel（多工作表模式使用） */
   externalModel?: SheetModel
+  /** 外部传入的 UndoRedoManager（多工作表模式使用，所有 Sheet 共享） */
+  externalUndoRedo?: UndoRedoManager
   /** 是否跳过演示数据初始化 */
   skipDemoData?: boolean
 }
@@ -130,7 +132,8 @@ export function useSheetState(options: SheetStateOptions = {}) {
   // 如果提供了外部 model，使用外部的；否则创建新的
   const model = options.externalModel ?? new SheetModel()
   const formulaSheet = new FormulaSheet(model, true) // 启用异步计算
-  const undoRedo = new UndoRedoManager(100)
+  // 如果提供了外部 undoRedo，使用外部的；否则创建新的
+  const undoRedo = options.externalUndoRedo ?? new UndoRedoManager(100)
   
   // 只有在没有外部 model 且没有跳过演示数据时才初始化演示数据
   if (!options.externalModel && !options.skipDemoData) {

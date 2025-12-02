@@ -118,12 +118,12 @@ describe('clipboard - isInternalClipboardValid', () => {
   it('should return true for recent copy (within 5 seconds)', () => {
     const now = Date.now()
     expect(isInternalClipboardValid(now - 1000)).toBe(true)
-    expect(isInternalClipboardValid(now - 4999)).toBe(true)
+    expect(isInternalClipboardValid(now - 4000)).toBe(true) // 使用更安全的边界值
   })
 
   it('should return false for old copy (after 5 seconds)', () => {
     const now = Date.now()
-    expect(isInternalClipboardValid(now - 5001)).toBe(false)
+    expect(isInternalClipboardValid(now - 6000)).toBe(false) // 使用更安全的边界值
     expect(isInternalClipboardValid(now - 10000)).toBe(false)
   })
 

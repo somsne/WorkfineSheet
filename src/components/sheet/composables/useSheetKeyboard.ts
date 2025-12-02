@@ -62,7 +62,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
     // 撤销 (Ctrl/Cmd + Z)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
       e.preventDefault()
-      if (undoRedo.undo()) {
+      if (undoRedo.undo() !== null) {
         onDraw()
       }
       return
@@ -71,7 +71,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
     // 重做 (Ctrl/Cmd + Y 或 Ctrl/Cmd + Shift + Z)
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
       e.preventDefault()
-      if (undoRedo.redo()) {
+      if (undoRedo.redo() !== null) {
         onDraw()
       }
       return
