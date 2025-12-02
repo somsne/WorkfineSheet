@@ -9,6 +9,7 @@
  */
 
 import { SheetModel, type ModelSnapshot } from './SheetModel'
+import { initializeDemoData } from './demoData'
 
 /**
  * 工作表视图状态（用于切换时保存/恢复）
@@ -132,6 +133,8 @@ export class Workbook {
   constructor() {
     // 默认创建一个工作表
     this.addSheet('Sheet1')
+    // 加载演示数据（会重命名工作表并创建第二个）
+    initializeDemoData(this)
   }
 
   // ==================== 工作表查询方法 ====================
@@ -242,6 +245,8 @@ export class Workbook {
     }
 
     // 创建工作表
+    const model = new SheetModel()
+    
     const sheetInfo: SheetInfo = {
       metadata: {
         id,
@@ -249,7 +254,7 @@ export class Workbook {
         visible: true,
         order
       },
-      model: new SheetModel(),
+      model,
       viewState: createDefaultViewState()
     }
 

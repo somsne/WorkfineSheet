@@ -13,7 +13,7 @@
  */
 
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
-import type { SheetInfo } from '../../lib/Workbook'
+import type { SheetInfo } from '../lib/Workbook'
 
 // Props
 const props = defineProps<{
@@ -771,79 +771,4 @@ const presetColors = [
   overflow-y: auto;
 }
 
-/* 暗黑模式 */
-:global(html.dark) .sheet-tab-bar {
-  background: #2d2d2d;
-  border-top-color: #404040;
-}
-
-:global(html.dark) .sheet-tab {
-  background: #2d2d2d;
-  border-color: #404040;
-  color: #999;
-}
-
-:global(html.dark) .sheet-tab:hover {
-  background: #3a3a3a;
-  color: #ccc;
-}
-
-:global(html.dark) .sheet-tab.active {
-  background: #2d2d2d;
-  color: #4ade80;
-  border-top-color: #4ade80;
-}
-
-:global(html.dark) .sheet-tab.active::after {
-  background: #2d2d2d;
-}
-
-:global(html.dark) .scroll-btn {
-  background: #2d2d2d;
-  border-color: #404040;
-  color: #999;
-}
-
-:global(html.dark) .scroll-btn:hover {
-  background: #3a3a3a;
-  color: #4ade80;
-}
-
-:global(html.dark) .add-sheet-btn-inline {
-  background: #2d2d2d;
-  border-color: #404040;
-  color: #666;
-}
-
-:global(html.dark) .add-sheet-btn-inline:hover {
-  background: #3a3a3a;
-  color: #4ade80;
-}
-
-:global(html.dark) .tab-name-input {
-  background: #3a3a3a;
-  border-color: #4ade80;
-  color: #e0e0e0;
-}
-
-:global(html.dark) .context-menu {
-  background: #2d2d2d;
-  border-color: #404040;
-}
-
-:global(html.dark) .menu-item {
-  color: #e0e0e0;
-}
-
-:global(html.dark) .menu-item:hover {
-  background: #3a3a3a;
-}
-
-:global(html.dark) .menu-divider {
-  background: #404040;
-}
-
-:global(html.dark) .menu-submenu > span {
-  color: #999;
-}
 </style>

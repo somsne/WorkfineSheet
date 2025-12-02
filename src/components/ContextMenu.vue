@@ -115,44 +115,4 @@ function handleItemClick(item: MenuItem) {
   padding: 0;
   cursor: default;
 }
-
-/* 暗黑模式支持 - 手动切换 */
-:global(html.dark) .context-menu {
-  background: #2d2d2d;
-  border-color: #505050;
-  color: #e0e0e0;
-}
-
-:global(html.dark) .menu-item:hover:not(.disabled):not(.divider) {
-  background: #3a3a3a;
-}
-
-:global(html.dark) .menu-item.disabled {
-  color: #666;
-}
-
-:global(html.dark) .menu-item.divider {
-  background: #505050;
-}
-
-/* 暗黑模式支持 - 系统偏好 (仅在自动模式下生效) */
-@media (prefers-color-scheme: dark) {
-  :global(html:not(.theme-manual)) .context-menu {
-    background: #2d2d2d;
-    border-color: #505050;
-    color: #e0e0e0;
-  }
-
-  :global(html:not(.theme-manual)) .menu-item:hover:not(.disabled):not(.divider) {
-    background: #3a3a3a;
-  }
-
-  :global(html:not(.theme-manual)) .menu-item.disabled {
-    color: #666;
-  }
-
-  :global(html:not(.theme-manual)) .menu-item.divider {
-    background: #505050;
-  }
-}
 </style>

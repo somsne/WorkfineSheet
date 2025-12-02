@@ -1,5 +1,33 @@
 <template>
   <div class="workbook-container">
+    <!-- 样式工具栏（Workbook 层级） -->
+    <StyleToolbar 
+      v-if="canvasSheetApi" 
+      :api="canvasSheetApi" 
+      :current-selection="currentSelection" 
+      :selection-range="selectionRange" 
+      :multi-selection="multiSelection" 
+    />
+    
+    <!-- 公式栏（Workbook 层级） -->
+    <FormulaBar
+      ref="formulaBarRef"
+      :row="formulaBarRow"
+      :col="formulaBarCol"
+      :end-row="formulaBarEndRow"
+      :end-col="formulaBarEndCol"
+      :cell-value="formulaBarCellValue"
+      :is-editing="formulaBarIsEditing"
+      :editing-value="formulaBarEditingValue"
+      :formula-references="formulaReferences"
+      @navigate="handleFormulaBarNavigate"
+      @select-range="handleFormulaBarSelectRange"
+      @start-edit="handleFormulaBarStartEdit"
+      @confirm="handleFormulaBarConfirm"
+      @cancel="handleFormulaBarCancel"
+      @input="handleFormulaBarInput"
+    />
+    
     <!-- 主表格区域 -->
     <div class="workbook-main" ref="mainRef">
       <!-- 当前活动工作表的 CanvasSheet -->
@@ -10,6 +38,8 @@
         :external-model="activeSheetData.model"
         :skip-demo-data="true"
         :initial-view-state="activeSheetData.viewState"
+        @selection-change="handleSelectionChange"
+        @editing-state-change="handleEditingStateChange"
       />
     </div>
     
@@ -33,8 +63,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Workbook, type WorkbookEventType, type WorkbookEvent, type SheetInfo } from '../lib/Workbook'
+// @ts-ignore
 import CanvasSheet from './CanvasSheet.vue'
-import SheetTabBar from './sheet/SheetTabBar.vue'
+// @ts-ignore
+import SheetTabBar from './SheetTabBar.vue'
+// @ts-ignore
+import StyleToolbar from './StyleToolbar.vue'
+// @ts-ignore
+import FormulaBar from './FormulaBar.vue'
 
 // Props
 interface Props {
@@ -68,6 +104,7 @@ const workbook = ref(new Workbook())
 /** DOM 引用 */
 const mainRef = ref<HTMLElement | null>(null)
 const canvasSheetRef = ref<InstanceType<typeof CanvasSheet> | null>(null)
+const formulaBarRef = ref<any>(null)
 
 /** 活动工作表 ID */
 const activeSheetId = computed(() => workbook.value.getActiveSheetId())
@@ -77,6 +114,107 @@ const activeSheetData = computed(() => workbook.value.getActiveSheet())
 
 /** 所有工作表列表 */
 const sheets = computed<SheetInfo[]>(() => workbook.value.getAllSheets())
+
+// ==================== CanvasSheet API 代理 ====================
+
+/** 当前 CanvasSheet 的 API */
+const canvasSheetApi = computed(() => {
+  if (!canvasSheetRef.value) return null
+  return canvasSheetRef.value
+})
+
+// ==================== 工具栏/公式栏 状态 ====================
+
+/** 当前选区状态（用于工具栏） */
+const currentSelection = ref({ row: 0, col: 0 })
+const selectionRange = ref({ startRow: 0, startCol: 0, endRow: 0, endCol: 0 })
+const multiSelection = ref<{
+  ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>
+  active: boolean
+}>({
+  ranges: [],
+  active: false
+})
+
+/** 公式栏状态 */
+const formulaBarRow = ref(0)
+const formulaBarCol = ref(0)
+const formulaBarEndRow = ref(0)
+const formulaBarEndCol = ref(0)
+const formulaBarCellValue = ref('')
+const formulaBarIsEditing = ref(false)
+const formulaBarEditingValue = ref('')
+const formulaReferences = ref<any[]>([])
+
+/** 监听 CanvasSheet 选区变化 */
+function handleSelectionChange(payload: {
+  selected: { row: number; col: number }
+  selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
+  multiSelection?: { ranges: any[]; active: boolean }
+  cellValue: string
+  formulaReferences?: any[]
+}) {
+  currentSelection.value = payload.selected
+  selectionRange.value = payload.selectionRange
+  if (payload.multiSelection) {
+    multiSelection.value = payload.multiSelection
+  }
+  
+  // 更新公式栏状态
+  formulaBarRow.value = payload.selectionRange.startRow
+  formulaBarCol.value = payload.selectionRange.startCol
+  formulaBarEndRow.value = payload.selectionRange.endRow
+  formulaBarEndCol.value = payload.selectionRange.endCol
+  formulaBarCellValue.value = payload.cellValue
+  if (payload.formulaReferences) {
+    formulaReferences.value = payload.formulaReferences
+  }
+}
+
+/** 监听 CanvasSheet 编辑状态变化 */
+function handleEditingStateChange(payload: {
+  isEditing: boolean
+  editingValue: string
+  formulaReferences?: any[]
+}) {
+  formulaBarIsEditing.value = payload.isEditing
+  formulaBarEditingValue.value = payload.editingValue
+  if (payload.formulaReferences) {
+    formulaReferences.value = payload.formulaReferences
+  }
+}
+
+// ==================== 公式栏事件处理 ====================
+
+/** 公式栏 - 导航到单元格 */
+function handleFormulaBarNavigate(row: number, col: number) {
+  canvasSheetRef.value?.selectCell?.(row, col)
+}
+
+/** 公式栏 - 选择范围 */
+function handleFormulaBarSelectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
+  canvasSheetRef.value?.selectRange?.(startRow, startCol, endRow, endCol)
+}
+
+/** 公式栏 - 开始编辑 */
+function handleFormulaBarStartEdit() {
+  canvasSheetRef.value?.startEditingCurrentCell?.()
+}
+
+/** 公式栏 - 确认 */
+function handleFormulaBarConfirm() {
+  canvasSheetRef.value?.confirmEditing?.()
+}
+
+/** 公式栏 - 取消 */
+function handleFormulaBarCancel() {
+  canvasSheetRef.value?.cancelEditing?.()
+}
+
+/** 公式栏 - 输入变化 */
+function handleFormulaBarInput(value: string) {
+  canvasSheetRef.value?.setEditingValue?.(value)
+}
 
 // ==================== 跨 Sheet 共享状态 ====================
 

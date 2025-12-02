@@ -1,17 +1,47 @@
 /**
- * Demo data initialization for showcasing cell styles
+ * Demo data initialization for showcasing cell styles and formats
  */
 
 import type { SheetModel } from './SheetModel'
+import type { Workbook } from './Workbook'
 import type { CellFormat } from '../components/sheet/types'
 
 // 示例图片 - 一个简单的表格图标 (SVG 转 Base64)
 const DEMO_IMAGE_DATA_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIiB2aWV3Qm94PSIwIDAgMTIwIDEyMCI+CiAgPCEtLSDog4zmma/lnIYgLS0+CiAgPGNpcmNsZSBjeD0iNjAiIGN5PSI2MCIgcj0iNTUiIGZpbGw9IiMzYjgyZjYiLz4KICA8IS0tIOihqOagvOWbvuaghyAtLT4KICA8cmVjdCB4PSIyNSIgeT0iMjUiIHdpZHRoPSI3MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IndoaXRlIi8+CiAgPCEtLSDooajmoLznur/mnaEgLS0+CiAgPGxpbmUgeDE9IjI1IiB5MT0iNDUiIHgyPSI5NSIgeTI9IjQ1IiBzdHJva2U9IiNlMmU4ZjAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxsaW5lIHgxPSIyNSIgeTE9IjY1IiB4Mj0iOTUiIHkyPSI2NSIgc3Ryb2tlPSIjZTJlOGYwIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8bGluZSB4MT0iNTAiIHkxPSIyNSIgeDI9IjUwIiB5Mj0iOTUiIHN0cm9rZT0iI2UyZThmMCIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPCEtLSDnhJ/lip/moIforrAgLS0+CiAgPGNpcmNsZSBjeD0iMzciIGN5PSI1NSIgcj0iNiIgZmlsbD0iIzIyYzU1ZSIvPgogIDxwYXRoIGQ9Ik0zNCA1NUwzNiA1N0w0MCA1MiIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIi8+CiAgPCEtLSDmlbDlrZfmoIforrAgLS0+CiAgPHRleHQgeD0iNzIiIHk9IjU4IiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIiBmaWxsPSIjM2I4MmY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4xMjM8L3RleHQ+CiAgPCEtLSDlupXpg6jmloflrZcgLS0+CiAgPHRleHQgeD0iNjAiIHk9IjgyIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM2NGI1ZjYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlNoZWV0PC90ZXh0Pgo8L3N2Zz4='
 
 /**
- * Initialize the sheet with demo data showcasing various cell styles
+ * Initialize demo data for the workbook
+ * - Renames Sheet1 to "样式示例" and populates with style demos
+ * - Creates a new sheet "格式示例" and populates with format demos
  */
-export function initializeDemoData(model: SheetModel): void {
+export function initializeDemoData(workbook: Workbook): void {
+  // 获取第一个工作表并重命名
+  const sheets = workbook.getAllSheets()
+  if (sheets.length === 0) return
+  
+  const firstSheet = sheets[0]
+  if (!firstSheet) return
+  
+  workbook.renameSheet(firstSheet.metadata.id, '样式示例')
+  
+  // 填充样式示例数据
+  initializeStyleDemoData(firstSheet.model)
+  
+  // 创建第二个工作表：格式示例
+  const formatSheetId = workbook.addSheet('格式示例')
+  const formatSheet = workbook.getSheetById(formatSheetId)
+  if (formatSheet) {
+    initializeFormatDemoData(formatSheet.model)
+  }
+  
+  // 切换回第一个工作表
+  workbook.setActiveSheet(firstSheet.metadata.id)
+}
+
+/**
+ * Initialize the sheet with style demo data
+ */
+function initializeStyleDemoData(model: SheetModel): void {
   // ===== 标题行 (合并单元格 A1:E1) =====
   model.setValue(0, 0, '样式功能演示')
   model.setCellStyle(0, 0, {
@@ -25,8 +55,11 @@ export function initializeDemoData(model: SheetModel): void {
   // 合并标题单元格 A1:E1
   model.mergeCells(0, 0, 0, 4)
 
-  // ===== P3～T12：合并单元格演示区域 =====
+  // ===== K1～P14：合并单元格演示区域 =====
   initializeMergeCellsDemo(model)
+
+  // ===== L17～N22：单元格内嵌图片演示 =====
+  initializeCellImagesDemo(model,16)
 
   // ===== G3～J20：边框样式演示区域 =====
   // 标题
@@ -549,519 +582,16 @@ export function initializeDemoData(model: SheetModel): void {
     backgroundColor: '#f5f3ff'
   })
 
-  // ===== 第 30-55 行：单元格格式示例 =====
-  initializeFormatExamples(model)
-}
-
-/**
- * Initialize format examples section
- */
-function initializeFormatExamples(model: SheetModel): void {
-  const startRow = 30
-
-  // 标题
-  model.setValue(startRow, 0, '单元格格式示例')
-  model.setCellStyle(startRow, 0, {
-    bold: true,
-    fontSize: 14,
-    backgroundColor: '#1e40af',
-    color: '#ffffff'
-  })
-
-  // 表头
-  const formatHeaders = ['格式类型', '原始值', '格式化结果', '说明']
-  formatHeaders.forEach((header, index) => {
-    model.setValue(startRow + 1, index, header)
-    model.setCellStyle(startRow + 1, index, {
-      bold: true,
-      backgroundColor: '#3b82f6',
-      color: '#ffffff',
-      textAlign: 'center'
-    })
-  })
-
-  let row = startRow + 2
-
-  // ===== 文本格式 =====
-  // 身份证
-  model.setValue(row, 0, '身份证')
-  model.setValue(row, 1, '110101199003076518')
-  model.setValue(row, 2, '110101199003076518')
-  model.setCellFormat(row, 2, { type: 'idCard' } as CellFormat)
-  model.setValue(row, 3, '验证身份证格式是否正确')
-  row++
-
-  // 无效身份证
-  model.setValue(row, 0, '无效身份证')
-  model.setValue(row, 1, '123456789012345678')
-  model.setValue(row, 2, '123456789012345678')
-  model.setCellFormat(row, 2, { type: 'idCard' } as CellFormat)
-  model.setValue(row, 3, '无效身份证会显示红色边框')
-  row++
-
-  // 手机号
-  model.setValue(row, 0, '手机号')
-  model.setValue(row, 1, '13812345678')
-  model.setValue(row, 2, '13812345678')
-  model.setCellFormat(row, 2, { type: 'phone' } as CellFormat)
-  model.setValue(row, 3, '验证手机号格式')
-  row++
-
-  // 固定电话
-  model.setValue(row, 0, '固定电话')
-  model.setValue(row, 1, '02112345678')
-  model.setValue(row, 2, '02112345678')
-  model.setCellFormat(row, 2, { type: 'telephone' } as CellFormat)
-  model.setValue(row, 3, '自动格式化为 021-12345678')
-  row++
-
-  // 邮箱
-  model.setValue(row, 0, '邮箱')
-  model.setValue(row, 1, 'test@example.com')
-  model.setValue(row, 2, 'test@example.com')
-  model.setCellFormat(row, 2, { type: 'email' } as CellFormat)
-  model.setValue(row, 3, '验证邮箱格式')
-  row++
-
-  // 超链接
-  model.setValue(row, 0, '超链接')
-  model.setValue(row, 1, 'https://workfine.com')
-  model.setValue(row, 2, 'https://workfine.com')
-  model.setCellFormat(row, 2, { type: 'hyperlink' } as CellFormat)
-  model.setValue(row, 3, '显示为可点击的链接')
-  row++
-
-  row++ // 空行
-
-  // ===== 数字格式 =====
-  model.setValue(row, 0, '数字格式')
-  model.setCellStyle(row, 0, { bold: true, backgroundColor: '#e0e7ff' })
-  row++
-
-  // 保留2位小数
-  model.setValue(row, 0, '小数 (2位)')
-  model.setValue(row, 1, '1234.5')
-  model.setValue(row, 2, '1234.5')
-  model.setCellFormat(row, 2, { type: 'decimal2' } as CellFormat)
-  model.setValue(row, 3, '显示为 1234.50')
-  row++
-
-  // 千分位
-  model.setValue(row, 0, '千分位')
-  model.setValue(row, 1, '1234567.89')
-  model.setValue(row, 2, '1234567.89')
-  model.setCellFormat(row, 2, { type: 'thousands' } as CellFormat)
-  model.setValue(row, 3, '显示为 1,234,567.89')
-  row++
-
-  // 百分比
-  model.setValue(row, 0, '百分比')
-  model.setValue(row, 1, '0.856')
-  model.setValue(row, 2, '0.856')
-  model.setCellFormat(row, 2, { type: 'percent' } as CellFormat)
-  model.setValue(row, 3, '显示为 85.60%')
-  row++
-
-  // 千分率
-  model.setValue(row, 0, '千分率')
-  model.setValue(row, 1, '0.0356')
-  model.setValue(row, 2, '0.0356')
-  model.setCellFormat(row, 2, { type: 'permille' } as CellFormat)
-  model.setValue(row, 3, '显示为 35.60‰')
-  row++
-
-  // 人民币
-  model.setValue(row, 0, '人民币')
-  model.setValue(row, 1, '1234.56')
-  model.setValue(row, 2, '1234.56')
-  model.setCellFormat(row, 2, { type: 'currencyCNY' } as CellFormat)
-  model.setValue(row, 3, '显示为 ¥1,234.56')
-  row++
-
-  // 美元
-  model.setValue(row, 0, '美元')
-  model.setValue(row, 1, '1234.56')
-  model.setValue(row, 2, '1234.56')
-  model.setCellFormat(row, 2, { type: 'currencyUSD' } as CellFormat)
-  model.setValue(row, 3, '显示为 $1,234.56')
-  row++
-
-  // 科学计数法
-  model.setValue(row, 0, '科学计数')
-  model.setValue(row, 1, '12345678')
-  model.setValue(row, 2, '12345678')
-  model.setCellFormat(row, 2, { type: 'scientific' } as CellFormat)
-  model.setValue(row, 3, '显示为 1.23e+7')
-  row++
-
-  // 分数
-  model.setValue(row, 0, '分数')
-  model.setValue(row, 1, '0.75')
-  model.setValue(row, 2, '0.75')
-  model.setCellFormat(row, 2, { type: 'fraction' } as CellFormat)
-  model.setValue(row, 3, '显示为 3/4')
-  row++
-
-  // 负数红色
-  model.setValue(row, 0, '负数红色')
-  model.setValue(row, 1, '-1234.56')
-  model.setValue(row, 2, '-1234.56')
-  model.setCellFormat(row, 2, { type: 'negativeRed' } as CellFormat)
-  model.setValue(row, 3, '负数以红色显示')
-  row++
-
-  // 自定义数字格式
-  model.setValue(row, 0, '自定义千分位')
-  model.setValue(row, 1, '1234567.891')
-  model.setValue(row, 2, '1234567.891')
-  model.setCellFormat(row, 2, { type: 'custom', pattern: '#,##0.00' } as CellFormat)
-  model.setValue(row, 3, '格式: #,##0.00')
-  row++
-
-  model.setValue(row, 0, '自定义货币')
-  model.setValue(row, 1, '9876.54')
-  model.setValue(row, 2, '9876.54')
-  model.setCellFormat(row, 2, { type: 'custom', pattern: '¥#,##0.00元' } as CellFormat)
-  model.setValue(row, 3, '格式: ¥#,##0.00元')
-  row++
-
-  model.setValue(row, 0, '电话前缀')
-  model.setValue(row, 1, '12345678')
-  model.setValue(row, 2, '12345678')
-  model.setCellFormat(row, 2, { type: 'custom', pattern: '021-########' } as CellFormat)
-  model.setValue(row, 3, '格式: 021-########')
-
-  // ===== F32～N49：扩展格式示例区域 =====
-  initializeExtendedFormatExamples(model)
-  
   // ===== 浮动图片演示 =====
   initializeDemoImage(model)
 }
 
 /**
- * Initialize extended format examples in F32-N49 area
- */
-function initializeExtendedFormatExamples(model: SheetModel): void {
-  const startRow = 31 // F32 开始 (0-indexed = 31)
-  const startCol = 5  // F 列 (0-indexed = 5)
-
-  // ===== 左侧区域 F-I 列：更多数字格式 =====
-  // 标题
-  model.setValue(startRow, startCol, '更多数字格式')
-  model.setCellStyle(startRow, startCol, {
-    bold: true,
-    fontSize: 14,
-    backgroundColor: '#7c3aed',
-    color: '#ffffff',
-    textAlign: 'center'
-  })
-
-  // 表头
-  const leftHeaders = ['格式', '值', '结果', '说明']
-  leftHeaders.forEach((header, index) => {
-    model.setValue(startRow + 1, startCol + index, header)
-    model.setCellStyle(startRow + 1, startCol + index, {
-      bold: true,
-      backgroundColor: '#8b5cf6',
-      color: '#ffffff',
-      textAlign: 'center'
-    })
-  })
-
-  let leftRow = startRow + 2
-
-  // 整数格式
-  model.setValue(leftRow, startCol, '整数')
-  model.setValue(leftRow, startCol + 1, '1234.567')
-  model.setValue(leftRow, startCol + 2, '1234.567')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'number' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '四舍五入为整数')
-  leftRow++
-
-  // 千分位格式
-  model.setValue(leftRow, startCol, '千分位大数')
-  model.setValue(leftRow, startCol + 1, '9876543.21')
-  model.setValue(leftRow, startCol + 2, '9876543.21')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'thousands' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 9,876,543.21')
-  leftRow++
-
-  // 百分比 - 大于100%
-  model.setValue(leftRow, startCol, '百分比>100%')
-  model.setValue(leftRow, startCol + 1, '1.5')
-  model.setValue(leftRow, startCol + 2, '1.5')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'percent' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 150.00%')
-  leftRow++
-
-  // 千分率 - 小数值
-  model.setValue(leftRow, startCol, '千分率')
-  model.setValue(leftRow, startCol + 1, '0.00856')
-  model.setValue(leftRow, startCol + 2, '0.00856')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'permille' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 8.56‰')
-  leftRow++
-
-  // 科学计数法 - 小数
-  model.setValue(leftRow, startCol, '科学计数小数')
-  model.setValue(leftRow, startCol + 1, '0.00000123')
-  model.setValue(leftRow, startCol + 2, '0.00000123')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'scientific' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 1.23e-6')
-  leftRow++
-
-  // 分数 - 1/3
-  model.setValue(leftRow, startCol, '分数 1/3')
-  model.setValue(leftRow, startCol + 1, '0.333333')
-  model.setValue(leftRow, startCol + 2, '0.333333')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'fraction' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 1/3')
-  leftRow++
-
-  // 人民币 - 大金额
-  model.setValue(leftRow, startCol, '人民币大额')
-  model.setValue(leftRow, startCol + 1, '98765.43')
-  model.setValue(leftRow, startCol + 2, '98765.43')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'currencyCNY' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 ¥98,765.43')
-  leftRow++
-
-  // 美元 - 小金额
-  model.setValue(leftRow, startCol, '美元小额')
-  model.setValue(leftRow, startCol + 1, '0.99')
-  model.setValue(leftRow, startCol + 2, '0.99')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'currencyUSD' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '显示为 $0.99')
-  leftRow++
-
-  leftRow++ // 空行
-
-  // 负数红色 - 实际负数
-  model.setValue(leftRow, startCol, '负数红色')
-  model.setValue(leftRow, startCol + 1, '-9999.99')
-  model.setValue(leftRow, startCol + 2, '-9999.99')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'negativeRed' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '负数显示红色')
-  leftRow++
-
-  // 正数用负数格式
-  model.setValue(leftRow, startCol, '正数(negativeRed)')
-  model.setValue(leftRow, startCol + 1, '9999.99')
-  model.setValue(leftRow, startCol + 2, '9999.99')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'negativeRed' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '正数保持黑色')
-  leftRow++
-
-  leftRow++ // 空行
-
-  // 自定义格式补充
-  model.setValue(leftRow, startCol, '自定义格式')
-  model.setCellStyle(leftRow, startCol, {
-    bold: true,
-    fontSize: 12,
-    backgroundColor: '#10b981',
-    color: '#ffffff'
-  })
-  leftRow++
-
-  // 自定义千分位4位小数
-  model.setValue(leftRow, startCol, '千分位4位')
-  model.setValue(leftRow, startCol + 1, '1234567.8912')
-  model.setValue(leftRow, startCol + 2, '1234567.8912')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'custom', pattern: '#,##0.0000' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '格式: #,##0.0000')
-  leftRow++
-
-  // 自定义带单位
-  model.setValue(leftRow, startCol, '带单位')
-  model.setValue(leftRow, startCol + 1, '12345')
-  model.setValue(leftRow, startCol + 2, '12345')
-  model.setCellFormat(leftRow, startCol + 2, { type: 'custom', pattern: '#,##0 元' } as CellFormat)
-  model.setValue(leftRow, startCol + 3, '格式: #,##0 元')
-  leftRow++
-
-  // ===== 右侧区域 K-N 列：日期时间格式 =====
-  const rightCol = 10 // K 列 (0-indexed = 10)
-  let rightRow = startRow
-
-  // 标题
-  model.setValue(rightRow, rightCol, '更多日期格式')
-  model.setCellStyle(rightRow, rightCol, {
-    bold: true,
-    fontSize: 14,
-    backgroundColor: '#0891b2',
-    color: '#ffffff',
-    textAlign: 'center'
-  })
-
-  // 表头
-  const rightHeaders = ['格式', '值', '结果', '说明']
-  rightHeaders.forEach((header, index) => {
-    model.setValue(rightRow + 1, rightCol + index, header)
-    model.setCellStyle(rightRow + 1, rightCol + index, {
-      bold: true,
-      backgroundColor: '#06b6d4',
-      color: '#ffffff',
-      textAlign: 'center'
-    })
-  })
-
-  rightRow = startRow + 2
-  // Excel 标准日期格式：2024/12/25
-  const excelDateStr = '2024/12/25'
-  // 日期时间字符串用于时间格式演示
-  const dateTimeStr = '2024-12-25 09:05:30'
-
-  // 年份
-  model.setValue(rightRow, rightCol, '年份')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-y' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024')
-  rightRow++
-
-  // 年份中文
-  model.setValue(rightRow, rightCol, '年份中文')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-y-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024年')
-  rightRow++
-
-  // 年月无补零
-  model.setValue(rightRow, rightCol, '年月无补零')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-ym' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024-12')
-  rightRow++
-
-  // 年月斜杠
-  model.setValue(rightRow, rightCol, '年月斜杠')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-ym-slash' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024/12')
-  rightRow++
-
-  // 年月中文
-  model.setValue(rightRow, rightCol, '年月中文')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-ym-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024年12月')
-  rightRow++
-
-  // 月中文
-  model.setValue(rightRow, rightCol, '月份中文')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-m-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 12月')
-  rightRow++
-
-  // 年月日无补零
-  model.setValue(rightRow, rightCol, '日期无补零')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-ymd' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024-12-25')
-  rightRow++
-
-  // 年月日斜杠
-  model.setValue(rightRow, rightCol, '日期斜杠')
-  model.setValue(rightRow, rightCol + 1, excelDateStr)
-  model.setValue(rightRow, rightCol + 2, excelDateStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'date-ymd-slash' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 2024/12/25')
-  rightRow++
-
-  rightRow++ // 空行
-
-  // 时间区域标题
-  model.setValue(rightRow, rightCol, '时间格式')
-  model.setCellStyle(rightRow, rightCol, {
-    bold: true,
-    fontSize: 12,
-    backgroundColor: '#f59e0b',
-    color: '#ffffff'
-  })
-  rightRow++
-
-  // 时分
-  model.setValue(rightRow, rightCol, '时分')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'time-hm' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 9:05')
-  rightRow++
-
-  // 时分中文
-  model.setValue(rightRow, rightCol, '时分中文')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'time-hm-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 9时5分')
-  rightRow++
-
-  // 时分秒
-  model.setValue(rightRow, rightCol, '时分秒')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'time-hms' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 9:05:30')
-  rightRow++
-
-  // 时分秒中文
-  model.setValue(rightRow, rightCol, '时分秒中文')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'time-hms-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '显示为 9时5分30秒')
-  rightRow++
-
-  rightRow++ // 空行
-
-  // 日期时间区域标题
-  model.setValue(rightRow, rightCol, '日期时间格式')
-  model.setCellStyle(rightRow, rightCol, {
-    bold: true,
-    fontSize: 12,
-    backgroundColor: '#dc2626',
-    color: '#ffffff'
-  })
-  rightRow++
-
-  // 日期时间
-  model.setValue(rightRow, rightCol, '日期时间')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'datetime' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '2024-12-25 9:05:30')
-  rightRow++
-
-  // 日期时间斜杠
-  model.setValue(rightRow, rightCol, '斜杠日期时间')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'datetime-slash' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '2024/12/25 9:05:30')
-  rightRow++
-
-  // 中文日期时间
-  model.setValue(rightRow, rightCol, '中文日期时间')
-  model.setValue(rightRow, rightCol + 1, dateTimeStr)
-  model.setValue(rightRow, rightCol + 2, dateTimeStr)
-  model.setCellFormat(rightRow, rightCol + 2, { type: 'datetime-cn' } as CellFormat)
-  model.setValue(rightRow, rightCol + 3, '2024年12月25日 9时5分')
-}
-
-/**
- * Initialize merge cells demo section in P3-T12 area
+ * Initialize merge cells demo section in K1-P14 area
  */
 function initializeMergeCellsDemo(model: SheetModel): void {
-  const startRow = 2  // 第3行 (0-indexed = 2)
-  const startCol = 15 // P列 (0-indexed = 15)
+  const startRow = 0  // 第1行 (0-indexed = 0)
+  const startCol = 11 // K列 (0-indexed = 11)
 
   // ===== 标题 (合并 P3:T3) =====
   model.setValue(startRow, startCol, '合并单元格演示')
@@ -1246,8 +776,8 @@ function initializeDemoImage(model: SheetModel): void {
     src: DEMO_IMAGE_DATA_URL,
     naturalWidth: 120,
     naturalHeight: 120,
-    anchorRow: 2,
-    anchorCol: 11, // L 列
+    anchorRow: 16,
+    anchorCol: 15, // L 列
     offsetX: 10,
     offsetY: 10,
     width: 120,
@@ -1259,19 +789,293 @@ function initializeDemoImage(model: SheetModel): void {
     hidden: false
   })
   
-  // ===== 单元格内嵌图片演示 =====
-  initializeCellImagesDemo(model)
 }
 
 /**
- * Initialize cell embedded images demo
- * 在 L26-N30 区域演示单元格内嵌图片功能
+ * Initialize format demo data for the format sheet (从 A1 开始)
  */
-function initializeCellImagesDemo(model: SheetModel): void {
-  const startRow = 25 // 第26行 (0-indexed = 25)
-  const startCol = 11 // L列 (0-indexed = 11)
+function initializeFormatDemoData(model: SheetModel): void {
+  // ===== 标题行 =====
+  model.setValue(0, 0, '单元格格式示例')
+  model.setCellStyle(0, 0, {
+    bold: true,
+    fontSize: 20,
+    backgroundColor: '#1e40af',
+    color: '#ffffff',
+    textAlign: 'center',
+    verticalAlign: 'middle'
+  })
+  model.mergeCells(0, 0, 0, 3)
 
-  // ===== 标题 (合并 L26:N26) =====
+  // 表头
+  const formatHeaders = ['格式类型', '原始值', '格式化结果', '说明']
+  formatHeaders.forEach((header, index) => {
+    model.setValue(1, index, header)
+    model.setCellStyle(1, index, {
+      bold: true,
+      backgroundColor: '#3b82f6',
+      color: '#ffffff',
+      textAlign: 'center'
+    })
+  })
+
+  let row = 2
+
+  // ===== 文本格式 =====
+  // 身份证
+  model.setValue(row, 0, '身份证')
+  model.setValue(row, 1, '110101199003076518')
+  model.setValue(row, 2, '110101199003076518')
+  model.setCellFormat(row, 2, { type: 'idCard' } as CellFormat)
+  model.setValue(row, 3, '验证身份证格式是否正确')
+  row++
+
+  // 无效身份证
+  model.setValue(row, 0, '无效身份证')
+  model.setValue(row, 1, '123456789012345678')
+  model.setValue(row, 2, '123456789012345678')
+  model.setCellFormat(row, 2, { type: 'idCard' } as CellFormat)
+  model.setValue(row, 3, '无效身份证会显示红色边框')
+  row++
+
+  // 手机号
+  model.setValue(row, 0, '手机号')
+  model.setValue(row, 1, '13812345678')
+  model.setValue(row, 2, '13812345678')
+  model.setCellFormat(row, 2, { type: 'phone' } as CellFormat)
+  model.setValue(row, 3, '验证手机号格式')
+  row++
+
+  // 固定电话
+  model.setValue(row, 0, '固定电话')
+  model.setValue(row, 1, '02112345678')
+  model.setValue(row, 2, '02112345678')
+  model.setCellFormat(row, 2, { type: 'telephone' } as CellFormat)
+  model.setValue(row, 3, '自动格式化为 021-12345678')
+  row++
+
+  // 邮箱
+  model.setValue(row, 0, '邮箱')
+  model.setValue(row, 1, 'test@example.com')
+  model.setValue(row, 2, 'test@example.com')
+  model.setCellFormat(row, 2, { type: 'email' } as CellFormat)
+  model.setValue(row, 3, '验证邮箱格式')
+  row++
+
+  // 超链接
+  model.setValue(row, 0, '超链接')
+  model.setValue(row, 1, 'https://workfine.com')
+  model.setValue(row, 2, 'https://workfine.com')
+  model.setCellFormat(row, 2, { type: 'hyperlink' } as CellFormat)
+  model.setValue(row, 3, '显示为可点击的链接')
+  row++
+
+  row++ // 空行
+  // ===== 日期时间格式 =====
+  model.setValue(row, 0, '日期时间格式')
+  model.setCellStyle(row, 0, { bold: true, backgroundColor: '#fef3c7' })
+  model.mergeCells(row, 0, row, 3)
+  row++
+
+  const excelDateStr = '2024/12/25'
+  const dateTimeStr = '2024-12-25 09:05:30'
+
+  // 年份
+  model.setValue(row, 0, '年份')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-y' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024')
+  row++
+
+  // 年份中文
+  model.setValue(row, 0, '年份中文')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-y-cn' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024年')
+  row++
+
+  // 年月
+  model.setValue(row, 0, '年月')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-ym' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024-12')
+  row++
+
+  // 年月中文
+  model.setValue(row, 0, '年月中文')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-ym-cn' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024年12月')
+  row++
+
+  // 年月日
+  model.setValue(row, 0, '年月日')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-ymd' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024-12-25')
+  row++
+
+  // 年月日斜杠
+  model.setValue(row, 0, '年月日斜杠')
+  model.setValue(row, 1, excelDateStr)
+  model.setValue(row, 2, excelDateStr)
+  model.setCellFormat(row, 2, { type: 'date-ymd-slash' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024/12/25')
+  row++
+
+  // 时分
+  model.setValue(row, 0, '时分')
+  model.setValue(row, 1, dateTimeStr)
+  model.setValue(row, 2, dateTimeStr)
+  model.setCellFormat(row, 2, { type: 'time-hm' } as CellFormat)
+  model.setValue(row, 3, '显示为 9:05')
+  row++
+
+  // 时分秒
+  model.setValue(row, 0, '时分秒')
+  model.setValue(row, 1, dateTimeStr)
+  model.setValue(row, 2, dateTimeStr)
+  model.setCellFormat(row, 2, { type: 'time-hms' } as CellFormat)
+  model.setValue(row, 3, '显示为 9:05:30')
+  row++
+
+  // 日期时间
+  model.setValue(row, 0, '日期时间')
+  model.setValue(row, 1, dateTimeStr)
+  model.setValue(row, 2, dateTimeStr)
+  model.setCellFormat(row, 2, { type: 'datetime' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024-12-25 9:05:30')
+  row++
+
+  // 中文日期时间
+  model.setValue(row, 0, '中文日期时间')
+  model.setValue(row, 1, dateTimeStr)
+  model.setValue(row, 2, dateTimeStr)
+  model.setCellFormat(row, 2, { type: 'datetime-cn' } as CellFormat)
+  model.setValue(row, 3, '显示为 2024年12月25日 9时5分')
+  row++
+  
+  row=1
+
+  let col=5
+  // ===== 数字格式 =====
+  model.setValue(row, col + 0, '数字格式')
+  model.setCellStyle(row, col + 0, { bold: true, backgroundColor: '#e0e7ff' })
+  model.mergeCells(row, col + 0, row, col + 3)
+  row++
+
+  // 保留2位小数
+  model.setValue(row, col + 0, '小数 (2位)')
+  model.setValue(row, col + 1, '1234.5')
+  model.setValue(row, col + 2, '1234.5')
+  model.setCellFormat(row, col + 2, { type: 'decimal2' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 1234.50')
+  row++
+
+  // 千分位
+  model.setValue(row, col + 0, '千分位')
+  model.setValue(row, col + 1, '1234567.89')
+  model.setValue(row, col + 2, '1234567.89')
+  model.setCellFormat(row, col + 2, { type: 'thousands' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 1,234,567.89')
+  row++
+
+  // 百分比
+  model.setValue(row, col + 0, '百分比')
+  model.setValue(row, col + 1, '0.856')
+  model.setValue(row, col + 2, '0.856')
+  model.setCellFormat(row, col + 2, { type: 'percent' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 85.60%')
+  row++
+
+  // 千分率
+  model.setValue(row, col + 0, '千分率')
+  model.setValue(row, col + 1, '0.0356')
+  model.setValue(row, col + 2, '0.0356')
+  model.setCellFormat(row, col + 2, { type: 'permille' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 35.60‰')
+  row++
+
+  // 人民币
+  model.setValue(row, col + 0, '人民币')
+  model.setValue(row, col + 1, '1234.56')
+  model.setValue(row, col + 2, '1234.56')
+  model.setCellFormat(row, col + 2, { type: 'currencyCNY' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 ¥1,234.56')
+  row++
+
+  // 美元
+  model.setValue(row, col + 0, '美元')
+  model.setValue(row, col + 1, '1234.56')
+  model.setValue(row, col + 2, '1234.56')
+  model.setCellFormat(row, col + 2, { type: 'currencyUSD' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 $1,234.56')
+  row++
+
+  // 科学计数法
+  model.setValue(row, col + 0, '科学计数')
+  model.setValue(row, col + 1, '12345678')
+  model.setValue(row, col + 2, '12345678')
+  model.setCellFormat(row, col + 2, { type: 'scientific' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 1.23e+7')
+  row++
+
+  // 分数
+  model.setValue(row, col + 0, '分数')
+  model.setValue(row, col + 1, '0.75')
+  model.setValue(row, col + 2, '0.75')
+  model.setCellFormat(row, col + 2, { type: 'fraction' } as CellFormat)
+  model.setValue(row, col + 3, '显示为 3/4')
+  row++
+
+  // 负数红色
+  model.setValue(row, col + 0, '负数红色')
+  model.setValue(row, col + 1, '-1234.56')
+  model.setValue(row, col + 2, '-1234.56')
+  model.setCellFormat(row, col + 2, { type: 'negativeRed' } as CellFormat)
+  model.setValue(row, col + 3, '负数以红色显示')
+  row++
+
+  // 自定义数字格式
+  model.setValue(row, col + 0, '自定义千分位')
+  model.setValue(row, col + 1, '1234567.891')
+  model.setValue(row, col + 2, '1234567.891')
+  model.setCellFormat(row, col + 2, { type: 'custom', pattern: '#,##0.00' } as CellFormat)
+  model.setValue(row, col + 3, '格式: #,##0.00')
+  row++
+
+  model.setValue(row, col + 0, '自定义货币')
+  model.setValue(row, col + 1, '9876.54')
+  model.setValue(row, col + 2, '9876.54')
+  model.setCellFormat(row, col + 2, { type: 'custom', pattern: '¥#,##0.00元' } as CellFormat)
+  model.setValue(row, col + 3, '格式: ¥#,##0.00元')
+  row++
+
+  model.setValue(row, col + 0, '电话前缀')
+  model.setValue(row, col + 1, '12345678')
+  model.setValue(row, col + 2, '12345678')
+  model.setCellFormat(row, col + 2, { type: 'custom', pattern: '021-########' } as CellFormat)
+  model.setValue(row, col + 3, '格式: 021-########')
+  row++
+
+}
+
+
+/**
+ * Initialize cell embedded images demo
+ * @param model SheetModel 实例
+ * @param baseRow 起始行 (可选，默认为 0)
+ */
+function initializeCellImagesDemo(model: SheetModel, baseRow: number = 0): void {
+  const startRow = baseRow
+  const startCol = 11 // L列
+
+  // ===== 标题 =====
   model.setValue(startRow, startCol, '单元格内嵌图片')
   model.setCellStyle(startRow, startCol, {
     bold: true,

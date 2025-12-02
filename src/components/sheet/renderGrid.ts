@@ -105,11 +105,9 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
-  // Background colors for headers - support dark mode (both system preference and manual toggle)
-  const isDarkMode = document.documentElement.classList.contains('dark') || 
-    (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  const headerBgColor = isDarkMode ? '#161616' : '#f0f0f0'
-  const headerTextColor = isDarkMode ? '#e0e0e0' : '#333'
+  // 固定使用亮色模式
+  const headerBgColor = '#f0f0f0'
+  const headerTextColor = '#333'
   
   ctx.fillStyle = headerBgColor
   ctx.fillRect(0, 0, w, colHeaderHeight)

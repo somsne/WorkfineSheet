@@ -1,27 +1,5 @@
 <template>
   <div class="sheet-wrapper">
-    <!-- 样式工具栏 -->
-    <StyleToolbar v-if="api" :api="api" :current-selection="state.selected" :selection-range="state.selectionRange" :multi-selection="state.multiSelection" />
-    
-    <!-- 公式栏 -->
-    <FormulaBar
-      ref="formulaBarRef"
-      :row="formulaBarRow"
-      :col="formulaBarCol"
-      :end-row="formulaBarEndRow"
-      :end-col="formulaBarEndCol"
-      :cell-value="formulaBarCellValue"
-      :is-editing="formulaBarIsEditing"
-      :editing-value="formulaBarEditingValue"
-      :formula-references="state.richTextFormulaReferences.value"
-      @navigate="handleFormulaBarNavigate"
-      @select-range="handleFormulaBarSelectRange"
-      @start-edit="handleFormulaBarStartEdit"
-      @confirm="handleFormulaBarConfirm"
-      @cancel="handleFormulaBarCancel"
-      @input="handleFormulaBarInput"
-    />
-    
     <div ref="containerRef" class="sheet-container" @contextmenu="handleContextMenuWrapper">
       <canvas ref="gridCanvasRef" class="grid-canvas"></canvas>
       <canvas ref="contentCanvasRef" class="content-canvas"></canvas>
@@ -103,17 +81,6 @@
         @cancel="state.inputDialog.visible = false"
       />
       
-      <!-- 填充选项菜单 -->
-      <FillOptionsMenu
-        :visible="fillHandle.fillOptionsMenu.visible"
-        :x="fillHandle.fillOptionsMenu.x"
-        :y="fillHandle.fillOptionsMenu.y"
-        :direction="fillHandle.fillOptionsMenu.direction"
-        :selected-type="fillHandle.fillOptionsMenu.selectedType"
-        @select="fillHandle.handleFillOptionSelect"
-        @close="fillHandle.closeFillOptionsMenu"
-      />
-      
       <!-- 单元格图片预览 -->
       <ImagePreview
         :visible="images.imagePreviewState.value.visible"
@@ -140,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
 import { createSheetAPI } from './sheet/api'
@@ -164,15 +131,9 @@ import type { SheetViewState } from '../lib/Workbook'
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
 // @ts-ignore
-import StyleToolbar from './StyleToolbar.vue'
-// @ts-ignore
-import FormulaBar from './sheet/FormulaBar.vue'
-// @ts-ignore
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
 import InputDialog from './InputDialog.vue'
-// @ts-ignore
-import FillOptionsMenu from './FillOptionsMenu.vue'
 // @ts-ignore
 import ImagePreview from './ImagePreview.vue'
 
@@ -192,6 +153,24 @@ const props = withDefaults(defineProps<Props>(), {
   initialViewState: undefined
 })
 
+// ==================== Events ====================
+const emit = defineEmits<{
+  /** 选区变化事件 */
+  (e: 'selection-change', payload: {
+    selected: { row: number; col: number }
+    selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
+    multiSelection?: { ranges: any[]; active: boolean }
+    cellValue: string
+    formulaReferences?: any[]
+  }): void
+  /** 编辑状态变化事件 */
+  (e: 'editing-state-change', payload: {
+    isEditing: boolean
+    editingValue: string
+    formulaReferences?: any[]
+  }): void
+}>()
+
 // ==================== 初始化状态 ====================
 const state = useSheetState({
   externalModel: props.externalModel,
@@ -203,7 +182,6 @@ const containerRef = ref<HTMLElement | null>(null)
 const gridCanvasRef = ref<HTMLCanvasElement | null>(null)
 const contentCanvasRef = ref<HTMLCanvasElement | null>(null)
 const overlayInputRef = ref<any>(null)
-const formulaBarRef = ref<any>(null)
 const imeProxyRef = ref<HTMLTextAreaElement | null>(null)
 
 // 将 DOM 引用同步到 state
@@ -212,7 +190,6 @@ function syncRefs() {
   state.gridCanvas.value = gridCanvasRef.value
   state.contentCanvas.value = contentCanvasRef.value
   state.overlayInput.value = overlayInputRef.value
-  state.formulaBarInput.value = formulaBarRef.value
   state.imeProxy.value = imeProxyRef.value
 }
 
@@ -538,6 +515,69 @@ onBeforeUnmount(() => {
     delete (window as any).__sheetThemeObserver
   }
 })
+
+// ==================== 事件发射 ====================
+
+/** 发射选区变化事件 */
+function emitSelectionChange() {
+  const row = state.selectionRange.startRow
+  const col = state.selectionRange.startCol
+  emit('selection-change', {
+    selected: { row: state.selected.row, col: state.selected.col },
+    selectionRange: { ...state.selectionRange },
+    multiSelection: state.multiSelection.active ? {
+      ranges: [...state.multiSelection.ranges],
+      active: true
+    } : undefined,
+    cellValue: state.model.getValue(row, col) ?? '',
+    formulaReferences: state.richTextFormulaReferences.value
+  })
+}
+
+/** 发射编辑状态变化事件 */
+function emitEditingStateChange() {
+  emit('editing-state-change', {
+    isEditing: state.overlay.visible,
+    editingValue: state.overlay.value,
+    formulaReferences: state.richTextFormulaReferences.value
+  })
+}
+
+// ==================== 状态变化监听 ====================
+
+// 监听选区变化（选中单元格/范围）
+watch(
+  () => [
+    state.selectionRange.startRow,
+    state.selectionRange.startCol,
+    state.selectionRange.endRow,
+    state.selectionRange.endCol,
+    state.selected.row,
+    state.selected.col
+  ],
+  () => {
+    emitSelectionChange()
+  }
+)
+
+// 监听编辑状态变化
+watch(
+  () => [state.overlay.visible, state.overlay.value],
+  () => {
+    emitEditingStateChange()
+  }
+)
+
+// 监听公式引用变化
+watch(
+  () => state.richTextFormulaReferences.value,
+  () => {
+    if (state.overlay.visible) {
+      emitEditingStateChange()
+    }
+  },
+  { deep: true }
+)
 
 // ==================== API 创建 ====================
 const api = createSheetAPI({
@@ -1356,6 +1396,7 @@ function selectCell(row: number, col: number) {
   geometry.ensureVisible(row, col)
   
   drawing.draw()
+  // watch 会自动发射选区变化事件
 }
 
 /** 选择范围 */
@@ -1371,6 +1412,7 @@ function selectRange(startRow: number, startCol: number, endRow: number, endCol:
   geometry.ensureVisible(startRow, startCol)
   
   drawing.draw()
+  // watch 会自动发射选区变化事件
 }
 
 /** 开始编辑当前单元格 */
@@ -1404,67 +1446,8 @@ function cancelEditing() {
 function setEditingValue(value: string) {
   if (state.overlay.visible) {
     state.overlay.value = value
+    // watch 会自动发射编辑状态变化事件
   }
-}
-
-// ==================== 公式栏 Computed ====================
-
-/** 公式栏 - 当前行 */
-const formulaBarRow = computed(() => state.selectionRange.startRow)
-
-/** 公式栏 - 当前列 */
-const formulaBarCol = computed(() => state.selectionRange.startCol)
-
-/** 公式栏 - 结束行 */
-const formulaBarEndRow = computed(() => state.selectionRange.endRow)
-
-/** 公式栏 - 结束列 */
-const formulaBarEndCol = computed(() => state.selectionRange.endCol)
-
-/** 公式栏 - 单元格值 */
-const formulaBarCellValue = computed(() => {
-  const row = state.selectionRange.startRow
-  const col = state.selectionRange.startCol
-  return state.model.getValue(row, col) ?? ''
-})
-
-/** 公式栏 - 是否编辑中 */
-const formulaBarIsEditing = computed(() => state.overlay.visible)
-
-/** 公式栏 - 编辑中的值 */
-const formulaBarEditingValue = computed(() => state.overlay.value)
-
-// ==================== 公式栏事件处理 ====================
-
-/** 公式栏 - 导航到单元格 */
-function handleFormulaBarNavigate(row: number, col: number) {
-  selectCell(row, col)
-}
-
-/** 公式栏 - 选择范围 */
-function handleFormulaBarSelectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
-  selectRange(startRow, startCol, endRow, endCol)
-}
-
-/** 公式栏 - 开始编辑 */
-function handleFormulaBarStartEdit() {
-  console.log('[CanvasSheet] handleFormulaBarStartEdit 被调用')
-  startEditingCurrentCell()
-}
-
-/** 公式栏 - 确认 */
-function handleFormulaBarConfirm() {
-  confirmEditing()
-}
-
-/** 公式栏 - 取消 */
-function handleFormulaBarCancel() {
-  cancelEditing()
-}
-
-/** 公式栏 - 输入变化 */
-function handleFormulaBarInput(value: string) {
-  setEditingValue(value)
 }
 
 // 扩展 API 对象
@@ -1628,39 +1611,4 @@ defineExpose(extendedApi)
   font-size: 12px;
 }
 
-/* 暗黑模式支持 - 系统偏好 */
-@media (prefers-color-scheme: dark) {
-  .sheet-container {
-    --sheet-border: #404040;
-  }
-  
-  .v-scrollbar-thumb,
-  .h-scrollbar-thumb {
-    --scrollbar-thumb: rgba(255, 255, 255, 0.25);
-  }
-  
-  .calculation-progress {
-    --progress-bg: rgba(30, 30, 30, 0.95);
-    --progress-border: #404040;
-    --progress-text: #e0e0e0;
-    --progress-detail: #b0b0b0;
-  }
-}
-
-/* 暗黑模式支持 - 手动切换 */
-:global(html.dark) .sheet-container {
-  --sheet-border: #404040;
-}
-
-:global(html.dark) .v-scrollbar-thumb,
-:global(html.dark) .h-scrollbar-thumb {
-  --scrollbar-thumb: rgba(255, 255, 255, 0.25);
-}
-
-:global(html.dark) .calculation-progress {
-  --progress-bg: rgba(30, 30, 30, 0.95);
-  --progress-border: #404040;
-  --progress-text: #e0e0e0;
-  --progress-detail: #b0b0b0;
-}
 </style>
