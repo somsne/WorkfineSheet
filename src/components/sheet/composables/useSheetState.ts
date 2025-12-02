@@ -13,7 +13,7 @@ import { ref, reactive, computed } from 'vue'
 import { SheetModel } from '../../../lib/SheetModel'
 import { UndoRedoManager } from '../../../lib/UndoRedoManager'
 import { FormulaSheet } from '../../../lib/FormulaSheet'
-import { initializeDemoData } from '../../../lib/demoData'
+import { initializeStyleDemoData } from '../../../lib/demoData'
 import { parseFormulaReferences } from '../references'
 
 // ==================== 类型定义 ====================
@@ -134,7 +134,7 @@ export function useSheetState(options: SheetStateOptions = {}) {
   
   // 只有在没有外部 model 且没有跳过演示数据时才初始化演示数据
   if (!options.externalModel && !options.skipDemoData) {
-    initializeDemoData(model)
+    initializeStyleDemoData(model)
   }
   
   // ==================== 自定义行高和列宽 ====================
@@ -156,7 +156,10 @@ export function useSheetState(options: SheetStateOptions = {}) {
     type: '' as 'row' | 'col' | '',
     index: -1,
     startPos: 0,
-    startSize: 0
+    startSize: 0,
+    // 批量调整：选中的其他行/列索引及其初始尺寸
+    batchIndices: [] as number[],
+    batchStartSizes: [] as number[]
   })
   
   // ==================== 悬停状态（用于高亮显示可调整的分隔线）====================
@@ -360,11 +363,6 @@ export function useSheetState(options: SheetStateOptions = {}) {
     }
     
     updateReferencesTimer = window.setTimeout(() => {
-      console.log('[DEBUG updateFormulaReferences] overlay.visible:', overlay.visible)
-      console.log('[DEBUG updateFormulaReferences] overlayInput.value:', !!overlayInput.value)
-      if (overlayInput.value) {
-        console.log('[DEBUG updateFormulaReferences] formulaMode:', (overlayInput.value as any).formulaMode)
-      }
       
       // 检查焦点在哪个组件
       const activeElement = document.activeElement as HTMLElement | null
@@ -377,15 +375,12 @@ export function useSheetState(options: SheetStateOptions = {}) {
         if (isFormulaBarFocused) {
           // 焦点在 FormulaBar，使用 overlay.value（由 FormulaBar emit 更新）
           currentValue = overlay.value
-          console.log('[DEBUG updateFormulaReferences] FormulaBar focused, using overlay.value:', currentValue)
         } else {
           // 焦点在 RichTextInput 或其他地方，从 RichTextInput 获取值
           currentValue = (overlayInput.value as any).getCurrentValue?.() || overlay.value
-          console.log('[DEBUG updateFormulaReferences] currentValue from RichTextInput:', currentValue)
           
           // 同步 RichTextInput 的值到 overlay.value
           if (currentValue !== overlay.value) {
-            console.log('[DEBUG updateFormulaReferences] 同步值到 overlay.value:', currentValue)
             overlay.value = currentValue
           }
         }
@@ -394,10 +389,8 @@ export function useSheetState(options: SheetStateOptions = {}) {
         const isFormulaMode = currentValue?.startsWith('=') ?? false
         if (isFormulaMode) {
           formulaReferences.value = parseFormulaReferences(currentValue)
-          console.log('[DEBUG updateFormulaReferences] formulaReferences:', formulaReferences.value)
         }
       } else {
-        console.log('[DEBUG updateFormulaReferences] clearing references')
         formulaReferences.value = []
       }
       updateReferencesTimer = null

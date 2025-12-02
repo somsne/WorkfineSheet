@@ -287,9 +287,19 @@ const images = useSheetImages({
   getContainer: () => state.container.value,
   totalRows: state.constants.DEFAULT_ROWS,
   totalCols: state.constants.DEFAULT_COLS,
-  requestDraw: () => {
-    drawing.draw()
-  }
+  requestDraw: (() => {
+    // 使用 requestAnimationFrame 节流，避免高频重绘（如拖动图片时）
+    let rafPending = false
+    return () => {
+      if (!rafPending) {
+        rafPending = true
+        requestAnimationFrame(() => {
+          rafPending = false
+          drawing.draw()
+        })
+      }
+    }
+  })()
 })
 
 // 绘制图片的辅助函数
@@ -385,7 +395,6 @@ onMounted(() => {
     syncRefs()
     
     if (!containerRef.value) return
-    console.log('Container size:', containerRef.value.clientWidth, containerRef.value.clientHeight)
     
     // 恢复初始视图状态（多工作表切换时使用）
     if (props.initialViewState) {
@@ -398,6 +407,8 @@ onMounted(() => {
       state.selectionRange.endCol = vs.selectionRange.endCol
       state.viewport.scrollTop = vs.scrollPosition.scrollTop
       state.viewport.scrollLeft = vs.scrollPosition.scrollLeft
+      // 恢复网格线显示状态
+      state.showGridLines.value = vs.showGridLines !== false
     } else {
       // 默认选中 A1 单元格
       state.selected.row = 0
@@ -1276,7 +1287,8 @@ function getViewState(): SheetViewState {
     scrollPosition: {
       scrollTop: state.viewport.scrollTop,
       scrollLeft: state.viewport.scrollLeft
-    }
+    },
+    showGridLines: state.showGridLines.value
   }
 }
 
@@ -1290,6 +1302,8 @@ function setViewState(viewState: SheetViewState) {
   state.selectionRange.endCol = viewState.selectionRange.endCol
   state.viewport.scrollTop = viewState.scrollPosition.scrollTop
   state.viewport.scrollLeft = viewState.scrollPosition.scrollLeft
+  // 恢复网格线显示状态
+  state.showGridLines.value = viewState.showGridLines !== false
   drawing.draw()
 }
 
@@ -1419,16 +1433,13 @@ function selectRange(startRow: number, startCol: number, endRow: number, endCol:
 function startEditingCurrentCell() {
   const row = state.selected.row
   const col = state.selected.col
-  console.log('[CanvasSheet] startEditingCurrentCell', { row, col })
   const value = state.formulaSheet.getDisplayValue(row, col) ?? ''
   
-  console.log('[CanvasSheet] 调用 openOverlay', { row, col, value })
   input.openOverlay(row, col, value, 'edit')
 }
 
 /** 确认编辑 */
 function confirmEditing() {
-  console.log('[CanvasSheet] confirmEditing', { overlayVisible: state.overlay.visible })
   if (state.overlay.visible) {
     input.onOverlaySave(state.overlay.value)
   }
@@ -1436,7 +1447,6 @@ function confirmEditing() {
 
 /** 取消编辑 */
 function cancelEditing() {
-  console.log('[CanvasSheet] cancelEditing', { overlayVisible: state.overlay.visible })
   if (state.overlay.visible) {
     input.onOverlayCancel()
   }

@@ -356,8 +356,12 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
     if (newRow !== selected.row || newCol !== selected.col) {
       selected.row = newRow
       selected.col = newCol
-      // 清除选区
-      state.clearSelectionRange()
+      // 将选区设置为当前单元格（而不是清除选区）
+      // 这样可以保持填充柄显示，并正确更新公式栏
+      selectionRange.startRow = newRow
+      selectionRange.startCol = newCol
+      selectionRange.endRow = newRow
+      selectionRange.endCol = newCol
       ensureVisible(newRow, newCol)
       onDraw()
       focusImeProxy()

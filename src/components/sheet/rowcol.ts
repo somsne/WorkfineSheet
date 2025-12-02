@@ -33,6 +33,16 @@ export interface FormulaSheetAdapter {
     getAllMergedRegions(): MergedRegion[]
     unmergeCells(row: number, col: number): MergedRegion | null
     mergeCells(startRow: number, startCol: number, endRow: number, endCol: number): boolean
+    // 单元格内嵌图片相关
+    adjustCellImagesForRowInsert(row: number, count?: number): void
+    adjustCellImagesForRowDelete(row: number, count?: number): void
+    adjustCellImagesForColInsert(col: number, count?: number): void
+    adjustCellImagesForColDelete(col: number, count?: number): void
+    // 浮动图片相关
+    adjustImagesForRowInsert(row: number, count?: number): void
+    adjustImagesForRowDelete(row: number, count?: number): void
+    adjustImagesForColInsert(col: number, count?: number): void
+    adjustImagesForColDelete(col: number, count?: number): void
   }
 }
 
@@ -64,18 +74,17 @@ export interface RowColConfig {
   sizeConfig: SizeConfig
   selected: SelectedCell
   onRedraw: () => void
+  /** 是否跳过重绘（用于批量操作时延迟重绘） */
+  skipRedraw?: boolean
 }
 
 /**
  * 在指定行上方插入行
  */
 export async function insertRowAbove(row: number, config: RowColConfig): Promise<void> {
-  console.log('在行', row, '上方插入行')
-  
   const { formulaSheet, sizeConfig, onRedraw } = config
   
   // 步骤1: 先异步调整所有公式（会自动移动公式单元格并更新引用）
-  // 这一步必须在移动非公式单元格之前，因为需要读取原始的元数据
   await formulaSheet.adjustAllFormulasAsync('insertRow', row, 1)
   
   // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
@@ -182,10 +191,6 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
   }
   
   // 步骤10: 调整合并区域
-  // 对于插入行：
-  // - 如果插入位置在合并区域内部（不在起始行），需要扩展合并区域（向下扩展1行）
-  // - 如果插入位置在合并区域下方，合并区域需要整体下移
-  // - 如果插入位置在合并区域上方或起始行，合并区域位置需要下移
   const mergedRegions = model.getAllMergedRegions()
   for (const region of mergedRegions) {
     // 取消原合并
@@ -214,15 +219,161 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
     }
   }
   
-  // 重新绘制
-  onRedraw()
+  // 步骤11: 调整单元格内嵌图片位置
+  model.adjustCellImagesForRowInsert(row, 1)
+  
+  // 步骤12: 调整浮动图片位置（根据锚点行移动）
+  model.adjustImagesForRowInsert(row, 1)
+  
+  // 重新绘制（除非跳过）
+  if (!config.skipRedraw) {
+    onRedraw()
+  }
+}
+
+/**
+ * 批量在指定行上方插入多行（优化版本）
+ * 相比循环调用 insertRowAbove，此函数一次性完成所有数据移动，性能提升显著
+ */
+export async function insertRowsAboveBatch(row: number, count: number, config: RowColConfig): Promise<void> {
+  if (count <= 0) return
+  if (count === 1) {
+    // 单行插入走原路径
+    return insertRowAbove(row, config)
+  }
+  
+  const { formulaSheet, sizeConfig, onRedraw } = config
+  
+  // 步骤1: 批量调整所有公式
+  await formulaSheet.adjustAllFormulasAsync('insertRow', row, count)
+  
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
+  model.forEach((r, c, cell) => {
+    if (r >= row && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
+    }
+  })
+  
+  nonFormulaCellsToMove.sort((a, b) => b.row - a.row)
+  
+  // 步骤3: 移动非公式单元格（一次性移动 count 行）
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')
+    model.setValue(r + count, c, value)
+  })
+  
+  // 步骤4-6: 合并遍历 - 同时收集样式、边框、格式（性能优化核心）
+  const dataToMove: Array<{
+    row: number
+    col: number
+    style?: CellStyle
+    border?: CellBorder
+    format?: CellFormat
+  }> = []
+  
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    for (let r = sizeConfig.totalRows - 1; r >= row; r--) {
+      const hasStyle = model.hasCellStyle(r, c)
+      const hasBorder = model.hasCellBorder(r, c)
+      const hasFormat = model.hasCellFormat(r, c)
+      
+      if (hasStyle || hasBorder || hasFormat) {
+        dataToMove.push({
+          row: r,
+          col: c,
+          style: hasStyle ? model.getCellStyle(r, c) : undefined,
+          border: hasBorder ? model.getCellBorder(r, c)! : undefined,
+          format: hasFormat ? model.getCellFormat(r, c) : undefined
+        })
+        if (hasStyle) model.clearCellStyle(r, c)
+        if (hasBorder) model.clearCellBorder(r, c)
+        if (hasFormat) model.clearCellFormat(r, c)
+      }
+    }
+  }
+  
+  // 设置到新位置
+  dataToMove.forEach(({ row: r, col: c, style, border, format }) => {
+    if (style) model.setCellStyle(r + count, c, style)
+    if (border) model.setCellBorder(r + count, c, border)
+    if (format) model.setCellFormat(r + count, c, format)
+  })
+  
+  // 步骤7: 新行继承样式（所有新插入的行都从相同的源行继承）
+  const sourceRow = row > 0 ? row - 1 : row + count  // 继承源行
+  for (let c = 0; c < sizeConfig.totalCols; c++) {
+    const sourceStyle = model.hasCellStyle(sourceRow, c) ? model.getCellStyle(sourceRow, c) : null
+    const sourceBorder = model.hasCellBorder(sourceRow, c) ? model.getCellBorder(sourceRow, c)! : null
+    const sourceFormat = model.hasCellFormat(sourceRow, c) ? model.getCellFormat(sourceRow, c) : null
+    
+    // 为每个新行设置继承的样式
+    for (let i = 0; i < count; i++) {
+      const newRow = row + i
+      if (sourceStyle) model.setCellStyle(newRow, c, sourceStyle)
+      if (sourceBorder) model.setCellBorder(newRow, c, sourceBorder)
+      if (sourceFormat) model.setCellFormat(newRow, c, sourceFormat)
+    }
+  }
+  
+  // 步骤8-9: 移动自定义行高并继承
+  const newRowHeights = new Map<number, number>()
+  sizeConfig.rowHeights.forEach((height: number, r: number) => {
+    if (r >= row) {
+      newRowHeights.set(r + count, height)
+    } else {
+      newRowHeights.set(r, height)
+    }
+  })
+  sizeConfig.rowHeights = newRowHeights
+  
+  // 新行继承行高
+  const heightSourceRow = row > 0 ? row - 1 : row + count
+  if (sizeConfig.rowHeights.has(heightSourceRow)) {
+    const inheritedHeight = sizeConfig.rowHeights.get(heightSourceRow)!
+    for (let i = 0; i < count; i++) {
+      sizeConfig.rowHeights.set(row + i, inheritedHeight)
+    }
+  }
+  
+  // 步骤10: 调整合并区域
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    let newStartRow = region.startRow
+    let newEndRow = region.endRow
+    
+    if (row > region.startRow && row <= region.endRow) {
+      newEndRow = region.endRow + count
+    } else if (row <= region.startRow) {
+      newStartRow = region.startRow + count
+      newEndRow = region.endRow + count
+    }
+    
+    if (newStartRow !== region.startRow || newEndRow !== region.endRow || row <= region.startRow) {
+      model.mergeCells(newStartRow, region.startCol, newEndRow, region.endCol)
+    } else {
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    }
+  }
+  
+  // 步骤11-12: 调整图片位置
+  model.adjustCellImagesForRowInsert(row, count)
+  model.adjustImagesForRowInsert(row, count)
+  
+  // 重新绘制（只绘制一次！）
+  if (!config.skipRedraw) {
+    onRedraw()
+  }
 }
 
 /**
  * 在指定行下方插入行
  */
 export async function insertRowBelow(row: number, config: RowColConfig): Promise<void> {
-  console.log('在行', row, '下方插入行')
   // 在下方插入等同于在 row+1 的上方插入
   await insertRowAbove(row + 1, config)
 }
@@ -231,7 +382,6 @@ export async function insertRowBelow(row: number, config: RowColConfig): Promise
  * 删除指定行
  */
 export async function deleteRow(row: number, config: RowColConfig): Promise<void> {
-  console.log('删除行', row)
   
   const { formulaSheet, sizeConfig, selected, onRedraw } = config
   
@@ -373,6 +523,12 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
     }
   }
   
+  // 步骤11: 调整单元格内嵌图片位置
+  model.adjustCellImagesForRowDelete(row, 1)
+  
+  // 步骤12: 调整浮动图片位置（根据锚点行移动）
+  model.adjustImagesForRowDelete(row, 1)
+  
   // 重新绘制
   onRedraw()
 }
@@ -381,7 +537,6 @@ export async function deleteRow(row: number, config: RowColConfig): Promise<void
  * 在指定列左侧插入列
  */
 export async function insertColLeft(col: number, config: RowColConfig): Promise<void> {
-  console.log('在列', col, '左侧插入列')
   
   const { formulaSheet, sizeConfig, onRedraw } = config
   
@@ -524,15 +679,157 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
     }
   }
   
-  // 重新绘制
-  onRedraw()
+  // 步骤11: 调整单元格内嵌图片位置
+  model.adjustCellImagesForColInsert(col, 1)
+  
+  // 步骤12: 调整浮动图片位置（根据锚点列移动）
+  model.adjustImagesForColInsert(col, 1)
+  
+  // 重新绘制（除非跳过）
+  if (!config.skipRedraw) {
+    onRedraw()
+  }
+}
+
+/**
+ * 批量在指定列左侧插入多列（优化版本）
+ */
+export async function insertColsLeftBatch(col: number, count: number, config: RowColConfig): Promise<void> {
+  if (count <= 0) return
+  if (count === 1) {
+    return insertColLeft(col, config)
+  }
+  
+  const { formulaSheet, sizeConfig, onRedraw } = config
+  
+  // 步骤1: 批量调整所有公式
+  await formulaSheet.adjustAllFormulasAsync('insertCol', col, count)
+  
+  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const model = formulaSheet.getModel()
+  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+  
+  model.forEach((r, c, cell) => {
+    if (c >= col && !cell.formulaMetadata) {
+      nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
+    }
+  })
+  
+  nonFormulaCellsToMove.sort((a, b) => b.col - a.col)
+  
+  // 步骤3: 移动非公式单元格（一次性移动 count 列）
+  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+    model.setValue(r, c, '')
+    model.setValue(r, c + count, value)
+  })
+  
+  // 步骤4-6: 合并遍历 - 同时收集样式、边框、格式
+  const dataToMove: Array<{
+    row: number
+    col: number
+    style?: CellStyle
+    border?: CellBorder
+    format?: CellFormat
+  }> = []
+  
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
+      const hasStyle = model.hasCellStyle(r, c)
+      const hasBorder = model.hasCellBorder(r, c)
+      const hasFormat = model.hasCellFormat(r, c)
+      
+      if (hasStyle || hasBorder || hasFormat) {
+        dataToMove.push({
+          row: r,
+          col: c,
+          style: hasStyle ? model.getCellStyle(r, c) : undefined,
+          border: hasBorder ? model.getCellBorder(r, c)! : undefined,
+          format: hasFormat ? model.getCellFormat(r, c) : undefined
+        })
+        if (hasStyle) model.clearCellStyle(r, c)
+        if (hasBorder) model.clearCellBorder(r, c)
+        if (hasFormat) model.clearCellFormat(r, c)
+      }
+    }
+  }
+  
+  // 设置到新位置
+  dataToMove.forEach(({ row: r, col: c, style, border, format }) => {
+    if (style) model.setCellStyle(r, c + count, style)
+    if (border) model.setCellBorder(r, c + count, border)
+    if (format) model.setCellFormat(r, c + count, format)
+  })
+  
+  // 步骤7: 新列继承样式
+  const sourceCol = col > 0 ? col - 1 : col + count
+  for (let r = 0; r < sizeConfig.totalRows; r++) {
+    const sourceStyle = model.hasCellStyle(r, sourceCol) ? model.getCellStyle(r, sourceCol) : null
+    const sourceBorder = model.hasCellBorder(r, sourceCol) ? model.getCellBorder(r, sourceCol)! : null
+    const sourceFormat = model.hasCellFormat(r, sourceCol) ? model.getCellFormat(r, sourceCol) : null
+    
+    for (let i = 0; i < count; i++) {
+      const newCol = col + i
+      if (sourceStyle) model.setCellStyle(r, newCol, sourceStyle)
+      if (sourceBorder) model.setCellBorder(r, newCol, sourceBorder)
+      if (sourceFormat) model.setCellFormat(r, newCol, sourceFormat)
+    }
+  }
+  
+  // 步骤8-9: 移动自定义列宽并继承
+  const newColWidths = new Map<number, number>()
+  sizeConfig.colWidths.forEach((width: number, c: number) => {
+    if (c >= col) {
+      newColWidths.set(c + count, width)
+    } else {
+      newColWidths.set(c, width)
+    }
+  })
+  sizeConfig.colWidths = newColWidths
+  
+  const widthSourceCol = col > 0 ? col - 1 : col + count
+  if (sizeConfig.colWidths.has(widthSourceCol)) {
+    const inheritedWidth = sizeConfig.colWidths.get(widthSourceCol)!
+    for (let i = 0; i < count; i++) {
+      sizeConfig.colWidths.set(col + i, inheritedWidth)
+    }
+  }
+  
+  // 步骤10: 调整合并区域
+  const mergedRegions = model.getAllMergedRegions()
+  for (const region of mergedRegions) {
+    model.unmergeCells(region.startRow, region.startCol)
+    
+    let newStartCol = region.startCol
+    let newEndCol = region.endCol
+    
+    if (col > region.startCol && col <= region.endCol) {
+      newEndCol = region.endCol + count
+    } else if (col <= region.startCol) {
+      newStartCol = region.startCol + count
+      newEndCol = region.endCol + count
+    }
+    
+    if (newStartCol !== region.startCol || newEndCol !== region.endCol || col <= region.startCol) {
+      model.mergeCells(region.startRow, newStartCol, region.endRow, newEndCol)
+    } else {
+      model.mergeCells(region.startRow, region.startCol, region.endRow, region.endCol)
+    }
+  }
+  
+  // 步骤11-12: 调整图片位置
+  model.adjustCellImagesForColInsert(col, count)
+  model.adjustImagesForColInsert(col, count)
+  
+  // 重新绘制（只绘制一次！）
+  if (!config.skipRedraw) {
+    onRedraw()
+  }
 }
 
 /**
  * 在指定列右侧插入列
  */
 export async function insertColRight(col: number, config: RowColConfig): Promise<void> {
-  console.log('在列', col, '右侧插入列')
   // 在右侧插入等同于在 col+1 的左侧插入
   await insertColLeft(col + 1, config)
 }
@@ -541,7 +838,6 @@ export async function insertColRight(col: number, config: RowColConfig): Promise
  * 删除指定列
  */
 export async function deleteCol(col: number, config: RowColConfig): Promise<void> {
-  console.log('删除列', col)
   
   const { formulaSheet, sizeConfig, selected, onRedraw } = config
   
@@ -683,6 +979,12 @@ export async function deleteCol(col: number, config: RowColConfig): Promise<void
     }
   }
   
+  // 步骤11: 调整单元格内嵌图片位置
+  model.adjustCellImagesForColDelete(col, 1)
+  
+  // 步骤12: 调整浮动图片位置（根据锚点列移动）
+  model.adjustImagesForColDelete(col, 1)
+  
   // 重新绘制
   onRedraw()
 }
@@ -711,18 +1013,25 @@ export function showSetRowHeightDialog(
   currentHeight: number,
   rowHeights: Map<number, number>,
   manualRowHeights: Set<number>,
+  hiddenRows: Set<number>,
   dialogState: InputDialogState,
   onRedraw: () => void
 ): void {
   dialogState.title = '设置行高'
   dialogState.defaultValue = currentHeight.toString()
-  dialogState.placeholder = '请输入行高（像素）'
+  dialogState.placeholder = '请输入行高（像素），0 表示隐藏'
   dialogState.callback = (value: string) => {
     const height = parseInt(value, 10)
-    if (!isNaN(height) && height > 0) {
-      rowHeights.set(row, height)
-      // 记录为用户手动设置的行高
-      manualRowHeights.add(row)
+    if (!isNaN(height)) {
+      if (height <= 0) {
+        // 高度 <= 0 等价于隐藏行
+        hiddenRows.add(row)
+      } else {
+        hiddenRows.delete(row)
+        rowHeights.set(row, height)
+        // 记录为用户手动设置的行高
+        manualRowHeights.add(row)
+      }
       onRedraw()
     }
   }
@@ -736,16 +1045,23 @@ export function showSetColWidthDialog(
   col: number,
   currentWidth: number,
   colWidths: Map<number, number>,
+  hiddenCols: Set<number>,
   dialogState: InputDialogState,
   onRedraw: () => void
 ): void {
   dialogState.title = '设置列宽'
   dialogState.defaultValue = currentWidth.toString()
-  dialogState.placeholder = '请输入列宽（像素）'
+  dialogState.placeholder = '请输入列宽（像素），0 表示隐藏'
   dialogState.callback = (value: string) => {
     const width = parseInt(value, 10)
-    if (!isNaN(width) && width > 0) {
-      colWidths.set(col, width)
+    if (!isNaN(width)) {
+      if (width <= 0) {
+        // 宽度 <= 0 等价于隐藏列
+        hiddenCols.add(col)
+      } else {
+        hiddenCols.delete(col)
+        colWidths.set(col, width)
+      }
       onRedraw()
     }
   }

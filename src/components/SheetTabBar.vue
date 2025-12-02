@@ -27,8 +27,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 切换工作表 */
   (e: 'switch', sheetId: string): void
-  /** 新建工作表 */
-  (e: 'add'): void
+  /** 新建工作表，可选传递插入位置索引 */
+  (e: 'add', index?: number): void
   /** 删除工作表 */
   (e: 'remove', sheetId: string): void
   /** 重命名工作表 */
@@ -160,7 +160,11 @@ function getSheetName(sheetId: string): string {
 function handleContextMenu(e: MouseEvent, sheetId: string) {
   e.preventDefault()
   contextMenuSheetId.value = sheetId
-  contextMenuPosition.value = { x: e.clientX, y: e.clientY }
+  // 菜单向上弹出，使用屏幕底部作为参考
+  contextMenuPosition.value = { 
+    x: e.clientX, 
+    y: window.innerHeight - e.clientY // 转换为从底部的距离
+  }
   contextMenuVisible.value = true
 }
 
@@ -187,16 +191,14 @@ function handleMenuAction(action: string) {
     case 'hide':
       emit('hide', sheetId)
       break
-    case 'insertBefore':
-      // 在当前工作表之前插入
+    case 'insert':
+      // 在当前工作表前面插入
       const sheet = props.sheets.find(s => s.metadata.id === sheetId)
       if (sheet) {
+        emit('add', sheet.metadata.order)
+      } else {
         emit('add')
-        // 移动到当前位置（通过 add 事件后处理）
       }
-      break
-    case 'insertAfter':
-      emit('add')
       break
   }
   
@@ -441,7 +443,7 @@ const presetColors = [
       <div 
         v-if="contextMenuVisible"
         class="context-menu"
-        :style="{ left: contextMenuPosition.x + 'px', top: contextMenuPosition.y + 'px' }"
+        :style="{ left: contextMenuPosition.x + 'px', bottom: contextMenuPosition.y + 'px' }"
       >
         <div class="menu-item" @click="handleMenuAction('rename')">
           重命名
@@ -449,12 +451,8 @@ const presetColors = [
         <div class="menu-item" @click="handleMenuAction('duplicate')">
           复制工作表
         </div>
-        <div class="menu-divider"></div>
-        <div class="menu-item" @click="handleMenuAction('insertBefore')">
-          在前面插入
-        </div>
-        <div class="menu-item" @click="handleMenuAction('insertAfter')">
-          在后面插入
+        <div class="menu-item" @click="handleMenuAction('insert')">
+          插入工作表
         </div>
         <div class="menu-divider"></div>
         <div 
@@ -546,14 +544,14 @@ const presetColors = [
   position: relative;
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 12px;
   background: #fff;
   border-right: 1px solid #e0e0e0;
   cursor: pointer;
   font-size: 12px;
   color: #666;
   white-space: nowrap;
-  min-width: 60px;
+  min-width: fit-content;
   max-width: 150px;
   transition: background-color 0.15s, color 0.15s;
 }

@@ -3,7 +3,7 @@
  * Depends on geometry module for sizes and positions.
  */
 
-import type { GeometryConfig, SizeAccess, MergedRegion } from './types'
+import type { GeometryConfig, SizeAccess, MergedRegion, SelectionRange, MultiSelectionState, SelectedCell } from './types'
 import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from './geometry'
 
 export interface GridRenderConfig {
@@ -17,6 +17,12 @@ export interface GridRenderConfig {
   geometryConfig: GeometryConfig
   /** 合并单元格区域列表 */
   mergedRegions?: MergedRegion[]
+  /** 当前选中的单元格 */
+  selected?: SelectedCell
+  /** 选区范围 */
+  selectionRange?: SelectionRange
+  /** 多选区 */
+  multiSelection?: MultiSelectionState
 }
 
 /**
@@ -88,6 +94,46 @@ function getColLabel(c: number): string {
 /**
  * Draw grid lines, headers, and hover highlights on the grid canvas.
  */
+/**
+ * 计算选中的行和列范围
+ */
+function getSelectedRowsAndCols(
+  selected: SelectedCell | undefined,
+  selectionRange: SelectionRange | undefined,
+  multiSelection: MultiSelectionState | undefined
+): { selectedRows: Set<number>; selectedCols: Set<number> } {
+  const selectedRows = new Set<number>()
+  const selectedCols = new Set<number>()
+  
+  // 添加当前选区
+  if (selectionRange && selectionRange.startRow >= 0) {
+    const minRow = Math.min(selectionRange.startRow, selectionRange.endRow)
+    const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow)
+    const minCol = Math.min(selectionRange.startCol, selectionRange.endCol)
+    const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol)
+    for (let r = minRow; r <= maxRow; r++) selectedRows.add(r)
+    for (let c = minCol; c <= maxCol; c++) selectedCols.add(c)
+  } else if (selected && selected.row >= 0 && selected.col >= 0) {
+    // 如果没有选区，使用单个选中的单元格
+    selectedRows.add(selected.row)
+    selectedCols.add(selected.col)
+  }
+  
+  // 添加多选区的行列
+  if (multiSelection && multiSelection.ranges.length > 0) {
+    for (const range of multiSelection.ranges) {
+      const minRow = Math.min(range.startRow, range.endRow)
+      const maxRow = Math.max(range.startRow, range.endRow)
+      const minCol = Math.min(range.startCol, range.endCol)
+      const maxCol = Math.max(range.startCol, range.endCol)
+      for (let r = minRow; r <= maxRow; r++) selectedRows.add(r)
+      for (let c = minCol; c <= maxCol; c++) selectedCols.add(c)
+    }
+  }
+  
+  return { selectedRows, selectedCols }
+}
+
 export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig) {
   const {
     containerWidth: w,
@@ -98,16 +144,26 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     totalCols,
     sizes,
     geometryConfig,
-    mergedRegions = []
+    mergedRegions = [],
+    selected,
+    selectionRange,
+    multiSelection
   } = config
   
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
+  
+  // 计算选中的行和列
+  const { selectedRows, selectedCols } = getSelectedRowsAndCols(selected, selectionRange, multiSelection)
   
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
   // 固定使用亮色模式
   const headerBgColor = '#f0f0f0'
   const headerTextColor = '#333'
+  // 选中的行/列头背景色（参考Excel的浅绿色）
+  const selectedHeaderBgColor = '#e8f5e9'
+  // 选中的行/列头文字颜色（深绿色）
+  const selectedHeaderTextColor = '#217346'
   
   ctx.fillStyle = headerBgColor
   ctx.fillRect(0, 0, w, colHeaderHeight)
@@ -237,7 +293,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     const colWidth = getColWidth(c, sizes, geometryConfig)
     const x = accumulatedColX - viewport.scrollLeft
     
-    if (x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
+    if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
       const label = getColLabel(c)
       const metrics = ctx.measureText(label)
       ctx.fillText(label, x + (colWidth - metrics.width) / 2, colHeaderHeight / 2)
@@ -253,7 +309,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     const rowHeight = getRowHeight(r, sizes, geometryConfig)
     const y = accumulatedRowY - viewport.scrollTop
     
-    if (y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
+    if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
       const label = (r + 1).toString()
       const metrics = ctx.measureText(label)
       ctx.fillText(label, (rowHeaderWidth - metrics.width) / 2, y + rowHeight / 2)
@@ -271,28 +327,77 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // Row header mask  
   ctx.fillRect(0, 0, rowHeaderWidth, h)
   
+  // Draw selected column header backgrounds first
+  accumulatedColX = rowHeaderWidth
+  for (let c = 0; c < totalCols; c++) {
+    const colWidth = getColWidth(c, sizes, geometryConfig)
+    const x = accumulatedColX - viewport.scrollLeft
+    
+    if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
+      // 如果该列被选中，绘制高亮背景
+      if (selectedCols.has(c)) {
+        ctx.fillStyle = selectedHeaderBgColor
+        ctx.fillRect(Math.max(x, rowHeaderWidth), 0, Math.min(colWidth, x + colWidth - rowHeaderWidth), colHeaderHeight)
+      }
+    }
+    
+    accumulatedColX += colWidth
+    if (accumulatedColX - viewport.scrollLeft > w) break
+  }
+  
+  // Draw selected row header backgrounds first
+  accumulatedRowY = colHeaderHeight
+  for (let r = 0; r < totalRows; r++) {
+    const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    const y = accumulatedRowY - viewport.scrollTop
+    
+    if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
+      // 如果该行被选中，绘制高亮背景
+      if (selectedRows.has(r)) {
+        ctx.fillStyle = selectedHeaderBgColor
+        ctx.fillRect(0, Math.max(y, colHeaderHeight), rowHeaderWidth, Math.min(rowHeight, y + rowHeight - colHeaderHeight))
+      }
+    }
+    
+    accumulatedRowY += rowHeight
+    if (accumulatedRowY - viewport.scrollTop > h) break
+  }
+  
   // Redraw column labels and separator lines
-  ctx.fillStyle = headerTextColor
   ctx.font = '12px sans-serif'
   ctx.textBaseline = 'middle'
   ctx.strokeStyle = '#999'
   ctx.lineWidth = 1
+  
+  // 获取隐藏行列信息
+  const hiddenRows = sizes.hiddenRows || new Set<number>()
+  const hiddenCols = sizes.hiddenCols || new Set<number>()
   
   accumulatedColX = rowHeaderWidth
   for (let c = 0; c < totalCols; c++) {
     const colWidth = getColWidth(c, sizes, geometryConfig)
     const x = accumulatedColX - viewport.scrollLeft
     
-    if (x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
+    if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
       // Draw column left border line
+      // 检查是否有隐藏的列在当前列之前（使用不同颜色的分隔线）
+      if (c > 0 && hiddenCols.has(c - 1)) {
+        ctx.strokeStyle = '#217346'  // 绿色表示有隐藏列
+        ctx.lineWidth = 2
+      } else {
+        ctx.strokeStyle = '#999'
+        ctx.lineWidth = 1
+      }
       ctx.beginPath()
       ctx.moveTo(x, 0)
       ctx.lineTo(x, colHeaderHeight)
       ctx.stroke()
+      ctx.lineWidth = 1
       
-      // Draw column label
+      // Draw column label with appropriate color
       const label = getColLabel(c)
       const metrics = ctx.measureText(label)
+      ctx.fillStyle = selectedCols.has(c) ? selectedHeaderTextColor : headerTextColor
       ctx.fillText(label, x + (colWidth - metrics.width) / 2, colHeaderHeight / 2)
     }
     
@@ -318,16 +423,26 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     const rowHeight = getRowHeight(r, sizes, geometryConfig)
     const y = accumulatedRowY - viewport.scrollTop
     
-    if (y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
+    if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
       // Draw row top border line
+      // 检查是否有隐藏的行在当前行之前（使用不同颜色的分隔线）
+      if (r > 0 && hiddenRows.has(r - 1)) {
+        ctx.strokeStyle = '#217346'  // 绿色表示有隐藏行
+        ctx.lineWidth = 2
+      } else {
+        ctx.strokeStyle = '#999'
+        ctx.lineWidth = 1
+      }
       ctx.beginPath()
       ctx.moveTo(0, y)
       ctx.lineTo(rowHeaderWidth, y)
       ctx.stroke()
+      ctx.lineWidth = 1
       
-      // Draw row label
+      // Draw row label with appropriate color
       const label = (r + 1).toString()
       const metrics = ctx.measureText(label)
+      ctx.fillStyle = selectedRows.has(r) ? selectedHeaderTextColor : headerTextColor
       ctx.fillText(label, (rowHeaderWidth - metrics.width) / 2, y + rowHeight / 2)
     }
     

@@ -21,6 +21,8 @@ export interface SheetViewState {
   selectionRange: { startRow: number; startCol: number; endRow: number; endCol: number }
   /** 滚动位置 */
   scrollPosition: { scrollTop: number; scrollLeft: number }
+  /** 是否显示网格线 */
+  showGridLines?: boolean
 }
 
 /**
@@ -110,7 +112,8 @@ function createDefaultViewState(): SheetViewState {
   return {
     activeCell: { row: 0, col: 0 },
     selectionRange: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
-    scrollPosition: { scrollTop: 0, scrollLeft: 0 }
+    scrollPosition: { scrollTop: 0, scrollLeft: 0 },
+    showGridLines: true
   }
 }
 

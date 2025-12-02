@@ -4,11 +4,10 @@
  */
 
 import {
-  insertRowAbove as insertRowAboveHelper,
   insertRowBelow as insertRowBelowHelper,
+  insertRowsAboveBatch,
   deleteRow as deleteRowHelper,
-  insertColLeft as insertColLeftHelper,
-  insertColRight as insertColRightHelper,
+  insertColsLeftBatch,
   deleteCol as deleteColHelper,
   showSetRowHeightDialog as showSetRowHeightDialogHelper,
   showSetColWidthDialog as showSetColWidthDialogHelper,
@@ -28,6 +27,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
     constants,
     model, formulaSheet, undoRedo,
     rowHeights, colWidths, manualRowHeights,
+    hiddenRows, hiddenCols,
     selected,
     inputDialog,
     saveRowHeightsSnapshot, restoreRowHeights,
@@ -58,17 +58,15 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
   // ==================== 行操作 ====================
   
   /**
-   * 在指定行上方插入行（支持批量插入）
+   * 在指定行上方插入行（支持批量插入 - 使用优化的批量函数）
    */
   async function insertRowAbove(row: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    // 批量插入
-    for (let i = 0; i < count; i++) {
-      await insertRowAboveHelper(row, createRowColConfig())
-    }
+    // 使用优化的批量插入函数（一次性移动所有内容）
+    await insertRowsAboveBatch(row, count, createRowColConfig())
     
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
@@ -95,6 +93,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
         onDraw()
       }
     })
+    
   }
   
   /**
@@ -182,23 +181,21 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
    */
   function showSetRowHeightDialog(row: number) {
     const currentHeight = getRowHeight(row)
-    showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, manualRowHeights.value, inputDialog as any, onDraw)
+    showSetRowHeightDialogHelper(row, currentHeight, rowHeights.value, manualRowHeights.value, hiddenRows.value, inputDialog as any, onDraw)
   }
   
   // ==================== 列操作 ====================
   
   /**
-   * 在指定列左侧插入列（支持批量插入）
+   * 在指定列左侧插入列（支持批量插入 - 使用优化的批量函数）
    */
   async function insertColLeft(col: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    // 批量插入
-    for (let i = 0; i < count; i++) {
-      await insertColLeftHelper(col, createRowColConfig())
-    }
+    // 使用优化的批量插入函数
+    await insertColsLeftBatch(col, count, createRowColConfig())
     
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
@@ -225,20 +222,19 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
         onDraw()
       }
     })
+    
   }
   
   /**
-   * 在指定列右侧插入列（支持批量插入）
+   * 在指定列右侧插入列（支持批量插入 - 使用优化的批量函数）
    */
   async function insertColRight(col: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
     
-    // 批量插入（从后往前插入，保持相对位置）
-    for (let i = 0; i < count; i++) {
-      await insertColRightHelper(col, createRowColConfig())
-    }
+    // 使用优化的批量插入函数（在 col+1 的左侧插入）
+    await insertColsLeftBatch(col + 1, count, createRowColConfig())
     
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
@@ -265,6 +261,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
         onDraw()
       }
     })
+    
   }
   
   /**
@@ -312,7 +309,7 @@ export function useRowColOperations({ state, geometry, onDraw }: UseRowColOperat
    */
   function showSetColWidthDialog(col: number) {
     const currentWidth = getColWidth(col)
-    showSetColWidthDialogHelper(col, currentWidth, colWidths.value, inputDialog as any, onDraw)
+    showSetColWidthDialogHelper(col, currentWidth, colWidths.value, hiddenCols.value, inputDialog as any, onDraw)
   }
   
   return {

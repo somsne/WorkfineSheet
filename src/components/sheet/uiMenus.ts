@@ -45,17 +45,25 @@ export interface ContextMenuConfig {
   getColAtX: (x: number) => number
   /** 当前选区，用于计算多选行列数量 */
   selectionRange?: SelectionRangeInfo
+  /** 隐藏的行集合 */
+  hiddenRows?: Set<number>
+  /** 隐藏的列集合 */
+  hiddenCols?: Set<number>
   rowOperations: {
     insertRowAbove: (row: number, count?: number) => void
     insertRowBelow: (row: number, count?: number) => void
     deleteRow: (row: number, count?: number) => void
     showSetRowHeightDialog: (row: number) => void
+    hideRows: (startRow: number, endRow: number) => void
+    unhideRows: (startRow: number, endRow: number) => void
   }
   colOperations: {
     insertColLeft: (col: number, count?: number) => void
     insertColRight: (col: number, count?: number) => void
     deleteCol: (col: number, count?: number) => void
     showSetColWidthDialog: (col: number) => void
+    hideCols: (startCol: number, endCol: number) => void
+    unhideCols: (startCol: number, endCol: number) => void
   }
 }
 
@@ -76,7 +84,7 @@ export function handleContextMenu(
   menuState.x = e.clientX
   menuState.y = e.clientY
   
-  const { rowHeaderWidth, colHeaderHeight, getRowAtY, getColAtX, rowOperations, colOperations, selectionRange } = config
+  const { rowHeaderWidth, colHeaderHeight, getRowAtY, getColAtX, rowOperations, colOperations, selectionRange, hiddenRows, hiddenCols } = config
   
   // 判断点击位置
   if (x < rowHeaderWidth && y > colHeaderHeight) {
@@ -97,11 +105,47 @@ export function handleContextMenu(
     }
     
     const rowText = rowCount > 1 ? `${rowCount} 行` : '行'
+    const endRow = selectionRange && row >= selectionRange.startRow && row <= selectionRange.endRow ? selectionRange.endRow : row
+    
+    // 检查选区范围内是否有隐藏行（用于判断是否显示取消隐藏选项）
+    let hasHiddenRowsInRange = false
+    if (hiddenRows) {
+      for (let r = startRow; r <= endRow; r++) {
+        if (hiddenRows.has(r)) {
+          hasHiddenRowsInRange = true
+          break
+        }
+      }
+    }
+    
+    // 检查选区前面是否有连续隐藏的行（用于单行选择时取消隐藏前面的行）
+    let hasHiddenRowsBefore = false
+    let hiddenRowsBeforeStart = startRow
+    if (hiddenRows && startRow > 0) {
+      // 向前查找连续隐藏的行
+      let checkRow = startRow - 1
+      while (checkRow >= 0 && hiddenRows.has(checkRow)) {
+        hiddenRowsBeforeStart = checkRow
+        hasHiddenRowsBefore = true
+        checkRow--
+      }
+    }
     
     menuState.items = [
       { label: `在上方插入${rowText}`, action: () => rowOperations.insertRowAbove(startRow, rowCount) },
-      { label: `在下方插入${rowText}`, action: () => rowOperations.insertRowBelow(selectionRange && row >= selectionRange.startRow && row <= selectionRange.endRow ? selectionRange.endRow : row, rowCount) },
+      { label: `在下方插入${rowText}`, action: () => rowOperations.insertRowBelow(endRow, rowCount) },
       { label: `删除${rowText}`, action: () => rowOperations.deleteRow(startRow, rowCount) },
+      { label: '', action: () => {}, divider: true },
+      { label: `隐藏${rowText}`, action: () => rowOperations.hideRows(startRow, endRow) },
+      { label: '取消隐藏', action: () => {
+        if (hasHiddenRowsInRange) {
+          // 取消隐藏选区内的隐藏行
+          rowOperations.unhideRows(startRow, endRow)
+        } else if (hasHiddenRowsBefore) {
+          // 取消隐藏选区前面的连续隐藏行
+          rowOperations.unhideRows(hiddenRowsBeforeStart, startRow - 1)
+        }
+      }, disabled: !hasHiddenRowsInRange && !hasHiddenRowsBefore },
       { label: '', action: () => {}, divider: true },
       { label: '设置行高...', action: () => rowOperations.showSetRowHeightDialog(row) }
     ]
@@ -124,11 +168,47 @@ export function handleContextMenu(
     }
     
     const colText = colCount > 1 ? `${colCount} 列` : '列'
+    const endCol = selectionRange && col >= selectionRange.startCol && col <= selectionRange.endCol ? selectionRange.endCol : col
+    
+    // 检查选区范围内是否有隐藏列（用于判断是否显示取消隐藏选项）
+    let hasHiddenColsInRange = false
+    if (hiddenCols) {
+      for (let c = startCol; c <= endCol; c++) {
+        if (hiddenCols.has(c)) {
+          hasHiddenColsInRange = true
+          break
+        }
+      }
+    }
+    
+    // 检查选区前面是否有连续隐藏的列（用于单列选择时取消隐藏前面的列）
+    let hasHiddenColsBefore = false
+    let hiddenColsBeforeStart = startCol
+    if (hiddenCols && startCol > 0) {
+      // 向前查找连续隐藏的列
+      let checkCol = startCol - 1
+      while (checkCol >= 0 && hiddenCols.has(checkCol)) {
+        hiddenColsBeforeStart = checkCol
+        hasHiddenColsBefore = true
+        checkCol--
+      }
+    }
     
     menuState.items = [
       { label: `在左侧插入${colText}`, action: () => colOperations.insertColLeft(startCol, colCount) },
-      { label: `在右侧插入${colText}`, action: () => colOperations.insertColRight(selectionRange && col >= selectionRange.startCol && col <= selectionRange.endCol ? selectionRange.endCol : col, colCount) },
+      { label: `在右侧插入${colText}`, action: () => colOperations.insertColRight(endCol, colCount) },
       { label: `删除${colText}`, action: () => colOperations.deleteCol(startCol, colCount) },
+      { label: '', action: () => {}, divider: true },
+      { label: `隐藏${colText}`, action: () => colOperations.hideCols(startCol, endCol) },
+      { label: '取消隐藏', action: () => {
+        if (hasHiddenColsInRange) {
+          // 取消隐藏选区内的隐藏列
+          colOperations.unhideCols(startCol, endCol)
+        } else if (hasHiddenColsBefore) {
+          // 取消隐藏选区前面的连续隐藏列
+          colOperations.unhideCols(hiddenColsBeforeStart, startCol - 1)
+        }
+      }, disabled: !hasHiddenColsInRange && !hasHiddenColsBefore },
       { label: '', action: () => {}, divider: true },
       { label: '设置列宽...', action: () => colOperations.showSetColWidthDialog(col) }
     ]

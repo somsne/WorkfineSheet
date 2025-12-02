@@ -832,13 +832,25 @@ export function createSheetAPI(context: {
     getRowHeight: context.getRowHeight,
     getColWidth: context.getColWidth,
     setRowHeight(row: number, height: number): void {
-      context.rowHeights.set(row, height)
-      // 记录为用户手动设置的行高
-      context.manualRowHeights.add(row)
+      if (height <= 0) {
+        // 高度 <= 0 等价于隐藏行
+        context.hiddenRows?.add(row)
+      } else {
+        context.hiddenRows?.delete(row)
+        context.rowHeights.set(row, height)
+        // 记录为用户手动设置的行高
+        context.manualRowHeights.add(row)
+      }
       context.draw()
     },
     setColWidth(col: number, width: number): void {
-      context.colWidths.set(col, width)
+      if (width <= 0) {
+        // 宽度 <= 0 等价于隐藏列
+        context.hiddenCols?.add(col)
+      } else {
+        context.hiddenCols?.delete(col)
+        context.colWidths.set(col, width)
+      }
       context.draw()
     },
     

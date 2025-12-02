@@ -79,7 +79,6 @@ export class FormulaSheet {
     // 如果结果是错误，返回 0 而不是错误信息
     // 这样可以避免在嵌套公式中显示错误信息
     if (typeof result === 'string' && result.startsWith('#')) {
-      console.log(`[FormulaSheet] 单元格 ${this.getCellAddress(row, col)} 计算错误: ${result}，返回 0`)
       return 0
     }
 
@@ -106,7 +105,6 @@ export class FormulaSheet {
       const result = this.formulaEngine.evaluate(formula)
       const finalResult = result.error || result.result
       
-      console.log(`[FormulaSheet] 计算: ${this.getCellAddress(row, col)} = ${finalResult}`)
       return finalResult
     } catch (err) {
       console.error(`[FormulaSheet] 计算异常: ${this.getCellAddress(row, col)}`, err)

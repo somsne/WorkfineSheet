@@ -446,8 +446,8 @@ function handleSheetChange(sheetId: string) {
 }
 
 /** 添加工作表 */
-function handleSheetAdd() {
-  const newSheetId = workbook.value.addSheet()
+function handleSheetAdd(index?: number) {
+  const newSheetId = workbook.value.addSheet(undefined, index)
   // 切换到新创建的工作表
   workbook.value.setActiveSheet(newSheetId)
 }

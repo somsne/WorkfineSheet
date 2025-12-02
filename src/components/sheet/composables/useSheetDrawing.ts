@@ -120,7 +120,10 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       totalCols: constants.DEFAULT_COLS,
       sizes: createSizeAccess(),
       geometryConfig: createGeometryConfig(),
-      mergedRegions: model.getAllMergedRegions()
+      mergedRegions: model.getAllMergedRegions(),
+      selected,
+      selectionRange,
+      multiSelection
     }
     
     renderGrid(ctx, gridConfig)

@@ -364,11 +364,19 @@ export function startDragSelection(config: SelectionDragConfig): boolean {
     state.dragState.startCol = region.startCol
     state.dragState.currentRow = region.endRow
     state.dragState.currentCol = region.endCol
+    
+    // 立即更新选中状态，使焦点框立即响应
+    state.selected.row = region.startRow
+    state.selected.col = region.startCol
   } else {
     state.dragState.startRow = row
     state.dragState.startCol = col
     state.dragState.currentRow = row
     state.dragState.currentCol = col
+    
+    // 立即更新选中状态，使焦点框立即响应
+    state.selected.row = row
+    state.selected.col = col
   }
   
   return true

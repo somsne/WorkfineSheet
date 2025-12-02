@@ -597,10 +597,17 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
   // Draw visible cells from model
   for (let r = startRow; r <= endRow; r++) {
-    const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
     const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    // 跳过隐藏的行
+    if (rowHeight <= 0) continue
+    
+    const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
     
     for (let c = startCol; c <= endCol; c++) {
+      const colWidth = getColWidth(c, sizes, geometryConfig)
+      // 跳过隐藏的列
+      if (colWidth <= 0) continue
+      
       // 检查合并单元格信息
       const mergeInfo = getMergedCellInfo?.(r, c)
       
@@ -611,17 +618,17 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
       // 计算单元格位置和尺寸
       const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-      let colWidth = getColWidth(c, sizes, geometryConfig)
+      let actualColWidth = colWidth
       let actualRowHeight = rowHeight
 
       // 如果是合并单元格的主单元格，使用合并区域的尺寸
       if (mergeInfo?.isMaster && mergeInfo.region) {
         const region = mergeInfo.region
-        colWidth = getMergedWidth(region.startCol, region.endCol)
+        actualColWidth = getMergedWidth(region.startCol, region.endCol)
         actualRowHeight = getMergedHeight(region.startRow, region.endRow)
       }
       
-      renderCellContent(r, c, cellX, cellY, colWidth, actualRowHeight)
+      renderCellContent(r, c, cellX, cellY, actualColWidth, actualRowHeight)
     }
   }
 
@@ -632,12 +639,18 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     const drawnMergedBorders = new Set<string>()
     
     for (let r = startRow; r <= endRow; r++) {
-      const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
       const rowHeight = getRowHeight(r, sizes, geometryConfig)
+      // 跳过隐藏的行
+      if (rowHeight <= 0) continue
+      
+      const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
       
       for (let c = startCol; c <= endCol; c++) {
-        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
         const colWidth = getColWidth(c, sizes, geometryConfig)
+        // 跳过隐藏的列
+        if (colWidth <= 0) continue
+        
+        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
         
         // 检查单元格是否在合并区域内
         const mergeInfo = getMergedCellInfo?.(r, c)
@@ -727,7 +740,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   }
 
   // Highlight selection range (fill with light blue)
-  if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0) {
+  // 只有当选区包含多个单元格时才绘制背景遮罩，单个单元格（活动单元格）不需要遮罩
+  const isSingleCellSelection = selectionRange.startRow === selectionRange.endRow && 
+                                 selectionRange.startCol === selectionRange.endCol
+  if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0 && !isSingleCellSelection) {
     ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
     
     // 记录已绘制的合并区域，避免重复绘制
@@ -801,9 +817,7 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
   // Draw colored borders for formula references (Excel style)
   if (formulaReferences.length > 0) {
-    console.log('[DEBUG renderCells] Drawing formula references, count:', formulaReferences.length)
     for (const ref of formulaReferences) {
-      console.log('[DEBUG renderCells] Drawing reference:', ref.range, 'startRow:', ref.startRow, 'startCol:', ref.startCol, 'endRow:', ref.endRow, 'endCol:', ref.endCol, 'color:', ref.color)
       const sx = rowHeaderWidth + getColLeft(ref.startCol, sizes, geometryConfig) - viewport.scrollLeft
       const sy = colHeaderHeight + getRowTop(ref.startRow, sizes, geometryConfig) - viewport.scrollTop
       const ex = rowHeaderWidth + getColLeft(ref.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
@@ -811,24 +825,23 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       const width = ex - sx
       const height = ey - sy
       
-      console.log('[DEBUG renderCells] coords: sx=', sx, 'sy=', sy, 'width=', width, 'height=', height, 'canvas w=', w, 'h=', h)
       
       // Only draw visible references
       if (sx + width > 0 && sx < w && sy + height > 0 && sy < h) {
-        console.log('[DEBUG renderCells] Drawing rect with color:', ref.color)
         ctx.save()
         ctx.strokeStyle = ref.color
         ctx.lineWidth = 3  // 加粗便于观察
         ctx.strokeRect(sx + 1, sy + 1, width - 2, height - 2)
         ctx.restore()
       } else {
-        console.log('[DEBUG renderCells] Reference out of view, skipping')
       }
     }
   }
 
-  // Draw dashed box during dragging
-  if (dragState.isDragging && dragState.startRow >= 0 && dragState.startCol >= 0) {
+  // Draw dashed box during dragging (only when mouse has actually moved)
+  // 只有当鼠标真正移动了（起点和当前点不同）时才绘制虚线拖拽框
+  const hasDragged = dragState.startRow !== dragState.currentRow || dragState.startCol !== dragState.currentCol
+  if (dragState.isDragging && dragState.startRow >= 0 && dragState.startCol >= 0 && hasDragged) {
     const startRow = Math.min(dragState.startRow, dragState.currentRow)
     const startCol = Math.min(dragState.startCol, dragState.currentCol)
     const endRow = Math.max(dragState.startRow, dragState.currentRow)

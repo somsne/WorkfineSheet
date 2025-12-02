@@ -41,6 +41,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     overlay,
     resizeState, hoverState,
     rowHeights, colWidths, manualRowHeights,
+    hiddenRows, hiddenCols,
     formulaReferences,
     contextMenu, inputDialog,
     formatPainter
@@ -87,24 +88,15 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理点击事件
    */
   function onClick(e: MouseEvent) {
-    console.log('[useSheetMouse] onClick', {
-      target: e.target,
-      detail: e.detail,
-      overlayVisible: overlay.visible,
-      selectedRow: selected.row,
-      selectedCol: selected.col
-    })
     if (!container.value) return
     
     // 如果正在编辑，不处理点击（避免干扰编辑器）
     if (overlay.visible) {
-      console.log('[useSheetMouse] onClick: overlay visible, 返回')
       return
     }
     
     // 如果是双击的第二次点击，不处理，让 dblclick 处理
     if (e.detail === 2) {
-      console.log('[useSheetMouse] onClick: detail === 2, 返回')
       return
     }
     
@@ -194,6 +186,26 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           resizeState.index = r
           resizeState.startPos = e.clientY
           resizeState.startSize = rowHeight
+          
+          // 检查是否选中了多行（整行选择模式）
+          const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === constants.DEFAULT_COLS - 1
+          const isInSelection = isRowSelection && r >= selectionRange.startRow && r <= selectionRange.endRow
+          
+          if (isInSelection && selectionRange.endRow > selectionRange.startRow) {
+            // 选中了多行，记录所有选中行的初始高度
+            resizeState.batchIndices = []
+            resizeState.batchStartSizes = []
+            for (let i = selectionRange.startRow; i <= selectionRange.endRow; i++) {
+              if (i !== r) {  // 不包括当前拖拽的行
+                resizeState.batchIndices.push(i)
+                resizeState.batchStartSizes.push(getRowHeight(i))
+              }
+            }
+          } else {
+            resizeState.batchIndices = []
+            resizeState.batchStartSizes = []
+          }
+          
           hitResize = true
           e.preventDefault()
           return
@@ -238,6 +250,26 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           resizeState.index = c
           resizeState.startPos = e.clientX
           resizeState.startSize = colWidth
+          
+          // 检查是否选中了多列（整列选择模式）
+          const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === constants.DEFAULT_ROWS - 1
+          const isInSelection = isColSelection && c >= selectionRange.startCol && c <= selectionRange.endCol
+          
+          if (isInSelection && selectionRange.endCol > selectionRange.startCol) {
+            // 选中了多列，记录所有选中列的初始宽度
+            resizeState.batchIndices = []
+            resizeState.batchStartSizes = []
+            for (let i = selectionRange.startCol; i <= selectionRange.endCol; i++) {
+              if (i !== c) {  // 不包括当前拖拽的列
+                resizeState.batchIndices.push(i)
+                resizeState.batchStartSizes.push(getColWidth(i))
+              }
+            }
+          } else {
+            resizeState.batchIndices = []
+            resizeState.batchStartSizes = []
+          }
+          
           hitResize = true
           e.preventDefault()
           return
@@ -277,15 +309,11 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const formulaBarInstance = formulaBarInput.value as any
     
     if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
-      console.log('[DEBUG onMouseDown] FormulaBar is active and in formula mode, preventing default')
       e.preventDefault()
     }
     
     // 检查编辑框
     if (overlay.visible && overlayInput.value) {
-      console.log('[DEBUG onMouseDown] overlay visible, checking formulaMode...')
-      console.log('[DEBUG onMouseDown] formulaMode:', (overlayInput.value as any).formulaMode)
-      console.log('[DEBUG onMouseDown] formulaMode?.value:', (overlayInput.value as any).formulaMode?.value)
       
       const inputElement = (overlayInput.value as any).getInputElement?.()
       
@@ -307,10 +335,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       }
       
       if ((overlayInput.value as any).formulaMode) {
-        console.log('[DEBUG onMouseDown] formulaMode is TRUE, calling preventDefault')
         e.preventDefault()
       } else {
-        console.log('[DEBUG onMouseDown] formulaMode is FALSE or undefined')
       }
     }
     
@@ -321,7 +347,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     }
     
     // 普通单元格拖拽
-    startDragSelection({
+    const started = startDragSelection({
       x,
       y,
       shiftKey: e.shiftKey,
@@ -335,17 +361,17 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       state: createSelectionState(),
       getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
+    
+    // 立即重绘以显示焦点框
+    if (started) {
+      onDraw()
+    }
   }
   
   /**
    * 处理双击事件
    */
   function onDoubleClick(e: MouseEvent) {
-    console.log('[useSheetMouse] onDoubleClick', {
-      target: e.target,
-      detail: e.detail,
-      overlayVisible: overlay.visible
-    })
     if (!container.value) return
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -358,13 +384,11 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     }
     
     const { shouldOpen } = handleDoubleClickHelper(x, y, createGeometryConfig())
-    console.log('[useSheetMouse] onDoubleClick: shouldOpen =', shouldOpen)
     if (!shouldOpen) return
     
     let col = getColAtX(x)
     let row = getRowAtY(y)
     
-    console.log('[useSheetMouse] onDoubleClick: 准备打开编辑器', { row, col })
     
     const mergedRegion = model.getMergedRegion(row, col)
     if (mergedRegion) {
@@ -375,7 +399,6 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     selected.row = row
     selected.col = col
     const editValue = formulaSheet.getDisplayValue(row, col)
-    console.log('[useSheetMouse] onDoubleClick: 调用 openOverlay', { row, col, editValue })
     openOverlay(row, col, editValue, 'edit')
   }
   
@@ -424,11 +447,13 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         const delta = e.clientY - resizeState.startPos
         const newHeight = Math.max(constants.ROW_HEIGHT / 2, resizeState.startSize + delta)
         rowHeights.value.set(resizeState.index, newHeight)
+        // 实时只调整当前行，其他选中的行在 mouseup 时同步
         scheduleRedraw()
       } else if (resizeState.type === 'col') {
         const delta = e.clientX - resizeState.startPos
         const newWidth = Math.max(constants.COL_WIDTH / 2, resizeState.startSize + delta)
         colWidths.value.set(resizeState.index, newWidth)
+        // 实时只调整当前列，其他选中的列在 mouseup 时同步
         scheduleRedraw()
       }
       return
@@ -517,8 +542,6 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
    * 处理鼠标松开事件
    */
   function onMouseUp(): void {
-    console.log('[DEBUG onMouseUp] called')
-    console.log('[DEBUG onMouseUp] dragState.isDragging:', dragState.isDragging)
     
     // 结束填充柄拖拽
     if (fillHandle && fillHandle.fillHandleState.dragging) {
@@ -528,26 +551,35 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     // 结束调整大小
     if (resizeState.isResizing) {
-      // 如果是调整行高，记录为用户手动设置
+      // 在结束时同步其他选中的行/列
       if (resizeState.type === 'row') {
+        const finalHeight = rowHeights.value.get(resizeState.index) ?? constants.ROW_HEIGHT
         manualRowHeights.value.add(resizeState.index)
+        // 同步其他选中的行
+        for (const idx of resizeState.batchIndices) {
+          rowHeights.value.set(idx, finalHeight)
+          manualRowHeights.value.add(idx)
+        }
+      } else if (resizeState.type === 'col') {
+        const finalWidth = colWidths.value.get(resizeState.index) ?? constants.COL_WIDTH
+        // 同步其他选中的列
+        for (const idx of resizeState.batchIndices) {
+          colWidths.value.set(idx, finalWidth)
+        }
       }
+      
       resizeState.isResizing = false
       resizeState.type = ''
       resizeState.index = -1
+      resizeState.batchIndices = []
+      resizeState.batchStartSizes = []
+      scheduleRedraw()
       return
     }
     
     if (!dragState.isDragging) {
-      console.log('[DEBUG onMouseUp] dragState.isDragging is false, returning early')
       return
     }
-    
-    // 公式模式特殊处理 - 支持 RichTextInput 和 FormulaBar
-    console.log('[DEBUG onMouseUp] checking formula mode...')
-    console.log('[DEBUG onMouseUp] overlay.visible:', overlay.visible)
-    console.log('[DEBUG onMouseUp] overlayInput.value:', !!overlayInput.value)
-    console.log('[DEBUG onMouseUp] formulaBarInput.value:', !!formulaBarInput.value)
     
     // 检查是否在公式编辑模式（RichTextInput 或 FormulaBar）
     const overlayInputInstance = overlayInput.value as any
@@ -564,21 +596,14 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
       activeEditor = formulaBarInstance
       isFormulaMode = true
-      console.log('[DEBUG onMouseUp] FormulaBar is active and in formula mode')
     } else if (overlay.visible && overlayInputInstance?.formulaMode) {
       activeEditor = overlayInputInstance
       isFormulaMode = true
-      console.log('[DEBUG onMouseUp] RichTextInput is active and in formula mode')
     }
     
     if (activeEditor && isFormulaMode) {
       const isSelectable = activeEditor?.isInSelectableState ?? false
       const hasSelection = activeEditor?.hasTextSelection ?? false
-      
-      console.log('[DEBUG onMouseUp] activeEditor:', activeEditor)
-      console.log('[DEBUG onMouseUp] isSelectable:', isSelectable, 'hasSelection:', hasSelection)
-      console.log('[DEBUG onMouseUp] activeEditor.isInSelectableState:', activeEditor?.isInSelectableState)
-      console.log('[DEBUG onMouseUp] activeEditor.getCurrentValue():', activeEditor?.getCurrentValue?.())
       
       // 如果是 FormulaBar 模式，检查点击的是否是正在编辑的单元格
       if (isFormulaBarActive) {
@@ -654,7 +679,6 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       // 插入引用后立即更新公式引用高亮（使用返回的新文本）
       const valueForParsing = newText || activeEditor.getCurrentValue?.() || ''
       formulaReferences.value = parseFormulaReferences(valueForParsing)
-      console.log('[DEBUG onMouseUp] Updated formulaReferences immediately:', formulaReferences.value)
       
       if (!isFormulaBarActive) {
         selected.row = overlay.row
@@ -767,6 +791,87 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     if (!container.value) return
     const rect = container.value.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    
+    // 判断点击位置并在需要时选中行/列
+    if (x < constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
+      // 点击行头 - 检查是否需要选中该行
+      const row = getRowAtY(y)
+      // 检查当前是否是整行选择模式（选区覆盖所有列）
+      const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === constants.DEFAULT_COLS - 1
+      // 检查点击的行是否在选区范围内
+      const isRowInSelection = isRowSelection && row >= selectionRange.startRow && row <= selectionRange.endRow
+      
+      if (!isRowInSelection) {
+        // 点击的行不在当前选区内，选中该行
+        selected.row = row
+        selected.col = 0
+        selectionRange.startRow = row
+        selectionRange.startCol = 0
+        selectionRange.endRow = row
+        selectionRange.endCol = constants.DEFAULT_COLS - 1
+        // 清除多选区
+        if (multiSelection) {
+          multiSelection.ranges = []
+          multiSelection.active = false
+        }
+        onDraw()
+      }
+    } else if (y < constants.COL_HEADER_HEIGHT && x > constants.ROW_HEADER_WIDTH) {
+      // 点击列头 - 检查是否需要选中该列
+      const col = getColAtX(x)
+      // 检查当前是否是整列选择模式（选区覆盖所有行）
+      const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === constants.DEFAULT_ROWS - 1
+      // 检查点击的列是否在选区范围内
+      const isColInSelection = isColSelection && col >= selectionRange.startCol && col <= selectionRange.endCol
+      
+      if (!isColInSelection) {
+        // 点击的列不在当前选区内，选中该列
+        selected.row = 0
+        selected.col = col
+        selectionRange.startRow = 0
+        selectionRange.startCol = col
+        selectionRange.endRow = constants.DEFAULT_ROWS - 1
+        selectionRange.endCol = col
+        // 清除多选区
+        if (multiSelection) {
+          multiSelection.ranges = []
+          multiSelection.active = false
+        }
+        onDraw()
+      }
+    }
+    
+    // 隐藏/取消隐藏行的操作
+    function hideRows(startRow: number, endRow: number) {
+      for (let r = startRow; r <= endRow; r++) {
+        hiddenRows.value.add(r)
+      }
+      onDraw()
+    }
+    
+    function unhideRows(startRow: number, endRow: number) {
+      for (let r = startRow; r <= endRow; r++) {
+        hiddenRows.value.delete(r)
+      }
+      onDraw()
+    }
+    
+    // 隐藏/取消隐藏列的操作
+    function hideCols(startCol: number, endCol: number) {
+      for (let c = startCol; c <= endCol; c++) {
+        hiddenCols.value.add(c)
+      }
+      onDraw()
+    }
+    
+    function unhideCols(startCol: number, endCol: number) {
+      for (let c = startCol; c <= endCol; c++) {
+        hiddenCols.value.delete(c)
+      }
+      onDraw()
+    }
     
     const menuConfig: ContextMenuConfig = {
       rowHeaderWidth: constants.ROW_HEADER_WIDTH,
@@ -779,17 +884,23 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         endRow: selectionRange.endRow,
         endCol: selectionRange.endCol
       },
+      hiddenRows: hiddenRows.value,
+      hiddenCols: hiddenCols.value,
       rowOperations: {
         insertRowAbove,
         insertRowBelow,
         deleteRow,
-        showSetRowHeightDialog
+        showSetRowHeightDialog,
+        hideRows,
+        unhideRows
       },
       colOperations: {
         insertColLeft,
         insertColRight,
         deleteCol,
-        showSetColWidthDialog
+        showSetColWidthDialog,
+        hideCols,
+        unhideCols
       }
     }
     

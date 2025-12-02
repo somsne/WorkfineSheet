@@ -83,19 +83,20 @@ function handleItemClick(item: MenuItem) {
 <style scoped>
 .context-menu {
   position: fixed;
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 4px 0;
   min-width: 160px;
-  z-index: 1000;
-  font-size: 14px;
+  z-index: 10000;
 }
 
 .menu-item {
-  padding: 8px 16px;
+  padding: 6px 12px;
   cursor: pointer;
+  font-size: 13px;
+  color: #333;
   user-select: none;
 }
 
@@ -108,9 +109,13 @@ function handleItemClick(item: MenuItem) {
   cursor: not-allowed;
 }
 
+.menu-item.disabled:hover {
+  background: transparent;
+}
+
 .menu-item.divider {
   height: 1px;
-  background: #e0e0e0;
+  background: #e5e5e5;
   margin: 4px 0;
   padding: 0;
   cursor: default;

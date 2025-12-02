@@ -73,11 +73,6 @@ function setEditorRef(el: any) {
 
 // 初始化编辑器内容
 function initializeEditor() {
-  console.log('[RichTextInput] initializeEditor 开始', {
-    editorRef: !!editorRef,
-    activeElement: document.activeElement,
-    activeElementClass: (document.activeElement as HTMLElement)?.className
-  })
   if (!editorRef) return
   
   isInitialized = true  // 标记已初始化
@@ -89,23 +84,16 @@ function initializeEditor() {
   const activeElement = document.activeElement as HTMLElement | null
   const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
   
-  console.log('[RichTextInput] initializeEditor 检查焦点', {
-    activeElement: activeElement?.tagName,
-    activeElementClass: activeElement?.className,
-    isFormulaBarFocused
-  })
   
   // 在测试环境中，focus 和 setCursorPosition 可能会失败
   try {
     // 只有在焦点不在 FormulaBar 时才聚焦
     if (!isFormulaBarFocused) {
-      console.log('[RichTextInput] initializeEditor: 聚焦编辑器')
       editorRef.focus()
       const len = internal.value.length
       setCursorPosition(len)
       cursorPos.value = len
     } else {
-      console.log('[RichTextInput] initializeEditor: FormulaBar 有焦点，跳过聚焦')
     }
     
     // 初始化时更新可选择状态（对于输入 = 进入公式模式的情况）
@@ -606,12 +594,6 @@ function handleCompositionEnd(e: CompositionEvent) {
  * 失焦事件
  */
 function handleBlur(e: FocusEvent) {
-  console.log('[RichTextInput] handleBlur', {
-    relatedTarget: e.relatedTarget,
-    isCancelling: isCancelling.value,
-    formulaMode: formulaMode.value,
-    internalValue: internal.value.substring(0, 50)
-  })
   if (isCancelling.value) return
   if (formulaMode.value) return // 公式模式不自动保存
   
@@ -622,12 +604,10 @@ function handleBlur(e: FocusEvent) {
     // 检查是否是 FormulaBar 的输入区域
     const isFormulaBar = relatedTarget.closest('.formula-bar') !== null
     if (isFormulaBar) {
-      console.log('[RichTextInput] handleBlur: 焦点转移到 FormulaBar，不触发保存')
       return
     }
   }
   
-  console.log('[RichTextInput] handleBlur: 发送 save 事件')
   emit('save', internal.value)
 }
 
@@ -879,7 +859,6 @@ watch(
     // 如果焦点在 FormulaBar，更新 internal.value 和 DOM（但不设置光标，避免抢夺焦点）
     if (isFormulaBarFocused) {
       if (newValue !== internal.value) {
-        console.log('[RichTextInput] watch props.value: FormulaBar 有焦点，更新内容但不设置光标')
         internal.value = newValue
         // 更新 DOM 显示（不设置光标）
         const html = generateFormulaHtml(newValue)
@@ -893,16 +872,11 @@ watch(
     // 如果焦点在 RichTextInput，跳过（用户正在输入）
     const hasFocus = document.activeElement === editorRef
     if (hasFocus) {
-      console.log('[RichTextInput] watch props.value: RichTextInput 有焦点，跳过同步')
       return
     }
     
     // 焦点在其他地方，同步值
     if (newValue !== internal.value) {
-      console.log('[RichTextInput] watch props.value: 同步值', { 
-        oldValue: internal.value, 
-        newValue 
-      })
       internal.value = newValue
       updateEditorContent(newValue, false)
     }
@@ -918,7 +892,6 @@ watch(
       const activeElement = document.activeElement as HTMLElement | null
       const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
       if (isFormulaBarFocused) {
-        console.log('[RichTextInput] watch formulaReferences: FormulaBar 有焦点，跳过更新')
         return
       }
       

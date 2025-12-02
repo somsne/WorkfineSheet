@@ -40,8 +40,9 @@ export function initializeDemoData(workbook: Workbook): void {
 
 /**
  * Initialize the sheet with style demo data
+ * (Exported for single-sheet scenarios like standalone CanvasSheet)
  */
-function initializeStyleDemoData(model: SheetModel): void {
+export function initializeStyleDemoData(model: SheetModel): void {
   // ===== 标题行 (合并单元格 A1:E1) =====
   model.setValue(0, 0, '样式功能演示')
   model.setCellStyle(0, 0, {

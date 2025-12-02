@@ -346,7 +346,6 @@ function getCursorPosition(): number {
  * 设置光标位置
  */
 function setCursorPosition(position: number) {
-  console.log('[FormulaBar] setCursorPosition', { position, formulaInputRef: !!formulaInputRef.value })
   if (!formulaInputRef.value) return
   
   try {
@@ -368,7 +367,6 @@ function setCursorPosition(position: number) {
     }
     collectTextNodes(formulaInputRef.value)
     
-    console.log('[FormulaBar] setCursorPosition: textNodes count =', textNodes.length, 'total text length =', textNodes.reduce((sum, n) => sum + n.length, 0))
     
     for (const textNode of textNodes) {
       const nodeLength = textNode.length
@@ -377,7 +375,6 @@ function setCursorPosition(position: number) {
         range.collapse(true)
         selection.removeAllRanges()
         selection.addRange(range)
-        console.log('[FormulaBar] setCursorPosition: 设置到位置', position, '在节点内偏移', position - charCount)
         return
       }
       charCount += nodeLength
@@ -390,10 +387,8 @@ function setCursorPosition(position: number) {
       range.collapse(true)
       selection.removeAllRanges()
       selection.addRange(range)
-      console.log('[FormulaBar] setCursorPosition: 位置超出，设置到末尾')
     }
   } catch (e) {
-    console.log('[FormulaBar] setCursorPosition error:', e)
   }
 }
 
@@ -403,13 +398,7 @@ function setCursorPosition(position: number) {
  * @param forceUpdate - 是否强制更新（跳过 isLocalInput 检查，用于 formulaReferences 变化时）
  */
 function updateEditorContent(preserveCursor: boolean = true, forceUpdate: boolean = false) {
-  console.log('[FormulaBar] updateEditorContent', {
-    preserveCursor,
-    forceUpdate,
-    isLocalInput: isLocalInput.value,
-    isComposing: isComposing.value,
-    activeElement: document.activeElement === formulaInputRef.value ? 'FormulaBar' : 'Other'
-  })
+
   if (!formulaInputRef.value || isComposing.value) return
   
   // 如果 FormulaBar 持有焦点，先保存光标位置
@@ -418,19 +407,12 @@ function updateEditorContent(preserveCursor: boolean = true, forceUpdate: boolea
   // 如果是本地输入触发的更新，并且 FormulaBar 仍然持有焦点，跳过（避免光标跳动）
   // 但如果是强制更新（如 formulaReferences 变化），则不跳过
   if (isLocalInput.value && hasFocus && !forceUpdate) {
-    console.log('[FormulaBar] updateEditorContent: isLocalInput=true 且 hasFocus, 跳过')
     return
   }
   
   const currentPos = preserveCursor && hasFocus ? getCursorPosition() : displayValue.value.length
   const html = generateFormulaHtml(displayValue.value)
   
-  console.log('[FormulaBar] updateEditorContent: 更新内容', {
-    currentPos,
-    displayValue: displayValue.value,
-    htmlLength: html.length,
-    hasFocus
-  })
   
   // 检查 HTML 是否真的需要更新
   if (formulaInputRef.value.innerHTML !== html) {
@@ -445,7 +427,6 @@ function updateEditorContent(preserveCursor: boolean = true, forceUpdate: boolea
 
 // 监听 formulaReferences 变化，更新高亮
 watch(() => props.formulaReferences, () => {
-  console.log('[FormulaBar] watch formulaReferences 变化')
   if (props.isEditing) {
     // 强制更新，即使 isLocalInput=true 也要更新颜色高亮
     updateEditorContent(true, true)
@@ -453,8 +434,7 @@ watch(() => props.formulaReferences, () => {
 }, { deep: true })
 
 // 监听 editingValue 变化，同步显示内容（当从单元格编辑器输入时）
-watch(() => props.editingValue, (newVal, oldVal) => {
-  console.log('[FormulaBar] watch editingValue 变化', { newVal, oldVal })
+watch(() => props.editingValue, () => {
   if (props.isEditing) {
     updateEditorContent(true)
   }
@@ -475,13 +455,7 @@ watch(() => formulaInputRef.value, (el) => {
 }, { immediate: true })
 
 // 监听编辑状态变化
-watch(() => props.isEditing, (editing, oldEditing) => {
-  console.log('[FormulaBar] watch isEditing 变化', { 
-    editing, 
-    oldEditing, 
-    row: props.row, 
-    col: props.col 
-  })
+watch(() => props.isEditing, (editing) => {
   // 编辑状态变化时更新内容显示
   if (!editing) {
     // 编辑结束，更新显示
@@ -492,36 +466,21 @@ watch(() => props.isEditing, (editing, oldEditing) => {
 /**
  * 公式输入区点击 - 进入编辑并获取焦点
  */
-function handleFormulaInputClick(e: MouseEvent) {
-  console.log('[FormulaBar] handleFormulaInputClick', {
-    isEditing: props.isEditing,
-    row: props.row,
-    col: props.col,
-    cellValue: props.cellValue,
-    target: e.target,
-    currentTarget: e.currentTarget
-  })
+function handleFormulaInputClick(_e: MouseEvent) {
   if (!props.isEditing) {
-    console.log('[FormulaBar] 发送 start-edit 事件')
     emit('start-edit')
     // 编辑开始后，确保 FormulaBar 获得焦点
     // 使用较长的延迟确保在 RichTextInput 初始化完成后再聚焦
     // RichTextInput 在 nextTick 中初始化，我们需要在它之后执行
     setTimeout(() => {
-      console.log('[FormulaBar] setTimeout 后尝试 focus', {
-        formulaInputRef: formulaInputRef.value,
-        isEditing: props.isEditing
-      })
       if (formulaInputRef.value && props.isEditing) {
         formulaInputRef.value.focus()
         // 将光标移到末尾
         setCursorPosition(displayValue.value.length)
-        console.log('[FormulaBar] 设置焦点完成, activeElement:', document.activeElement)
         
         // 再次确认焦点（防止被其他代码抢走）
         setTimeout(() => {
           if (formulaInputRef.value && props.isEditing && document.activeElement !== formulaInputRef.value) {
-            console.log('[FormulaBar] 焦点被抢走，重新聚焦')
             formulaInputRef.value.focus()
             setCursorPosition(displayValue.value.length)
           }
@@ -530,7 +489,6 @@ function handleFormulaInputClick(e: MouseEvent) {
     }, 0)
   } else {
     // 已经在编辑状态，确保焦点在 FormulaBar
-    console.log('[FormulaBar] 已在编辑状态，聚焦 FormulaBar')
     formulaInputRef.value?.focus()
   }
 }
@@ -539,23 +497,16 @@ function handleFormulaInputClick(e: MouseEvent) {
  * 公式输入区输入事件
  */
 function handleFormulaInput() {
-  console.log('[FormulaBar] handleFormulaInput', {
-    isComposing: isComposing.value,
-    text: formulaInputRef.value?.innerText,
-    isEditing: props.isEditing
-  })
   if (isComposing.value) return
   
   const text = formulaInputRef.value?.innerText ?? ''
   // 更新光标位置
   const newCursorPos = getCursorPosition()
   cursorPos.value = newCursorPos
-  console.log('[FormulaBar] handleFormulaInput: cursorPos =', newCursorPos, 'text =', text)
   
   // 标记为本地输入，避免后续的 watch 触发内容更新导致光标跳动
   // 这个标志会保持到下一个事件循环，确保所有 watch 都被跳过
   isLocalInput.value = true
-  console.log('[FormulaBar] 发送 input 事件, text:', text)
   emit('input', text)
   
   // 立即更新可选择状态（不等 nextTick，因为鼠标点击可能立即发生）
@@ -634,28 +585,18 @@ function updateSelectableState(textOverride?: string, posOverride?: number) {
   const pos = posOverride ?? cursorPos.value
   const isFormulaText = text?.startsWith('=') ?? false
   
-  console.log('[FormulaBar] updateSelectableState', {
-    text,
-    isFormulaText,
-    cursorPos: pos,
-    displayValue: displayValue.value
-  })
-  
   if (!isFormulaText) {
     isInSelectableState.value = false
     lastOperatorPos.value = -1
-    console.log('[FormulaBar] updateSelectableState: 非公式，不可选择')
     return
   }
   
   // 检查光标前一个字符是否是操作符
   if (pos > 0 && text) {
     const prevChar = text.charAt(pos - 1)
-    console.log('[FormulaBar] updateSelectableState: prevChar =', prevChar, 'pos =', pos)
     if (prevChar && OPERATORS.includes(prevChar)) {
       isInSelectableState.value = true
       lastOperatorPos.value = pos - 1
-      console.log('[FormulaBar] updateSelectableState: 操作符后，可选择')
       return
     }
   }
@@ -669,7 +610,6 @@ function updateSelectableState(textOverride?: string, posOverride?: number) {
         if (/^\s*$/.test(between) || /^\s*\$?[A-Z]*\$?\d*$/.test(between)) {
           isInSelectableState.value = true
           lastOperatorPos.value = i
-          console.log('[FormulaBar] updateSelectableState: 操作符后有引用模式，可选择')
           return
         }
         break
@@ -678,7 +618,6 @@ function updateSelectableState(textOverride?: string, posOverride?: number) {
   }
   
   isInSelectableState.value = false
-  console.log('[FormulaBar] updateSelectableState: 不满足条件，不可选择')
 }
 
 // 为了向后兼容，创建别名
@@ -721,7 +660,6 @@ function insertCellReference(ref: string): string {
   const text = (formulaInputRef.value.innerText ?? displayValue.value).replace(/\u200B/g, '')
   const pos = cursorPos.value
   
-  console.log('[FormulaBar] insertCellReference', { ref, text, pos, lastOperatorPos: lastOperatorPos.value })
   
   // 检查是否需要替换现有引用
   const existingRef = findReferenceToReplace()
@@ -742,7 +680,6 @@ function insertCellReference(ref: string): string {
     newCursorPos = pos + ref.length
   }
   
-  console.log('[FormulaBar] insertCellReference: newText =', newText, 'newCursorPos =', newCursorPos)
   
   // 直接更新 formulaInputRef 的内容（立即生效）
   const html = generateFormulaHtml(newText)
