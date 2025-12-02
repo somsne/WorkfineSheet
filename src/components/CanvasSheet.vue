@@ -127,6 +127,7 @@ import {
 import { renderFloatingImages } from './sheet/images'
 import type { SheetModel } from '../lib/SheetModel'
 import type { SheetViewState } from '../lib/Workbook'
+import type { WorkbookClipboard } from './sheet/types'
 
 // @ts-ignore
 import RichTextInput from './RichTextInput.vue'
@@ -145,12 +146,18 @@ interface Props {
   skipDemoData?: boolean
   /** 初始视图状态（多工作表模式切换时恢复） */
   initialViewState?: SheetViewState
+  /** 外部剪贴板（Workbook 层级管理，可选） */
+  clipboard?: WorkbookClipboard | null
+  /** 当前 Sheet ID（用于判断蚂蚁线显示） */
+  sheetId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   externalModel: undefined,
   skipDemoData: false,
-  initialViewState: undefined
+  initialViewState: undefined,
+  clipboard: undefined,
+  sheetId: ''
 })
 
 // ==================== Events ====================
@@ -168,6 +175,18 @@ const emit = defineEmits<{
     isEditing: boolean
     editingValue: string
     formulaReferences?: any[]
+  }): void
+  /** 剪贴板变化事件（复制时触发） */
+  (e: 'clipboard-change', clipboard: WorkbookClipboard): void
+  /** 剪贴板清除事件（ESC 取消时触发） */
+  (e: 'clipboard-clear'): void
+  /** 剪切源区域清除事件（跨 Sheet 粘贴时触发） */
+  (e: 'cut-source-clear', payload: {
+    sourceSheetId: string
+    startRow: number
+    startCol: number
+    height: number
+    width: number
   }): void
 }>()
 
@@ -241,10 +260,26 @@ const input = useSheetInput({
   onDraw: drawing.draw 
 })
 
-// 5. 剪贴板
+// 5. 剪贴板（支持外部剪贴板模式）
 const clipboard = useSheetClipboard({ 
   state, 
-  onDraw: drawing.draw 
+  onDraw: drawing.draw,
+  // 外部剪贴板：从 props 获取
+  externalClipboard: () => props.clipboard ?? null,
+  // 剪贴板变化时通知父组件
+  onClipboardChange: (clipboardData) => {
+    // 填充 sourceSheetId
+    clipboardData.sourceSheetId = props.sheetId || null
+    emit('clipboard-change', clipboardData)
+  },
+  // 剪贴板清除时通知父组件
+  onClipboardClear: () => {
+    emit('clipboard-clear')
+  },
+  // 跨 Sheet 剪切源清除时通知父组件
+  onCutSourceClear: (payload) => {
+    emit('cut-source-clear', payload)
+  }
 })
 
 // 6. 行列操作
@@ -472,17 +507,60 @@ onMounted(() => {
       keyboard.onKeyDown(e)
     }
     
-    // paste 事件处理器 - 从剪贴板事件获取文本
+    // copy 事件处理器 - 使用 clipboardData.setData 写入剪贴板（更好的 Excel 兼容性）
+    const wrappedCopy = (e: ClipboardEvent) => {
+      // 如果编辑器正在编辑中，不处理（让编辑器自己处理）
+      if (state.overlay.visible) return
+      
+      // 检查事件是否来自其他输入元素（但允许 imeProxy）
+      const target = e.target as HTMLElement
+      if (target && target !== state.imeProxy.value) {
+        const tagName = target.tagName.toLowerCase()
+        const isContentEditable = target.isContentEditable
+        if (tagName === 'input' || tagName === 'textarea' || isContentEditable) {
+          return
+        }
+      }
+      
+      // 使用 clipboardEvent 写入剪贴板
+      clipboard.onCopy(false, e)
+      // 启动蚂蚁线动画
+      drawing.startMarchingAntsAnimation()
+    }
+    
+    // cut 事件处理器 - 使用 clipboardData.setData 写入剪贴板（更好的 Excel 兼容性）
+    const wrappedCut = (e: ClipboardEvent) => {
+      // 如果编辑器正在编辑中，不处理（让编辑器自己处理）
+      if (state.overlay.visible) return
+      
+      // 检查事件是否来自其他输入元素（但允许 imeProxy）
+      const target = e.target as HTMLElement
+      if (target && target !== state.imeProxy.value) {
+        const tagName = target.tagName.toLowerCase()
+        const isContentEditable = target.isContentEditable
+        if (tagName === 'input' || tagName === 'textarea' || isContentEditable) {
+          return
+        }
+      }
+      
+      // 使用 clipboardEvent 写入剪贴板
+      clipboard.onCut(e)
+      // 启动蚂蚁线动画
+      drawing.startMarchingAntsAnimation()
+    }
+    
+    // paste 事件处理器 - 从剪贴板事件获取文本和 HTML
     const wrappedPaste = (e: ClipboardEvent) => {
       // 如果编辑器正在编辑中，不处理（让编辑器自己处理）
       if (state.overlay.visible) return
       
-      // 从 ClipboardEvent 获取文本
+      // 从 ClipboardEvent 获取文本和 HTML
       const text = e.clipboardData?.getData('text/plain') || ''
+      const html = e.clipboardData?.getData('text/html') || ''
       
-      if (text || clipboard.hasInternalClipboard()) {
+      if (text || html || clipboard.hasInternalClipboard()) {
         e.preventDefault() // 阻止默认粘贴行为
-        clipboard.onPaste(text || undefined)
+        clipboard.onPaste(text || undefined, html || undefined)
       }
     }
     
@@ -494,6 +572,8 @@ onMounted(() => {
       onWheel: mouse.onWheel,
       onMouseUp: wrappedMouseUp,
       onKeyDown: wrappedKeyDown,
+      onCopy: wrappedCopy,
+      onCut: wrappedCut,
       onPaste: wrappedPaste,
       onResize: drawing.draw,
       onCompositionStart: input.onCompositionStart,
@@ -588,6 +668,32 @@ watch(
     }
   },
   { deep: true }
+)
+
+// 监听外部剪贴板变化，同步蚂蚁线显示
+watch(
+  () => props.clipboard,
+  (newClipboard) => {
+    if (newClipboard && newClipboard.copyRange) {
+      // 只有当前 Sheet 是复制源时才显示蚂蚁线
+      const isSourceSheet = newClipboard.sourceSheetId === props.sheetId
+      if (isSourceSheet) {
+        clipboard.syncCopyRangeFromExternal(newClipboard.copyRange)
+        // 重新启动蚂蚁线动画
+        drawing.startMarchingAntsAnimation()
+      } else {
+        // 不是源 Sheet，隐藏蚂蚁线
+        clipboard.syncCopyRangeFromExternal(null)
+        drawing.stopMarchingAntsAnimation()
+      }
+    } else {
+      // 剪贴板被清除，隐藏蚂蚁线
+      clipboard.syncCopyRangeFromExternal(null)
+      drawing.stopMarchingAntsAnimation()
+    }
+    drawing.draw()
+  },
+  { deep: true, immediate: true }
 )
 
 // ==================== API 创建 ====================
@@ -1322,16 +1428,19 @@ function setFormatPainterState(formatPainterState: { mode: 'off' | 'single' | 'c
   drawing.draw()
 }
 
-/** 获取剪贴板状态 */
+/** 
+ * @deprecated 剪贴板现在由 Workbook 层级通过 props.clipboard 管理
+ * 保留此方法仅用于向后兼容
+ */
 function getClipboardState() {
+  // 返回当前蚂蚁线状态（剪贴板数据由外部管理）
   return {
-    data: state.internalClipboard.data,
-    startRow: state.internalClipboard.startRow,
-    startCol: state.internalClipboard.startCol,
-    mergedRegions: state.internalClipboard.mergedRegions,
-    tsvContent: state.internalClipboard.tsvContent,
-    copyTs: state.lastCopyTs.value,
-    // 蚂蚁线状态
+    data: null,
+    startRow: -1,
+    startCol: -1,
+    mergedRegions: [],
+    tsvContent: '',
+    copyTs: 0,
     copyRange: state.copyRange.visible ? {
       startRow: state.copyRange.startRow,
       startCol: state.copyRange.startCol,
@@ -1341,8 +1450,11 @@ function getClipboardState() {
   }
 }
 
-/** 设置剪贴板状态 */
-function setClipboardState(clipboardState: { 
+/** 
+ * @deprecated 剪贴板现在由 Workbook 层级通过 props.clipboard 管理
+ * 保留此方法仅用于向后兼容
+ */
+function setClipboardState(_clipboardState: { 
   data: any; 
   startRow: number; 
   startCol: number; 
@@ -1351,27 +1463,9 @@ function setClipboardState(clipboardState: {
   copyTs?: number;
   copyRange?: { startRow: number; startCol: number; endRow: number; endCol: number } | null
 }) {
-  state.internalClipboard.data = clipboardState.data
-  state.internalClipboard.startRow = clipboardState.startRow
-  state.internalClipboard.startCol = clipboardState.startCol
-  state.internalClipboard.mergedRegions = clipboardState.mergedRegions
-  state.internalClipboard.tsvContent = clipboardState.tsvContent ?? ''
-  // 恢复复制时间戳，确保跨 Sheet 粘贴时剪贴板有效
-  if (clipboardState.copyTs) {
-    state.lastCopyTs.value = clipboardState.copyTs
-  }
-  // 恢复蚂蚁线状态
-  if (clipboardState.copyRange) {
-    state.copyRange.startRow = clipboardState.copyRange.startRow
-    state.copyRange.startCol = clipboardState.copyRange.startCol
-    state.copyRange.endRow = clipboardState.copyRange.endRow
-    state.copyRange.endCol = clipboardState.copyRange.endCol
-    state.copyRange.visible = true
-    // 重新启动蚂蚁线动画
-    drawing.startMarchingAntsAnimation()
-  } else {
-    state.copyRange.visible = false
-  }
+  // 剪贴板数据现在通过 props.clipboard 传入，不再在这里设置
+  // 蚂蚁线状态由 watch(props.clipboard) 自动同步
+  console.warn('setClipboardState is deprecated. Clipboard is now managed by Workbook via props.clipboard')
 }
 
 /** 是否正在编辑公式 */

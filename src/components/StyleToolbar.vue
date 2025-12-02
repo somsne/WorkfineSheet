@@ -38,21 +38,13 @@
 
     <!-- 字体选择 -->
     <select v-model="fontFamily" @change="applyFontFamily" class="font-select">
-      <!-- macOS 系统字体 -->
-      <option value="-apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif">SF Pro (系统)</option>
-      <option value="'Helvetica Neue', Helvetica, sans-serif">Helvetica</option>
-      <option value="'PingFang SC', 'Microsoft YaHei', sans-serif">苹方/微软雅黑</option>
-      <option value="'STHeiti', 'Microsoft YaHei', sans-serif">华文黑体</option>
-      <option value="'STSong', 'SimSun', serif">华文宋体/宋体</option>
-      <option value="'STKaiti', 'KaiTi', serif">华文楷体/楷体</option>
-      <option value="'Menlo', 'Monaco', 'Courier New', monospace">Menlo/Monaco</option>
-      
-      <!-- 通用字体 -->
-      <option value="Arial, sans-serif">Arial</option>
-      <option value="'Times New Roman', 'Times', serif">Times New Roman</option>
-      <option value="'Courier New', 'Courier', monospace">Courier New</option>
-      <option value="Georgia, serif">Georgia</option>
-      <option value="Verdana, sans-serif">Verdana</option>
+      <template v-for="group in fontList" :key="group.group">
+        <optgroup :label="group.group">
+          <option v-for="font in group.fonts" :key="font.value" :value="font.value">
+            {{ font.label }}
+          </option>
+        </optgroup>
+      </template>
     </select>
 
     <!-- 字号选择 -->
@@ -432,6 +424,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { SheetAPI } from './sheet/api'
 import type { CellStyle, BorderStyle, CellFormatType } from './sheet/types'
+import { isMac, isWindows, isLinux, DEFAULT_FONT_FAMILY } from './sheet/defaultFont'
 
 const props = defineProps<{
   api: SheetAPI
@@ -443,9 +436,148 @@ const props = defineProps<{
   }
 }>()
 
-// 检测是否为 macOS
-const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+// 使用导入的 OS 检测结果
 const modKey = isMac ? '⌘' : 'Ctrl'
+
+// 根据操作系统配置字体列表
+interface FontOption {
+  label: string
+  value: string
+}
+
+// macOS 字体列表
+const macFonts: FontOption[] = [
+  { label: '苹方', value: "'PingFang SC', sans-serif" },
+  { label: '苹方-简', value: "'PingFang SC', 'Heiti SC', sans-serif" },
+  { label: 'SF Pro', value: "-apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif" },
+  { label: 'Helvetica Neue', value: "'Helvetica Neue', Helvetica, sans-serif" },
+  { label: '华文黑体', value: "'STHeiti', 'Heiti SC', sans-serif" },
+  { label: '华文宋体', value: "'STSong', 'Songti SC', serif" },
+  { label: '华文楷体', value: "'STKaiti', 'Kaiti SC', serif" },
+  { label: '华文仿宋', value: "'STFangsong', 'Fangsong SC', serif" },
+  { label: '冬青黑体', value: "'Hiragino Sans GB', 'Heiti SC', sans-serif" },
+  { label: 'Menlo', value: "'Menlo', 'Monaco', monospace" },
+]
+
+// Windows 字体列表
+const windowsFonts: FontOption[] = [
+  { label: '微软雅黑', value: "'Microsoft YaHei', sans-serif" },
+  { label: '微软雅黑 UI', value: "'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif" },
+  { label: '宋体', value: "'SimSun', 'NSimSun', serif" },
+  { label: '黑体', value: "'SimHei', sans-serif" },
+  { label: '楷体', value: "'KaiTi', serif" },
+  { label: '仿宋', value: "'FangSong', serif" },
+  { label: '新宋体', value: "'NSimSun', 'SimSun', serif" },
+  { label: '等线', value: "'DengXian', 'Microsoft YaHei', sans-serif" },
+  { label: 'Consolas', value: "'Consolas', 'Courier New', monospace" },
+  { label: 'Segoe UI', value: "'Segoe UI', Tahoma, sans-serif" },
+]
+
+// Linux 字体列表
+const linuxFonts: FontOption[] = [
+  { label: '文泉驿微米黑', value: "'WenQuanYi Micro Hei', sans-serif" },
+  { label: '文泉驿正黑', value: "'WenQuanYi Zen Hei', sans-serif" },
+  { label: 'Noto Sans CJK', value: "'Noto Sans CJK SC', 'Noto Sans SC', sans-serif" },
+  { label: 'Noto Serif CJK', value: "'Noto Serif CJK SC', 'Noto Serif SC', serif" },
+  { label: 'Ubuntu', value: "'Ubuntu', sans-serif" },
+  { label: 'DejaVu Sans', value: "'DejaVu Sans', sans-serif" },
+  { label: 'Liberation Sans', value: "'Liberation Sans', sans-serif" },
+  { label: 'Liberation Mono', value: "'Liberation Mono', monospace" },
+]
+
+// 通用字体（所有系统都显示）
+const commonFonts: FontOption[] = [
+  { label: 'Arial', value: 'Arial, sans-serif' },
+  { label: 'Times New Roman', value: "'Times New Roman', 'Times', serif" },
+  { label: 'Courier New', value: "'Courier New', 'Courier', monospace" },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Verdana', value: 'Verdana, sans-serif' },
+  { label: 'Tahoma', value: 'Tahoma, sans-serif' },
+  { label: 'Trebuchet MS', value: "'Trebuchet MS', sans-serif" },
+  { label: 'Comic Sans MS', value: "'Comic Sans MS', cursive" },
+]
+
+// 根据操作系统获取字体列表
+function getSystemFonts(): FontOption[] {
+  if (isMac) return macFonts
+  if (isWindows) return windowsFonts
+  if (isLinux) return linuxFonts
+  return windowsFonts // 默认使用 Windows 字体列表
+}
+
+// 组合字体列表：系统字体 + 通用字体
+const fontList = computed(() => [
+  { group: '系统字体', fonts: getSystemFonts() },
+  { group: '通用字体', fonts: commonFonts }
+])
+
+// 获取所有可用字体选项（扁平化列表）
+function getAllFontOptions(): FontOption[] {
+  return [...getSystemFonts(), ...commonFonts]
+}
+
+/**
+ * 规范化字体名称（移除引号和多余空格）
+ */
+function normalizeFontName(font: string): string {
+  return font.replace(/['"]/g, '').trim().toLowerCase()
+}
+
+/**
+ * 从字体字符串中提取字体名称列表
+ * 例如: "'PingFang SC', sans-serif" => ["pingfang sc", "sans-serif"]
+ */
+function extractFontNames(fontFamily: string): string[] {
+  return fontFamily
+    .split(',')
+    .map(f => normalizeFontName(f))
+    .filter(f => f.length > 0)
+}
+
+/**
+ * 匹配字体值到下拉框选项
+ * 按照字体名称列表的顺序匹配，返回最佳匹配的选项值
+ */
+function matchFontToOption(fontFamily: string): string {
+  if (!fontFamily) return DEFAULT_FONT_FAMILY
+  
+  const allOptions = getAllFontOptions()
+  
+  // 1. 首先尝试精确匹配（规范化后）
+  const normalizedInput = normalizeFontName(fontFamily)
+  for (const opt of allOptions) {
+    if (normalizeFontName(opt.value) === normalizedInput) {
+      return opt.value
+    }
+  }
+  
+  // 2. 提取输入的字体名称列表
+  const inputFonts = extractFontNames(fontFamily)
+  
+  // 3. 按顺序匹配每个字体名
+  for (const inputFont of inputFonts) {
+    // 跳过通用字体族
+    if (['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy'].includes(inputFont)) {
+      continue
+    }
+    
+    for (const opt of allOptions) {
+      const optFonts = extractFontNames(opt.value)
+      // 检查选项的第一个字体是否与输入字体匹配
+      if (optFonts[0] === inputFont) {
+        return opt.value
+      }
+      // 检查选项中是否包含该字体
+      if (optFonts.includes(inputFont)) {
+        return opt.value
+      }
+    }
+  }
+  
+  // 4. 没有找到匹配，返回原值（会在下拉框中显示为空或无效）
+  // 为了用户体验，返回默认字体
+  return DEFAULT_FONT_FAMILY
+}
 
 // 撤销还原状态
 const canUndo = ref(false)
@@ -520,7 +652,7 @@ function doRedo() {
 }
 
 // 当前样式状态
-const fontFamily = ref('Arial, sans-serif')
+const fontFamily = ref(DEFAULT_FONT_FAMILY)
 const fontSize = ref(12)
 const bold = ref(false)
 const italic = ref(false)
@@ -646,7 +778,8 @@ function updateToolbarState() {
   
   const style: CellStyle = props.api.getCellStyle(row, col)
   
-  fontFamily.value = style.fontFamily || 'Arial, sans-serif'
+  // 使用智能匹配找到对应的字体选项
+  fontFamily.value = matchFontToOption(style.fontFamily || '')
   fontSize.value = style.fontSize || 12
   bold.value = style.bold || false
   italic.value = style.italic || false

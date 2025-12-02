@@ -5,6 +5,7 @@
 
 import type { SelectedCell } from './rowcol'
 import type { CellStyle, CellBorder, BorderEdge, CellFormat, MergedRegion, MergedCellInfo, CellImage, CellImageAlignment, CellImageVerticalAlign } from './types'
+import { DEFAULT_FONT_FAMILY } from './defaultFont'
 
 /**
  * 行列尺寸 API
@@ -700,7 +701,7 @@ function calculateRowHeightForWrapText(
     white-space: pre-wrap;
     word-break: break-all;
     width: ${containerWidth - 4}px;
-    font-family: ${cellStyle.fontFamily || 'Arial, sans-serif'};
+    font-family: ${cellStyle.fontFamily || DEFAULT_FONT_FAMILY};
     font-size: ${cellStyle.fontSize || 12}px;
     font-weight: ${cellStyle.bold ? 'bold' : 'normal'};
     font-style: ${cellStyle.italic ? 'italic' : 'normal'};

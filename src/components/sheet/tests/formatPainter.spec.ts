@@ -8,11 +8,12 @@ import {
   createFormatPainterState 
 } from '../formatPainter'
 import type { CellStyle, CellBorder, CellFormat, MergedRegion } from '../types'
+import { DEFAULT_FONT_FAMILY } from '../defaultFont'
 
 // 创建默认样式
 function createDefaultStyle(): CellStyle {
   return {
-    fontFamily: 'Arial, sans-serif',
+    fontFamily: DEFAULT_FONT_FAMILY,
     fontSize: 12,
     bold: false,
     italic: false,

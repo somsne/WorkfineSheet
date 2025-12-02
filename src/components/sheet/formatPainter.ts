@@ -4,6 +4,7 @@
  */
 
 import type { CellStyle, CellBorder, CellFormat, MergedRegion } from './types'
+import { DEFAULT_FONT_FAMILY } from './defaultFont'
 
 /**
  * 单元格完整格式（样式 + 边框 + 数字格式）
@@ -119,7 +120,7 @@ export function extractFormats(
       
       // 只存储非默认的样式属性
       const stylePartial: Partial<CellStyle> = {}
-      if (style.fontFamily !== 'Arial, sans-serif') stylePartial.fontFamily = style.fontFamily
+      if (style.fontFamily !== DEFAULT_FONT_FAMILY) stylePartial.fontFamily = style.fontFamily
       if (style.fontSize !== 12) stylePartial.fontSize = style.fontSize
       if (style.bold) stylePartial.bold = style.bold
       if (style.italic) stylePartial.italic = style.italic

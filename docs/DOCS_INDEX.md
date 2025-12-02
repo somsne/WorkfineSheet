@@ -52,6 +52,9 @@
 - **[CELL_IMAGES.md](./features/CELL_IMAGES.md)** ⭐ 功能说明
 - **[CELL_IMAGE_API.md](./api/CELL_IMAGE_API.md)** - API 参考
 
+### 剪贴板
+- **[CLIPBOARD.md](./features/CLIPBOARD.md)** ⭐ 功能说明 (Excel 互操作)
+
 ### 多工作表
 - **[MULTI_SHEET.md](./features/MULTI_SHEET.md)** ⭐ 功能说明
 
@@ -145,4 +148,4 @@
 ---
 
 **文档维护**: 请在更新文档时同步更新此索引  
-**最后更新**: 2025-06-18
+**最后更新**: 2025-12-02

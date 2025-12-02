@@ -31,7 +31,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
   
   const { ensureVisible } = geometry
   const { openOverlay, focusImeProxy } = input
-  const { onCopy, clearCopyRange } = clipboard
+  const { onCopy, onCut, clearCopyRange, hasInternalClipboard } = clipboard
   
   /**
    * 处理键盘按下事件
@@ -170,6 +170,15 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
       return
     }
     
+    // 剪切 (Ctrl/Cmd + X)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+      e.preventDefault()
+      onCut()
+      // 启动蚂蚁线动画
+      drawing?.startMarchingAntsAnimation()
+      return
+    }
+    
     // 粘贴 (Ctrl/Cmd + V) - 不阻止默认行为，让 paste 事件触发
     // 实际的粘贴处理由 onPaste 事件处理器完成
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
@@ -236,7 +245,8 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
       }
       
       // 清除蚂蚁线（复制区域）
-      if (state.copyRange.visible) {
+      // 检查本地蚂蚁线或外部剪贴板是否有数据
+      if (state.copyRange.visible || hasInternalClipboard()) {
         clearCopyRange()
         drawing?.stopMarchingAntsAnimation()
         return

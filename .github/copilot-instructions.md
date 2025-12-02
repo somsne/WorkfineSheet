@@ -161,6 +161,15 @@ undoRedo.execute({
 - `SheetViewState` 保存：滚动位置、选区、网格线显示状态
 - 切换 Sheet 时自动保存/恢复视图状态
 
+### 10. 剪贴板功能 (clipboard.ts)
+- **内部剪贴板**：保留公式、样式、边框、格式、合并单元格
+- **Excel 互操作**：与 Office 365 Excel 双向复制粘贴
+  - 生成 Excel 兼容 HTML（使用 `<style>` 定义类样式）
+  - 使用 `getComputedStyle` 解析 Excel 样式
+- **快捷键**：Ctrl/Cmd+C/X/V 复制/剪切/粘贴，Escape 取消
+- **蚂蚁线动画**：复制后显示虚线边框动画
+- **文档**：详见 `docs/features/CLIPBOARD.md`
+
 ## 测试约定
 - 单元测试位于 `src/components/sheet/tests/*.spec.ts`
 - HTML 功能测试位于 `tests/*.html`

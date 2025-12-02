@@ -2,6 +2,8 @@
  * Shared types for WorkfineSheet refactor
  */
 
+import { DEFAULT_FONT_FAMILY } from './defaultFont'
+
 // 选择范围（含拖拽框）
 export interface SelectionRange {
   startRow: number
@@ -90,6 +92,38 @@ export interface InternalClipboardCell {
   format?: CellFormat
 }
 
+// 工作簿级别剪贴板状态（跨 Sheet 共享）
+export interface WorkbookClipboard {
+  /** 复制的单元格数据 */
+  data: InternalClipboardCell[][] | null
+  /** 复制起始行 */
+  startRow: number
+  /** 复制起始列 */
+  startCol: number
+  /** 复制区域内的合并单元格信息（相对坐标） */
+  mergedRegions: Array<{
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+  }>
+  /** 复制时写入系统剪贴板的 TSV 内容（用于比较） */
+  tsvContent: string
+  /** 复制时间戳 */
+  copyTs: number
+  /** 复制源 Sheet ID（用于判断蚂蚁线显示） */
+  sourceSheetId: string | null
+  /** 复制区域范围（用于绘制蚂蚁线） */
+  copyRange: {
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+  } | null
+  /** 是否为剪切操作（true=剪切，false=复制） */
+  isCut: boolean
+}
+
 // 悬停状态（用于高亮调整分隔线）
 export interface HoverState {
   type: '' | 'row' | 'col'
@@ -144,7 +178,7 @@ export interface CellStyle {
  * 默认单元格样式
  */
 export const DEFAULT_CELL_STYLE: CellStyle = {
-  fontFamily: 'Arial, sans-serif',
+  fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: 12,
   bold: false,
   italic: false,

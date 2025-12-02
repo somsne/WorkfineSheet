@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { SheetModel } from '../../../lib/SheetModel'
 import { DEFAULT_CELL_STYLE } from '../types'
+import { DEFAULT_FONT_FAMILY } from '../defaultFont'
 import type { CellStyle } from '../types'
 
 describe('单元格样式 - 数据模型', () => {
@@ -217,7 +218,8 @@ describe('单元格样式 - 类型定义', () => {
   })
 
   it('DEFAULT_CELL_STYLE 应该有正确的默认值', () => {
-    expect(DEFAULT_CELL_STYLE.fontFamily).toBe('Arial, sans-serif')
+    // 默认字体根据操作系统动态设置
+    expect(DEFAULT_CELL_STYLE.fontFamily).toBe(DEFAULT_FONT_FAMILY)
     expect(DEFAULT_CELL_STYLE.fontSize).toBe(12)
     expect(DEFAULT_CELL_STYLE.bold).toBe(false)
     expect(DEFAULT_CELL_STYLE.italic).toBe(false)

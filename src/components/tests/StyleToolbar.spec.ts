@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import StyleToolbar from '../StyleToolbar.vue'
 import type { SheetAPI } from '../sheet/api'
 import { DEFAULT_CELL_STYLE } from '../sheet/types'
+import { DEFAULT_FONT_FAMILY } from '../sheet/defaultFont'
 import type { CellStyle } from '../sheet/types'
 
 describe('StyleToolbar 组件', () => {
@@ -470,7 +471,7 @@ describe('StyleToolbar 组件', () => {
 
       // 应该使用默认值
       const fontSelect = wrapper.find('.font-select')
-      expect((fontSelect.element as HTMLSelectElement).value).toBe('Arial, sans-serif')
+      expect((fontSelect.element as HTMLSelectElement).value).toBe(DEFAULT_FONT_FAMILY)
     })
 
     it('连续快速点击应该正确切换状态', async () => {

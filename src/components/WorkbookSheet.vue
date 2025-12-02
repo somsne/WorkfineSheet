@@ -38,8 +38,13 @@
         :external-model="activeSheetData.model"
         :skip-demo-data="true"
         :initial-view-state="activeSheetData.viewState"
+        :clipboard="workbookClipboard"
+        :sheet-id="activeSheetId ?? ''"
         @selection-change="handleSelectionChange"
         @editing-state-change="handleEditingStateChange"
+        @clipboard-change="handleClipboardChange"
+        @clipboard-clear="handleClipboardClear"
+        @cut-source-clear="handleCutSourceClear"
       />
     </div>
     
@@ -63,6 +68,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Workbook, type WorkbookEventType, type WorkbookEvent, type SheetInfo } from '../lib/Workbook'
+import type { WorkbookClipboard } from './sheet/types'
 // @ts-ignore
 import CanvasSheet from './CanvasSheet.vue'
 // @ts-ignore
@@ -229,26 +235,64 @@ const crossSheetFormatPainter = ref<{
   sourceSheetId: null
 })
 
-/** 跨 Sheet 剪贴板状态 */
-const crossSheetClipboard = ref<{
-  data: any
+/** 
+ * 工作簿级别剪贴板状态
+ * 直接传递给 CanvasSheet，无需中转同步
+ */
+const workbookClipboard = ref<WorkbookClipboard | null>(null)
+
+/** 剪贴板变化处理（复制时调用） */
+function handleClipboardChange(clipboard: WorkbookClipboard) {
+  workbookClipboard.value = clipboard
+}
+
+/** 剪贴板清除处理（ESC 取消时调用） */
+function handleClipboardClear() {
+  workbookClipboard.value = null
+}
+
+/** 跨 Sheet 剪切源清除处理（在目标 Sheet 粘贴后清除源 Sheet 内容） */
+function handleCutSourceClear(payload: {
+  sourceSheetId: string
   startRow: number
   startCol: number
-  mergedRegions: any[]
-  tsvContent: string
-  copyTs: number
-  sourceSheetId: string | null
-  copyRange: { startRow: number; startCol: number; endRow: number; endCol: number } | null
-}>({
-  data: null,
-  startRow: -1,
-  startCol: -1,
-  mergedRegions: [],
-  tsvContent: '',
-  copyTs: 0,
-  sourceSheetId: null,
-  copyRange: null
-})
+  height: number
+  width: number
+}) {
+  const { sourceSheetId, startRow, startCol, height, width } = payload
+  
+  // 查找源 Sheet 的数据
+  const sourceSheetData = workbook.value.getSheetById(sourceSheetId)
+  if (!sourceSheetData) {
+    console.warn(`Source sheet ${sourceSheetId} not found for cut operation`)
+    return
+  }
+  
+  const model = sourceSheetData.model
+  
+  // 清除源区域的内容和格式
+  for (let r = 0; r < height; r++) {
+    for (let c = 0; c < width; c++) {
+      const row = startRow + r
+      const col = startCol + c
+      // 清除值
+      model.setValue(row, col, '')
+      // 清除样式
+      model.clearCellStyle(row, col)
+      // 清除边框
+      model.clearCellBorder(row, col)
+      // 清除格式
+      model.clearCellFormat(row, col)
+      // 解除合并（如果是合并区域的左上角）
+      const merged = model.getMergedRegion(row, col)
+      if (merged && merged.startRow === row && merged.startCol === col) {
+        model.unmergeCells(row, col)
+      }
+    }
+  }
+  
+  console.log(`Cut source cleared: Sheet ${sourceSheetId}, range [${startRow},${startCol}] to [${startRow + height - 1},${startCol + width - 1}]`)
+}
 
 /** 公式编辑状态（跨 Sheet 引用） */
 const formulaEditState = ref<{
@@ -354,17 +398,8 @@ function syncSheetData() {
       }
     }
     
-    // 恢复剪贴板状态
-    if (crossSheetClipboard.value.data) {
-      const currentSheetId = workbook.value.getActiveSheetId()
-      // 只有切换回复制源 sheet 时才恢复蚂蚁线
-      const shouldShowMarchingAnts = crossSheetClipboard.value.sourceSheetId === currentSheetId
-      canvasSheetRef.value.setClipboardState?.({
-        ...crossSheetClipboard.value,
-        // 如果不是源 sheet，不显示蚂蚁线
-        copyRange: shouldShowMarchingAnts ? crossSheetClipboard.value.copyRange : null
-      })
-    }
+    // 剪贴板状态现在通过 props.clipboard 自动传递给 CanvasSheet
+    // CanvasSheet 内部 watch 会自动处理蚂蚁线显示
   })
 }
 
@@ -400,28 +435,7 @@ function saveCurrentSheetState() {
     }
   }
   
-  // 保存剪贴板状态（跨 Sheet 共享）
-  const clipboardState = canvasSheetRef.value.getClipboardState?.()
-  if (clipboardState && clipboardState.data) {
-    // 检查是否是新的复制操作（通过 copyRange 是否存在判断）
-    const hasNewCopyRange = clipboardState.copyRange !== null
-    // 如果当前 sheet 有新的 copyRange，说明在这里执行了复制，更新 sourceSheetId
-    // 否则保留原来的 sourceSheetId 和 copyRange
-    if (hasNewCopyRange) {
-      // 新的复制操作
-      crossSheetClipboard.value = {
-        ...clipboardState,
-        sourceSheetId: currentSheetId
-      }
-    } else {
-      // 保留原来的 sourceSheetId 和 copyRange
-      crossSheetClipboard.value = {
-        ...clipboardState,
-        sourceSheetId: crossSheetClipboard.value.sourceSheetId,
-        copyRange: crossSheetClipboard.value.copyRange
-      }
-    }
-  }
+  // 剪贴板状态现在由 workbookClipboard 直接管理，无需在这里保存
   
   // 检查是否正在编辑公式
   const formulaState = canvasSheetRef.value.getFormulaEditState?.()
