@@ -379,7 +379,12 @@ const mouse = useSheetMouse({
   rowColOps, 
   onDraw: drawing.draw,
   scheduleRedraw: drawing.scheduleRedraw,
-  fillHandle
+  fillHandle,
+  clipboardOps: {
+    onCopy: () => clipboard.onCopy(false),
+    onCut: () => clipboard.onCopy(true), // onCut 内部调用 onCopy(true)
+    onPaste: clipboard.onPaste
+  }
 })
 
 // 9. 图片处理（使用带 sheetId 的 undoRedo 包装器）

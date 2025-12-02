@@ -82,7 +82,7 @@ WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组�
 - `SheetModel.ts` - 单表数据模型，稀疏存储 cells/styles/borders/formats/images/merges
 - `FormulaSheet.ts` - 公式表包装器，异步计算队列、依赖图、值缓存、格式化
 - `FormulaEngine.ts` - 公式计算引擎（基于 hot-formula-parser）
-- `UndoRedoManager.ts` - 撤销重做（命令模式）
+- `UndoRedoManager.ts` - 撤销重做管理器（命令模式，支持跨 Sheet 操作和选区恢复）
 
 **辅助模块** (`src/components/sheet/`):
 - `types.ts` - 所有共享类型定义（CellStyle, SelectionRange, FloatingImage 等）
@@ -118,9 +118,19 @@ export function getRowHeight(row: number, sizes: SizeAccess, cfg: GeometryConfig
 undoRedo.execute({
   name: '设置单元格值',
   redo: () => model.setValue(r, c, newVal),
-  undo: () => model.setValue(r, c, oldVal)
+  undo: () => model.setValue(r, c, oldVal),
+  sheetId: currentSheetId,           // 跨 Sheet 支持
+  undoSelection: { startRow, startCol, endRow, endCol },  // 撤销后选中区域
+  redoSelection: { startRow, startCol, endRow, endCol }   // 重做后选中区域
 })
 ```
+
+**跨 Sheet 撤销/重做**：
+- `UndoRedoManager` 支持 `sheetId` 字段，记录操作所属的 Sheet
+- 撤销/重做时自动切换到目标 Sheet 并选中受影响区域
+- `peekUndoSheetId()` / `peekRedoSheetId()` 获取下一个操作的 Sheet ID
+- WorkbookSheet 通过全局 keydown 监听器（捕获阶段）统一处理所有撤销/重做
+- 跨 Sheet 切换时通过更新 `viewState` 实现选区恢复
 
 ### 3. 样式系统 (CellStyle)
 - 样式定义在 `types.ts` 的 `CellStyle` 接口
@@ -137,6 +147,8 @@ undoRedo.execute({
 - 公式填充时自动调整相对引用
 - 反向拖拽清除内容（Excel 行为）
 - 配置：`FILL_HANDLE_CONFIG = { SIZE: 8, HIT_AREA_PADDING: 5 }`
+- **编辑时点击填充柄**：自动保存当前编辑内容（调用 `onOverlaySave(value, false)`），然后开始填充拖拽
+- **填充柄位置更新**：在 `mousedown` 时立即更新（通过 `selection.ts` 中同步更新 `selectionRange`）
 
 ### 6. 行列操作样式继承 (rowcol.ts)
 - 插入行：新行继承**上方行**的样式/边框/格式/行高（第0行继承下方）
@@ -168,15 +180,23 @@ undoRedo.execute({
   - 使用 `getComputedStyle` 解析 Excel 样式
 - **快捷键**：Ctrl/Cmd+C/X/V 复制/剪切/粘贴，Escape 取消
 - **蚂蚁线动画**：复制后显示虚线边框动画
+- **右键菜单**：单元格右键支持剪切/复制/粘贴操作（通过 `ClipboardOperations` 接口）
 - **文档**：详见 `docs/features/CLIPBOARD.md`
 
+### 11. 单元格编辑保存 (useSheetInput.ts)
+- `onOverlaySave(value, moveToNext)` - 保存编辑内容
+  - `moveToNext = true`（默认）：保存后移动到下一个单元格
+  - `moveToNext = false`：保存后保持在当前单元格（用于填充柄等场景）
+- **防重复调用**：检查 `overlay.visible`，已关闭时直接返回
+- **RichTextInput 获取值**：使用 `getCurrentValue()` 方法（非 `getValue`）
+
 ## 测试约定
-- 单元测试位于 `src/components/sheet/tests/*.spec.ts`
+- 单元测试位于 `src/components/sheet/tests/*.spec.ts` 和 `src/lib/tests/*.spec.ts`
 - HTML 功能测试位于 `tests/*.html`
 - 测试框架: Vitest + jsdom
-- 纯函数模块（geometry, references, clipboard, fillHandle）优先测试
+- 纯函数模块（geometry, references, clipboard, fillHandle, UndoRedoManager）优先测试
 - 运行单个测试: `npm test -- geometry`
-- 当前测试: 623 个用例
+- 当前测试: 687 个用例
 
 ## 目录结构快速导航
 ```

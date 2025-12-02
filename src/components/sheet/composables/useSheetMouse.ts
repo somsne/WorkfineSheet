@@ -21,6 +21,13 @@ import type { SheetInput } from './useSheetInput'
 import type { RowColOperations } from './useRowColOperations'
 import type { FillHandleComposable } from './useFillHandle'
 
+/** 剪贴板操作接口 */
+export interface ClipboardOperations {
+  onCopy: () => Promise<{ tsv: string; html: string } | null>
+  onCut: () => Promise<{ tsv: string; html: string } | null>
+  onPaste: () => Promise<void>
+}
+
 export interface UseSheetMouseOptions {
   state: SheetState
   geometry: SheetGeometry
@@ -29,9 +36,11 @@ export interface UseSheetMouseOptions {
   onDraw: () => void
   scheduleRedraw: () => void
   fillHandle?: FillHandleComposable
+  /** 剪贴板操作（可选，用于右键菜单） */
+  clipboardOps?: ClipboardOperations
 }
 
-export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle }: UseSheetMouseOptions) {
+export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle, clipboardOps }: UseSheetMouseOptions) {
   const {
     constants,
     container, overlayInput, formulaBarInput,
@@ -84,6 +93,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     }
   }
   
+  // 标记是否刚刚完成填充柄拖拽（用于阻止随后的 click 事件）
+  let justFinishedFillHandleDrag = false
+  
   /**
    * 处理点击事件
    */
@@ -92,6 +104,17 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     // 如果正在编辑，不处理点击（避免干扰编辑器）
     if (overlay.visible) {
+      return
+    }
+    
+    // 如果刚刚完成填充柄拖拽，不处理点击
+    if (justFinishedFillHandleDrag) {
+      justFinishedFillHandleDrag = false
+      return
+    }
+    
+    // 如果正在填充柄拖拽，不处理点击
+    if (fillHandle?.fillHandleState.dragging) {
       return
     }
     
@@ -341,9 +364,35 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     }
     
     // 检测填充柄拖拽
-    if (fillHandle && fillHandle.startFillHandleDrag(x, y)) {
-      e.preventDefault()
-      return
+    if (fillHandle && fillHandle.isOnFillHandle(x, y)) {
+      // 如果正在编辑单元格，先保存内容（不移动到下一单元格）
+      if (overlay.visible && overlayInput.value) {
+        // 记住当前编辑的单元格位置
+        const editingRow = overlay.row
+        const editingCol = overlay.col
+        
+        // RichTextInput 暴露的方法是 getCurrentValue
+        const currentValue = (overlayInput.value as any).getCurrentValue?.() ?? ''
+        // 传入 false 表示保存后不移动到下一个单元格
+        input.onOverlaySave(currentValue, false)
+        
+        // 设置选区为刚编辑的单元格
+        selected.row = editingRow
+        selected.col = editingCol
+        selectionRange.startRow = editingRow
+        selectionRange.startCol = editingCol
+        selectionRange.endRow = editingRow
+        selectionRange.endCol = editingCol
+        
+        // 更新填充柄位置
+        fillHandle.updateFillHandlePosition()
+      }
+      
+      // 开始填充柄拖拽
+      if (fillHandle.startFillHandleDrag(x, y)) {
+        e.preventDefault()
+        return
+      }
     }
     
     // 普通单元格拖拽
@@ -362,8 +411,12 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
     
-    // 立即重绘以显示焦点框
+    // 立即重绘以显示焦点框，并更新填充柄位置
     if (started) {
+      // 在 mousedown 时立即更新填充柄位置
+      if (fillHandle) {
+        fillHandle.updateFillHandlePosition()
+      }
       onDraw()
     }
   }
@@ -546,6 +599,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 结束填充柄拖拽
     if (fillHandle && fillHandle.fillHandleState.dragging) {
       fillHandle.endFillHandleDrag()
+      // 标记刚完成填充柄拖拽，阻止随后的 click 事件
+      justFinishedFillHandleDrag = true
       return
     }
     
@@ -841,6 +896,93 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         }
         onDraw()
       }
+    } else if (x > constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
+      // 点击单元格区域
+      const row = getRowAtY(y)
+      const col = getColAtX(x)
+      
+      // 检查点击的单元格是否在当前选区内
+      const isInSelection = row >= selectionRange.startRow && row <= selectionRange.endRow &&
+                            col >= selectionRange.startCol && col <= selectionRange.endCol
+      
+      if (!isInSelection) {
+        // 点击的单元格不在当前选区内，选中该单元格
+        selected.row = row
+        selected.col = col
+        selectionRange.startRow = row
+        selectionRange.startCol = col
+        selectionRange.endRow = row
+        selectionRange.endCol = col
+        // 清除多选区
+        if (multiSelection) {
+          multiSelection.ranges = []
+          multiSelection.active = false
+        }
+        onDraw()
+      }
+      
+      // 显示单元格右键菜单（剪切、复制、粘贴）
+      contextMenu.x = e.clientX
+      contextMenu.y = e.clientY
+      contextMenu.targetRow = row
+      contextMenu.targetCol = col
+      
+      contextMenu.items = []
+      
+      if (clipboardOps) {
+        contextMenu.items.push(
+          { 
+            label: '剪切', 
+            action: async () => {
+              const result = await clipboardOps.onCut()
+              if (!result) return
+              // 写入系统剪贴板
+              try {
+                await navigator.clipboard.write([
+                  new ClipboardItem({
+                    'text/plain': new Blob([result.tsv], { type: 'text/plain' }),
+                    'text/html': new Blob([result.html], { type: 'text/html' })
+                  })
+                ])
+              } catch {
+                // 降级方案：只写入纯文本
+                await navigator.clipboard.writeText(result.tsv)
+              }
+              onDraw()
+            }
+          },
+          { 
+            label: '复制', 
+            action: async () => {
+              const result = await clipboardOps.onCopy()
+              if (!result) return
+              // 写入系统剪贴板
+              try {
+                await navigator.clipboard.write([
+                  new ClipboardItem({
+                    'text/plain': new Blob([result.tsv], { type: 'text/plain' }),
+                    'text/html': new Blob([result.html], { type: 'text/html' })
+                  })
+                ])
+              } catch {
+                // 降级方案：只写入纯文本
+                await navigator.clipboard.writeText(result.tsv)
+              }
+              onDraw()
+            }
+          },
+          { 
+            label: '粘贴', 
+            action: async () => {
+              await clipboardOps.onPaste()
+              onDraw()
+            }
+          }
+        )
+      }
+      
+      contextMenu.visible = true
+      return // 已处理，不再调用 handleContextMenu
     }
     
     // 隐藏/取消隐藏行的操作

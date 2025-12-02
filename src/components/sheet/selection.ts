@@ -368,6 +368,12 @@ export function startDragSelection(config: SelectionDragConfig): boolean {
     // 立即更新选中状态，使焦点框立即响应
     state.selected.row = region.startRow
     state.selected.col = region.startCol
+    
+    // 立即更新选区范围，使填充柄能正确定位
+    state.selectionRange.startRow = region.startRow
+    state.selectionRange.startCol = region.startCol
+    state.selectionRange.endRow = region.endRow
+    state.selectionRange.endCol = region.endCol
   } else {
     state.dragState.startRow = row
     state.dragState.startCol = col
@@ -377,6 +383,12 @@ export function startDragSelection(config: SelectionDragConfig): boolean {
     // 立即更新选中状态，使焦点框立即响应
     state.selected.row = row
     state.selected.col = col
+    
+    // 立即更新选区范围，使填充柄能正确定位
+    state.selectionRange.startRow = row
+    state.selectionRange.startCol = col
+    state.selectionRange.endRow = row
+    state.selectionRange.endCol = col
   }
   
   return true

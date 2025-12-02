@@ -87,8 +87,15 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
   
   /**
    * 保存编辑内容
+   * @param val 要保存的值
+   * @param moveToNext 保存后是否移动到下一个单元格（默认 true）
    */
-  function onOverlaySave(val: string) {
+  function onOverlaySave(val: string, moveToNext: boolean = true) {
+    // 如果 overlay 已经关闭，直接返回（防止重复调用）
+    if (!overlay.visible) {
+      return
+    }
+    
     const row = overlay.row
     const col = overlay.col
     const oldValue = formulaSheet.getDisplayValue(row, col)
@@ -138,13 +145,15 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
     Object.assign(overlay, closeOverlay())
     formulaReferences.value = []
     
-    // 使用覆盖层模块计算下一个单元格位置
-    const nextCell = getNextCellAfterSave(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
-    selected.row = nextCell.row
-    selected.col = nextCell.col
-    
-    // 清除区域选择
-    state.clearSelectionRange()
+    if (moveToNext) {
+      // 使用覆盖层模块计算下一个单元格位置
+      const nextCell = getNextCellAfterSave(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
+      selected.row = nextCell.row
+      selected.col = nextCell.col
+      
+      // 清除区域选择
+      state.clearSelectionRange()
+    }
     
     onDraw()
     
