@@ -31,8 +31,10 @@
         :cell-style="state.model.getCellStyle(state.overlay.row, state.overlay.col)"
         :formula-references="state.richTextFormulaReferences.value"
         :viewport-width="state.container.value?.clientWidth ?? 800"
-        @save="input.onOverlaySave"
-        @cancel="input.onOverlayCancel"
+        @enter="handleOverlayEnter"
+        @tab="handleOverlayTab"
+        @blur="handleOverlayBlur"
+        @cancel="handleOverlayCancel"
         @input-change="state.updateFormulaReferences"
       />
       
@@ -108,7 +110,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign } from './sheet/types'
+import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign, FormulaReference } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
 import { createSheetAPI } from './sheet/api'
 import { extractFormats, applyFormats } from './sheet/formatPainter'
@@ -153,6 +155,14 @@ interface Props {
   clipboard?: WorkbookClipboard | null
   /** 当前 Sheet ID（用于判断蚂蚁线显示和 UndoRedo 操作记录） */
   sheetId?: string
+  /** 跨 Sheet 公式编辑状态（由 WorkbookSheet 传递） */
+  crossSheetFormulaState?: {
+    active: boolean
+    sourceSheetId: string
+    currentSheetName: string  // 当前 Sheet 名称（用于生成跨 Sheet 引用）
+    selectionColor?: string
+    formulaReferences?: FormulaReference[]  // 当前 Sheet 需要显示的公式引用
+  } | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -161,7 +171,8 @@ const props = withDefaults(defineProps<Props>(), {
   skipDemoData: false,
   initialViewState: undefined,
   clipboard: undefined,
-  sheetId: ''
+  sheetId: '',
+  crossSheetFormulaState: null
 })
 
 // ==================== Events ====================
@@ -192,6 +203,19 @@ const emit = defineEmits<{
     height: number
     width: number
   }): void
+  /** 请求编辑事件（在跨 Sheet 公式模式下双击单元格时触发） */
+  (e: 'request-edit', payload: {
+    row: number
+    col: number
+  }): void
+  /** 单元格编辑器 Enter 键事件 */
+  (e: 'overlay-enter', payload: { row: number; col: number; value: string }): void
+  /** 单元格编辑器 Tab 键事件 */
+  (e: 'overlay-tab', payload: { row: number; col: number; value: string }): void
+  /** 单元格编辑器 Blur 事件 */
+  (e: 'overlay-blur', payload: { row: number; col: number; value: string }): void
+  /** 单元格编辑器 Cancel 事件 */
+  (e: 'overlay-cancel', payload: { row: number; col: number }): void
 }>()
 
 // ==================== 初始化状态 ====================
@@ -319,7 +343,12 @@ const fillHandle = useFillHandle({
 })
 
 // 3. 绘制 (传入 fillHandle)
-const drawing = useSheetDrawing({ state, geometry, fillHandle })
+const drawing = useSheetDrawing({ 
+  state, 
+  geometry, 
+  fillHandle,
+  getCrossSheetFormulaState: () => props.crossSheetFormulaState
+})
 drawFn = drawing.draw
 scheduleRedrawFn = drawing.scheduleRedraw
 
@@ -328,7 +357,8 @@ const input = useSheetInput({
   state, 
   geometry, 
   onDraw: drawing.draw,
-  undoRedoExecutor: undoRedoWithSheetId
+  undoRedoExecutor: undoRedoWithSheetId,
+  onCellValueChange: emitSelectionChange
 })
 
 // 5. 剪贴板（支持外部剪贴板模式）
@@ -350,7 +380,9 @@ const clipboard = useSheetClipboard({
   // 跨 Sheet 剪切源清除时通知父组件
   onCutSourceClear: (payload) => {
     emit('cut-source-clear', payload)
-  }
+  },
+  // 单元格值变化时更新 FormulaBar
+  onCellValueChange: emitSelectionChange
 })
 
 // 6. 行列操作（使用带 sheetId 的 undoRedo 包装器）
@@ -384,6 +416,10 @@ const mouse = useSheetMouse({
     onCopy: () => clipboard.onCopy(false),
     onCut: () => clipboard.onCopy(true), // onCut 内部调用 onCopy(true)
     onPaste: clipboard.onPaste
+  },
+  crossSheetFormulaState: props.crossSheetFormulaState ?? undefined,
+  onRequestEdit: (row: number, col: number) => {
+    emit('request-edit', { row, col })
   }
 })
 
@@ -772,6 +808,18 @@ watch(
     drawing.draw()
   },
   { deep: true, immediate: true }
+)
+
+// 监听跨 Sheet 公式状态变化，触发重绘（隐藏/显示选区和填充柄、更新公式引用高亮）
+watch(
+  () => [
+    props.crossSheetFormulaState?.active,
+    props.crossSheetFormulaState?.formulaReferences
+  ],
+  () => {
+    drawing.draw()
+  },
+  { deep: true }
 )
 
 // ==================== API 创建 ====================
@@ -1562,6 +1610,36 @@ function getFormulaEditState() {
   }
 }
 
+// ==================== Overlay 事件处理（向上传递给 WorkbookSheet） ====================
+
+/** RichTextInput Enter 键事件 - 向上传递 */
+function handleOverlayEnter(value: string) {
+  const row = state.overlay.row
+  const col = state.overlay.col
+  emit('overlay-enter', { row, col, value })
+}
+
+/** RichTextInput Tab 键事件 - 向上传递 */
+function handleOverlayTab(value: string) {
+  const row = state.overlay.row
+  const col = state.overlay.col
+  emit('overlay-tab', { row, col, value })
+}
+
+/** RichTextInput Blur 事件 - 向上传递 */
+function handleOverlayBlur(value: string) {
+  const row = state.overlay.row
+  const col = state.overlay.col
+  emit('overlay-blur', { row, col, value })
+}
+
+/** RichTextInput Cancel 事件 - 向上传递 */
+function handleOverlayCancel() {
+  const row = state.overlay.row
+  const col = state.overlay.col
+  emit('overlay-cancel', { row, col })
+}
+
 // ==================== 公式栏支持方法 ====================
 
 /** 获取当前选区 */
@@ -1571,15 +1649,37 @@ function getSelectionRange() {
 
 /** 选择单元格 */
 function selectCell(row: number, col: number) {
-  state.selected.row = row
-  state.selected.col = col
-  state.selectionRange.startRow = row
-  state.selectionRange.startCol = col
-  state.selectionRange.endRow = row
-  state.selectionRange.endCol = col
+  // 边界检查
+  const maxRow = state.constants.DEFAULT_ROWS - 1
+  const maxCol = state.constants.DEFAULT_COLS - 1
+  
+  // 处理超出边界的情况
+  let targetRow = row
+  let targetCol = col
+  
+  if (col > maxCol) {
+    // 超出列边界，移动到下一行第一列
+    targetCol = 0
+    targetRow = row + 1
+  }
+  if (targetRow > maxRow) {
+    // 超出行边界，回到第一行
+    targetRow = 0
+  }
+  
+  // 负值修正
+  targetRow = Math.max(0, targetRow)
+  targetCol = Math.max(0, targetCol)
+  
+  state.selected.row = targetRow
+  state.selected.col = targetCol
+  state.selectionRange.startRow = targetRow
+  state.selectionRange.startCol = targetCol
+  state.selectionRange.endRow = targetRow
+  state.selectionRange.endCol = targetCol
   
   // 确保单元格可见（滚动到视图）
-  geometry.ensureVisible(row, col)
+  geometry.ensureVisible(targetRow, targetCol)
   
   drawing.draw()
   // watch 会自动发射选区变化事件
@@ -1625,6 +1725,35 @@ function confirmEditing() {
   }
 }
 
+/** 
+ * 确认编辑并移动到指定方向 
+ * @param value 要保存的值
+ * @param direction 移动方向
+ * @param options 可选参数（row/col，用于从 FormulaBar 编辑时传入）
+ */
+function confirmEditingWithDirection(
+  value: string, 
+  direction: 'down' | 'right' | 'none',
+  options?: { row?: number; col?: number }
+) {
+  // 使用传入的 row/col 或从 overlay 获取
+  const row = options?.row ?? state.overlay.row
+  const col = options?.col ?? state.overlay.col
+  const saveOptions = { row, col }
+  
+  switch (direction) {
+    case 'down':
+      input.onOverlayEnter(value, saveOptions)
+      break
+    case 'right':
+      input.onOverlayTab(value, saveOptions)
+      break
+    case 'none':
+      input.onOverlayBlur(value, saveOptions)
+      break
+  }
+}
+
 /** 取消编辑 */
 function cancelEditing() {
   if (state.overlay.visible) {
@@ -1638,6 +1767,26 @@ function setEditingValue(value: string) {
     state.overlay.value = value
     // watch 会自动发射编辑状态变化事件
   }
+}
+
+/** 打开 overlay 并设置指定值（用于编辑源切换） */
+function openOverlayWithValue(row: number, col: number, value: string) {
+  input.openOverlay(row, col, value, 'edit')
+}
+
+/** 获取当前编辑值 */
+function getCurrentEditingValue(): string {
+  return state.overlay.value
+}
+
+/** 获取单元格显示值（对于公式单元格返回公式字符串，否则返回原始值） */
+function getCellDisplayValue(row: number, col: number): string {
+  return state.formulaSheet.getDisplayValue(row, col) ?? ''
+}
+
+/** 设置 FormulaBar 引用（供 WorkbookSheet 调用） */
+function setFormulaBarRef(ref: any) {
+  state.formulaBarInput.value = ref
 }
 
 // 扩展 API 对象
@@ -1658,7 +1807,12 @@ const extendedApi = {
   startEditingCurrentCell,
   confirmEditing,
   cancelEditing,
-  setEditingValue
+  setEditingValue,
+  openOverlayWithValue,
+  getCurrentEditingValue,
+  getCellDisplayValue,
+  confirmEditingWithDirection,
+  setFormulaBarRef
 }
 
 defineExpose(extendedApi)

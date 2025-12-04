@@ -21,12 +21,16 @@
       :is-editing="formulaBarIsEditing"
       :editing-value="formulaBarEditingValue"
       :formula-references="formulaReferences"
+      :source-sheet-name="formulaBarSourceSheetName"
       @navigate="handleFormulaBarNavigate"
       @select-range="handleFormulaBarSelectRange"
       @start-edit="handleFormulaBarStartEdit"
       @confirm="handleFormulaBarConfirm"
       @cancel="handleFormulaBarCancel"
+      @tab="handleFormulaBarTab"
+      @blur="handleFormulaBarBlur"
       @input="handleFormulaBarInput"
+      @focus="handleFormulaBarFocus"
     />
     
     <!-- 主表格区域 -->
@@ -42,11 +46,17 @@
         :initial-view-state="activeSheetData.viewState"
         :clipboard="workbookClipboard"
         :sheet-id="activeSheetId ?? ''"
+        :cross-sheet-formula-state="crossSheetFormulaState"
         @selection-change="handleSelectionChange"
         @editing-state-change="handleEditingStateChange"
         @clipboard-change="handleClipboardChange"
         @clipboard-clear="handleClipboardClear"
         @cut-source-clear="handleCutSourceClear"
+        @request-edit="handleRequestEdit"
+        @overlay-enter="handleOverlayEnter"
+        @overlay-tab="handleOverlayTab"
+        @overlay-blur="handleOverlayBlur"
+        @overlay-cancel="handleOverlayCancel"
       />
     </div>
     
@@ -71,7 +81,14 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Workbook, type WorkbookEventType, type WorkbookEvent, type SheetInfo } from '../lib/Workbook'
 import { UndoRedoManager } from '../lib/UndoRedoManager'
-import type { WorkbookClipboard } from './sheet/types'
+import { 
+  createFormulaEditStateManager, 
+  getCellAddress, 
+  formatCrossSheetReference,
+  type EditUIAction
+} from './sheet/formulaEditState'
+import { parseFormulaReferencesWithSheet, getReferencesForSheet, type SheetReferencesMap } from './sheet/references'
+import type { WorkbookClipboard, FormulaReference } from './sheet/types'
 // @ts-ignore
 import CanvasSheet from './CanvasSheet.vue'
 // @ts-ignore
@@ -80,6 +97,21 @@ import SheetTabBar from './SheetTabBar.vue'
 import StyleToolbar from './StyleToolbar.vue'
 // @ts-ignore
 import FormulaBar from './FormulaBar.vue'
+
+// ==================== 调试日志 ====================
+
+const DEBUG = true
+
+function log(category: string, message: string, data?: any) {
+  if (!DEBUG) return
+  const timestamp = new Date().toISOString().slice(11, 23)
+  const prefix = `[${timestamp}] [WorkbookSheet:${category}]`
+  if (data !== undefined) {
+    console.log(prefix, message, data)
+  } else {
+    console.log(prefix, message)
+  }
+}
 
 // Props
 interface Props {
@@ -112,6 +144,9 @@ const workbook = ref(new Workbook())
 
 /** 工作簿级别的撤销/重做管理器（所有 Sheet 共享） */
 const workbookUndoRedo = new UndoRedoManager(100)
+
+/** 公式编辑状态管理器（代理层） */
+const formulaEditManager = createFormulaEditStateManager()
 
 /** DOM 引用 */
 const mainRef = ref<HTMLElement | null>(null)
@@ -158,6 +193,9 @@ const formulaBarIsEditing = ref(false)
 const formulaBarEditingValue = ref('')
 const formulaReferences = ref<any[]>([])
 
+/** 跳过下一次选区变化事件（公式模式切换 Sheet 后的首次选区变化不应插入引用） */
+let skipNextSelectionChange = false
+
 /** 监听 CanvasSheet 选区变化 */
 function handleSelectionChange(payload: {
   selected: { row: number; col: number }
@@ -166,13 +204,81 @@ function handleSelectionChange(payload: {
   cellValue: string
   formulaReferences?: any[]
 }) {
+  log('selectionChange', `cell=[${payload.selected.row},${payload.selected.col}]`, {
+    range: payload.selectionRange,
+    formulaEditActive: formulaEditManager.state.active,
+    formulaEditSource: formulaEditManager.state.source,
+    skipNextSelectionChange
+  })
+  
+  // 检查是否需要跳过此次选区变化（公式模式切换 Sheet 后的首次选区变化）
+  if (skipNextSelectionChange) {
+    log('selectionChange', '跳过此次选区变化（Sheet切换后的初始化）')
+    skipNextSelectionChange = false
+    // 仍然更新公式栏位置显示，但不插入引用
+    formulaBarRow.value = payload.selectionRange.startRow
+    formulaBarCol.value = payload.selectionRange.startCol
+    formulaBarEndRow.value = payload.selectionRange.endRow
+    formulaBarEndCol.value = payload.selectionRange.endCol
+    return
+  }
+  
+  const mgr = formulaEditManager
+  
+  // 公式栏编辑 + 公式模式 + 可插入位置 → 插入引用
+  if (mgr.state.active && 
+      mgr.state.source === 'formulaBar' && 
+      mgr.state.isFormulaMode && 
+      mgr.state.isInSelectableState) {
+    
+    log('selectionChange', '检测到公式栏公式模式，准备插入引用')
+    
+    let reference: string
+    
+    // 判断是否跨 Sheet
+    if (mgr.isCrossSheetMode(activeSheetId.value ?? '')) {
+      const activeSheet = workbook.value.getActiveSheet()
+      const sheetName = activeSheet?.metadata?.name ?? 'Sheet1'
+      log('selectionChange', `跨Sheet模式，目标Sheet: ${sheetName}`)
+      
+      // 判断是单个单元格还是范围
+      const { startRow, startCol, endRow, endCol } = payload.selectionRange
+      if (startRow === endRow && startCol === endCol) {
+        reference = formatCrossSheetReference(sheetName, startRow, startCol)
+      } else {
+        reference = formatCrossSheetReference(sheetName, startRow, startCol, endRow, endCol)
+      }
+    } else {
+      // 同 Sheet 引用
+      const { startRow, startCol, endRow, endCol } = payload.selectionRange
+      if (startRow === endRow && startCol === endCol) {
+        reference = getCellAddress(startRow, startCol)
+      } else {
+        reference = `${getCellAddress(startRow, startCol)}:${getCellAddress(endRow, endCol)}`
+      }
+    }
+    
+    log('selectionChange', `插入引用: ${reference}`)
+    
+    // 通过 FormulaBar 的方法插入引用（会正确设置光标位置）
+    const newValue = formulaBarRef.value?.insertCellReference?.(reference)
+    if (newValue) {
+      // 同步更新 FormulaEditManager 状态
+      mgr.updateValue(newValue)
+      formulaReferences.value = mgr.state.formulaReferences
+    }
+    
+    return  // 不更新公式栏位置
+  }
+  
+  // 正常更新选区状态
   currentSelection.value = payload.selected
   selectionRange.value = payload.selectionRange
   if (payload.multiSelection) {
     multiSelection.value = payload.multiSelection
   }
   
-  // 更新公式栏状态
+  // 更新公式栏状态（非编辑时显示当前单元格信息）
   formulaBarRow.value = payload.selectionRange.startRow
   formulaBarCol.value = payload.selectionRange.startCol
   formulaBarEndRow.value = payload.selectionRange.endRow
@@ -187,8 +293,64 @@ function handleSelectionChange(payload: {
 function handleEditingStateChange(payload: {
   isEditing: boolean
   editingValue: string
+  editingRow?: number
+  editingCol?: number
+  mode?: 'edit' | 'typing'
+  cursorPosition?: number
   formulaReferences?: any[]
 }) {
+  log('editingStateChange', `isEditing=${payload.isEditing}`, {
+    value: payload.editingValue?.substring(0, 30),
+    row: payload.editingRow,
+    col: payload.editingCol,
+    mode: payload.mode,
+    cursorPosition: payload.cursorPosition
+  })
+  
+  const mgr = formulaEditManager
+  
+  if (payload.isEditing) {
+    // 单元格开始编辑或更新
+    if (!mgr.state.active) {
+      // 新编辑开始（来自单元格）
+      log('editingStateChange', '单元格开始新编辑')
+      mgr.startEdit({
+        source: 'cell',
+        sheetId: activeSheetId.value ?? '',
+        row: payload.editingRow ?? formulaBarRow.value,
+        col: payload.editingCol ?? formulaBarCol.value,
+        value: payload.editingValue,
+        mode: payload.mode ?? 'edit'
+      })
+      // 如果是公式，更新跨 Sheet 引用映射
+      if (payload.editingValue.startsWith('=')) {
+        const sourceSheet = workbook.value.getActiveSheet()
+        const sourceSheetName = sourceSheet?.metadata?.name ?? 'Sheet1'
+        crossSheetReferencesMap.value = parseFormulaReferencesWithSheet(payload.editingValue, sourceSheetName)
+      }
+    } else if (mgr.state.source === 'cell') {
+      // 同源更新（单元格编辑中）
+      mgr.updateValue(payload.editingValue, payload.cursorPosition)
+      // 如果是公式，更新跨 Sheet 引用映射
+      if (payload.editingValue.startsWith('=')) {
+        const sourceSheet = workbook.value.getSheetById(mgr.state.sourceSheetId ?? '')
+        const sourceSheetName = sourceSheet?.metadata?.name ?? 'Sheet1'
+        crossSheetReferencesMap.value = parseFormulaReferencesWithSheet(payload.editingValue, sourceSheetName)
+      } else {
+        crossSheetReferencesMap.value = new Map()
+      }
+    }
+    // 如果 source === 'formulaBar'，忽略（公式栏编辑时不应触发单元格编辑事件）
+  } else {
+    // 编辑结束
+    if (mgr.state.active && mgr.state.source === 'cell') {
+      log('editingStateChange', '单元格编辑结束')
+      mgr.reset()
+      crossSheetReferencesMap.value = new Map() // 清除公式引用
+    }
+  }
+  
+  // 更新公式栏 UI 状态
   formulaBarIsEditing.value = payload.isEditing
   formulaBarEditingValue.value = payload.editingValue
   if (payload.formulaReferences) {
@@ -196,39 +358,496 @@ function handleEditingStateChange(payload: {
   }
 }
 
+/** 处理双击请求编辑（在跨 Sheet 公式模式下触发） */
+function handleRequestEdit(payload: { row: number; col: number }) {
+  const mgr = formulaEditManager
+  
+  log('requestEdit', `双击单元格 [${payload.row},${payload.col}]`, {
+    active: mgr.state.active,
+    source: mgr.state.source,
+    isFormulaMode: mgr.state.isFormulaMode
+  })
+  
+  // 如果处于公式栏编辑公式模式，切换到单元格编辑
+  if (mgr.state.active && mgr.state.source === 'formulaBar' && mgr.state.isFormulaMode) {
+    log('requestEdit', '从公式栏切换到单元格编辑')
+    
+    // 切换编辑源
+    mgr.switchSource('cell')
+    
+    // 打开单元格 overlay，同步当前值
+    nextTick(() => {
+      // 选中目标单元格
+      canvasSheetRef.value?.selectCell?.(mgr.state.row, mgr.state.col)
+      // 打开 overlay 并设置当前编辑值
+      canvasSheetRef.value?.openOverlayWithValue?.(
+        mgr.state.row, 
+        mgr.state.col, 
+        mgr.state.currentValue
+      )
+    })
+  }
+}
+
 // ==================== 公式栏事件处理 ====================
+
+/**
+ * UI 动作执行器
+ * 将 FormulaEditManager 返回的动作转换为实际的 UI 操作
+ */
+function executeUIActions(actions: EditUIAction[]): void {
+  for (const action of actions) {
+    switch (action.type) {
+      case 'openOverlay':
+        log('executeAction', `打开 overlay [${action.row},${action.col}]`)
+        canvasSheetRef.value?.openOverlayWithValue?.(action.row, action.col, action.value)
+        break
+        
+      case 'closeOverlay':
+        log('executeAction', '关闭 overlay')
+        canvasSheetRef.value?.cancelEditing?.()
+        break
+        
+      case 'syncOverlayValue':
+        log('executeAction', `同步 overlay 值: ${action.value.substring(0, 30)}`)
+        canvasSheetRef.value?.setEditingValue?.(action.value)
+        break
+        
+      case 'focusFormulaBar':
+        log('executeAction', '聚焦公式栏')
+        formulaBarRef.value?.focus?.()
+        break
+        
+      case 'focusOverlay':
+        log('executeAction', '聚焦 overlay')
+        // overlay 焦点由其自身管理，这里不需要特殊处理
+        break
+        
+      case 'switchSheet':
+        log('executeAction', `切换 Sheet: ${action.sheetId}`)
+        workbook.value.setActiveSheet(action.sheetId)
+        break
+        
+      case 'selectCell':
+        log('executeAction', `选择单元格 [${action.row},${action.col}]`)
+        canvasSheetRef.value?.selectCell?.(action.row, action.col)
+        break
+        
+      case 'setCellValue':
+        log('executeAction', `设置单元格值 [${action.row},${action.col}]`)
+        canvasSheetRef.value?.setCellValue?.(action.row, action.col, action.value)
+        break
+        
+      case 'updateFormulaBarDisplay':
+        log('executeAction', `更新公式栏显示 [${action.row},${action.col}]`)
+        formulaBarCellValue.value = action.value
+        formulaBarRow.value = action.row
+        formulaBarCol.value = action.col
+        formulaBarEndRow.value = action.row
+        formulaBarEndCol.value = action.col
+        break
+    }
+  }
+}
+
+/**
+ * 重置公式栏 UI 状态
+ */
+function resetFormulaBarUI() {
+  formulaBarIsEditing.value = false
+  formulaBarEditingValue.value = ''
+  // 清空跨 Sheet 公式引用映射
+  crossSheetReferencesMap.value = new Map()
+}
 
 /** 公式栏 - 导航到单元格 */
 function handleFormulaBarNavigate(row: number, col: number) {
+  log('formulaBar', `导航到 [${row},${col}]`)
   canvasSheetRef.value?.selectCell?.(row, col)
 }
 
 /** 公式栏 - 选择范围 */
 function handleFormulaBarSelectRange(startRow: number, startCol: number, endRow: number, endCol: number) {
+  log('formulaBar', `选择范围 [${startRow},${startCol}] to [${endRow},${endCol}]`)
   canvasSheetRef.value?.selectRange?.(startRow, startCol, endRow, endCol)
 }
 
-/** 公式栏 - 开始编辑 */
+/** 公式栏 - 开始编辑（使用统一动作流程） */
 function handleFormulaBarStartEdit() {
-  canvasSheetRef.value?.startEditingCurrentCell?.()
+  log('formulaBar', '开始编辑', {
+    row: formulaBarRow.value,
+    col: formulaBarCol.value,
+    value: formulaBarCellValue.value?.substring(0, 30)
+  })
+  
+  const result = formulaEditManager.actionStartFormulaBarEdit({
+    sheetId: activeSheetId.value ?? '',
+    row: formulaBarRow.value,
+    col: formulaBarCol.value,
+    value: formulaBarCellValue.value
+  })
+  
+  if (result.success) {
+    executeUIActions(result.actions)
+    // 更新公式栏 UI
+    formulaBarIsEditing.value = true
+    formulaBarEditingValue.value = formulaBarCellValue.value
+    
+    // 初始化跨 Sheet 公式引用映射
+    const mgr = formulaEditManager
+    if (mgr.state.isFormulaMode) {
+      const activeSheet = workbook.value.getActiveSheet()
+      const sourceSheetName = activeSheet?.metadata?.name ?? 'Sheet1'
+      crossSheetReferencesMap.value = parseFormulaReferencesWithSheet(formulaBarCellValue.value, sourceSheetName)
+    }
+  }
 }
 
-/** 公式栏 - 确认 */
+/** 公式栏 - 焦点切换到公式栏（使用统一动作流程） */
+function handleFormulaBarFocus() {
+  log('formulaBar', '焦点切换')
+  
+  const result = formulaEditManager.actionSwitchToFormulaBar()
+  if (result.success) {
+    executeUIActions(result.actions)
+  }
+}
+
+/** 公式栏 - 确认（统一使用 confirmEditingWithDirection） */
 function handleFormulaBarConfirm() {
+  log('formulaBar', '确认编辑')
+  
+  const mgr = formulaEditManager
+  
+  // 如果代理层有活跃编辑
+  if (mgr.state.active && mgr.state.source === 'formulaBar') {
+    const value = mgr.state.currentValue
+    const row = mgr.state.row
+    const col = mgr.state.col
+    const sourceSheetId = mgr.state.sourceSheetId
+    
+    log('formulaBar', `确认成功`, { row, col, value: value.substring(0, 30), sourceSheetId })
+    
+    // 重置 FormulaEditManager 状态（先重置，避免切换 Sheet 时触发其他逻辑）
+    mgr.reset()
+    resetFormulaBarUI()
+    
+    // 检查是否需要切换回源 Sheet
+    if (sourceSheetId && sourceSheetId !== activeSheetId.value) {
+      log('formulaBar', `跨Sheet确认，切换回源Sheet: ${sourceSheetId}`)
+      // 先切换回源 Sheet
+      workbook.value.setActiveSheet(sourceSheetId)
+      // 等待 Sheet 切换完成后再保存
+      nextTick(() => {
+        canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'down', { row, col })
+      })
+    } else {
+      // 同 Sheet，直接保存
+      canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'down', { row, col })
+    }
+    return
+  }
+  
+  // 回退：通过 CanvasSheet 确认（兼容旧逻辑）
   canvasSheetRef.value?.confirmEditing?.()
 }
 
-/** 公式栏 - 取消 */
+/** 公式栏 - 取消（统一使用 cancelEditing） */
 function handleFormulaBarCancel() {
+  log('formulaBar', '取消编辑')
+  
+  const mgr = formulaEditManager
+  
+  // 如果代理层有活跃编辑
+  if (mgr.state.active && mgr.state.source === 'formulaBar') {
+    const sourceSheetId = mgr.state.sourceSheetId
+    
+    log('formulaBar', '取消成功', { sourceSheetId })
+    
+    // 重置 FormulaEditManager 状态（先重置，避免切换 Sheet 时触发其他逻辑）
+    mgr.reset()
+    resetFormulaBarUI()
+    
+    // 检查是否需要切换回源 Sheet
+    if (sourceSheetId && sourceSheetId !== activeSheetId.value) {
+      log('formulaBar', `跨Sheet取消，切换回源Sheet: ${sourceSheetId}`)
+      workbook.value.setActiveSheet(sourceSheetId)
+    }
+    
+    // 调用 CanvasSheet 执行取消
+    canvasSheetRef.value?.cancelEditing?.()
+    return
+  }
+  
+  // 回退：通过 CanvasSheet 取消（兼容旧逻辑）
   canvasSheetRef.value?.cancelEditing?.()
 }
 
-/** 公式栏 - 输入变化 */
-function handleFormulaBarInput(value: string) {
+/** 公式栏 - Tab 键确认并向右移动（统一使用 confirmEditingWithDirection） */
+function handleFormulaBarTab() {
+  log('formulaBar', 'Tab 确认编辑')
+  
+  const mgr = formulaEditManager
+  
+  // 如果代理层有活跃编辑
+  if (mgr.state.active && mgr.state.source === 'formulaBar') {
+    const value = mgr.state.currentValue
+    const row = mgr.state.row
+    const col = mgr.state.col
+    const sourceSheetId = mgr.state.sourceSheetId
+    
+    log('formulaBar', `Tab 确认成功`, { row, col, value: value.substring(0, 30), sourceSheetId })
+    
+    // 重置 FormulaEditManager 状态（先重置，避免切换 Sheet 时触发其他逻辑）
+    mgr.reset()
+    resetFormulaBarUI()
+    
+    // 检查是否需要切换回源 Sheet
+    if (sourceSheetId && sourceSheetId !== activeSheetId.value) {
+      log('formulaBar', `跨Sheet Tab确认，切换回源Sheet: ${sourceSheetId}`)
+      workbook.value.setActiveSheet(sourceSheetId)
+      nextTick(() => {
+        canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'right', { row, col })
+      })
+    } else {
+      canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'right', { row, col })
+    }
+    return
+  }
+  
+  // 回退：通过 CanvasSheet 处理
+  canvasSheetRef.value?.confirmEditing?.()
+}
+
+/** 公式栏 - 失焦时自动提交（统一使用 confirmEditingWithDirection） */
+function handleFormulaBarBlur() {
+  log('formulaBar', '失焦')
+  
+  const mgr = formulaEditManager
+  
+  // 如果代理层有活跃编辑
+  if (mgr.state.active && mgr.state.source === 'formulaBar') {
+    const value = mgr.state.currentValue
+    const row = mgr.state.row
+    const col = mgr.state.col
+    const sourceSheetId = mgr.state.sourceSheetId
+    
+    log('formulaBar', `失焦确认成功`, { row, col, value: value.substring(0, 30), sourceSheetId })
+    
+    // 重置 FormulaEditManager 状态（先重置，避免切换 Sheet 时触发其他逻辑）
+    mgr.reset()
+    resetFormulaBarUI()
+    
+    // 检查是否需要切换回源 Sheet
+    if (sourceSheetId && sourceSheetId !== activeSheetId.value) {
+      log('formulaBar', `跨Sheet失焦确认，切换回源Sheet: ${sourceSheetId}`)
+      workbook.value.setActiveSheet(sourceSheetId)
+      nextTick(() => {
+        canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'none', { row, col })
+      })
+    } else {
+      canvasSheetRef.value?.confirmEditingWithDirection?.(value, 'none', { row, col })
+    }
+    return
+  }
+  
+  // 回退：通过 CanvasSheet 确认
+  canvasSheetRef.value?.confirmEditing?.()
+}
+
+// ==================== Overlay (RichTextInput) 事件处理（统一使用 FormulaEditManager） ====================
+
+/** 单元格编辑器 - Enter 键确认并向下移动 */
+function handleOverlayEnter(payload: { row: number; col: number; value: string }) {
+  log('overlay', `Enter 确认编辑 [${payload.row},${payload.col}]`)
+  
+  const mgr = formulaEditManager
+  
+  // 更新 FormulaEditManager 状态
+  if (mgr.state.active && mgr.state.source === 'cell') {
+    mgr.updateValue(payload.value)
+  }
+  
+  // 调用 CanvasSheet 执行实际保存（包含 undo/redo 等完整逻辑）
+  canvasSheetRef.value?.confirmEditingWithDirection?.(payload.value, 'down')
+  
+  // 重置 FormulaEditManager 状态
+  mgr.reset()
+  resetFormulaBarUI()
+}
+
+/** 单元格编辑器 - Tab 键确认并向右移动 */
+function handleOverlayTab(payload: { row: number; col: number; value: string }) {
+  log('overlay', `Tab 确认编辑 [${payload.row},${payload.col}]`)
+  
+  const mgr = formulaEditManager
+  
+  // 更新 FormulaEditManager 状态
+  if (mgr.state.active && mgr.state.source === 'cell') {
+    mgr.updateValue(payload.value)
+  }
+  
+  // 调用 CanvasSheet 执行实际保存
+  canvasSheetRef.value?.confirmEditingWithDirection?.(payload.value, 'right')
+  
+  // 重置 FormulaEditManager 状态
+  mgr.reset()
+  resetFormulaBarUI()
+}
+
+/** 单元格编辑器 - Blur 失焦保存（不移动） */
+function handleOverlayBlur(payload: { row: number; col: number; value: string }) {
+  log('overlay', `Blur 保存 [${payload.row},${payload.col}]`)
+  
+  const mgr = formulaEditManager
+  
+  // 更新 FormulaEditManager 状态
+  if (mgr.state.active && mgr.state.source === 'cell') {
+    mgr.updateValue(payload.value)
+  }
+  
+  // 调用 CanvasSheet 执行实际保存
+  canvasSheetRef.value?.confirmEditingWithDirection?.(payload.value, 'none')
+  
+  // 重置 FormulaEditManager 状态
+  mgr.reset()
+  resetFormulaBarUI()
+}
+
+/** 单元格编辑器 - Escape 取消编辑 */
+function handleOverlayCancel(payload: { row: number; col: number }) {
+  log('overlay', `Cancel 取消编辑 [${payload.row},${payload.col}]`)
+  
+  const mgr = formulaEditManager
+  
+  // 调用 CanvasSheet 执行取消
+  canvasSheetRef.value?.cancelEditing?.()
+  
+  // 重置 FormulaEditManager 状态
+  mgr.reset()
+  resetFormulaBarUI()
+}
+
+/** 公式栏 - 输入变化（使用统一动作流程） */
+function handleFormulaBarInput(value: string, cursorPos?: number) {
+  log('formulaBar', `输入变化`, {
+    value: value.substring(0, 30),
+    cursorPos
+  })
+  
+  const mgr = formulaEditManager
+  
+  // 更新代理层状态
+  if (mgr.state.active && mgr.state.source === 'formulaBar') {
+    const result = mgr.actionInput(value, cursorPos)
+    
+    if (result.success) {
+      executeUIActions(result.actions)
+      
+      // 更新公式栏 UI
+      formulaBarEditingValue.value = value
+      formulaReferences.value = mgr.state.formulaReferences
+      
+      // 更新跨 Sheet 公式引用映射
+      if (mgr.state.isFormulaMode) {
+        const sourceSheet = workbook.value.getSheetById(mgr.state.sourceSheetId ?? '')
+        const sourceSheetName = sourceSheet?.metadata?.name ?? 'Sheet1'
+        crossSheetReferencesMap.value = parseFormulaReferencesWithSheet(value, sourceSheetName)
+      } else {
+        crossSheetReferencesMap.value = new Map()
+      }
+    }
+    return
+  }
+  
+  // 回退：通过 CanvasSheet 更新（兼容旧逻辑）
   canvasSheetRef.value?.setEditingValue?.(value)
 }
 
 // ==================== 跨 Sheet 共享状态 ====================
+
+/** 
+ * 跨 Sheet 公式引用映射（按 Sheet 名称分组）
+ * 当公式栏编辑公式时，解析公式中的所有引用并按 Sheet 分组
+ */
+const crossSheetReferencesMap = ref<SheetReferencesMap>(new Map())
+
+/** 
+ * 获取当前 Sheet 需要显示的公式引用
+ * 根据当前 Sheet 名称从 crossSheetReferencesMap 中获取对应的引用
+ * 支持所有编辑模式（单元格编辑和公式栏编辑）
+ */
+const currentSheetFormulaReferences = computed<FormulaReference[]>(() => {
+  const mgr = formulaEditManager
+  
+  // 任何编辑公式模式都显示公式引用
+  if (!mgr.state.active || !mgr.state.isFormulaMode) {
+    return []
+  }
+  
+  const activeSheet = workbook.value.getActiveSheet()
+  const currentSheetName = activeSheet?.metadata?.name ?? 'Sheet1'
+  
+  // 获取当前 Sheet 的引用
+  return getReferencesForSheet(crossSheetReferencesMap.value, currentSheetName)
+})
+
+/** 公式编辑状态（传递给 CanvasSheet 用于公式引用高亮和跨 Sheet 选区处理） */
+const crossSheetFormulaState = computed(() => {
+  const mgr = formulaEditManager
+  
+  // 任何编辑公式模式都返回状态（单元格编辑或公式栏编辑）
+  if (!mgr.state.active || !mgr.state.isFormulaMode) {
+    return null
+  }
+  
+  // 获取当前 Sheet 名称（用于生成跨 Sheet 引用）
+  const activeSheet = workbook.value.getActiveSheet()
+  const currentSheetName = activeSheet?.metadata?.name ?? 'Sheet1'
+  
+  // 判断是否在源 Sheet 上
+  const isOnSourceSheet = mgr.state.sourceSheetId === activeSheetId.value
+  
+  // 只有公式栏编辑模式才支持跨 Sheet 操作
+  const isFormulaBarMode = mgr.state.source === 'formulaBar'
+  
+  if (isOnSourceSheet || !isFormulaBarMode) {
+    // 在源 Sheet 上，或者是单元格编辑模式：只传递公式引用，不隐藏选区
+    return {
+      active: false,  // 不激活跨 Sheet 模式（不隐藏选区）
+      sourceSheetId: mgr.state.sourceSheetId ?? '',
+      currentSheetName,
+      selectionColor: undefined,
+      // 当前 Sheet 需要显示的公式引用
+      formulaReferences: currentSheetFormulaReferences.value
+    }
+  }
+  
+  // 公式栏编辑模式且在其他 Sheet 上：激活跨 Sheet 模式
+  return {
+    active: true,
+    sourceSheetId: mgr.state.sourceSheetId ?? '',
+    currentSheetName,
+    selectionColor: '#4285f4', // 蓝色高亮
+    // 当前 Sheet 需要显示的公式引用
+    formulaReferences: currentSheetFormulaReferences.value
+  }
+})
+
+/** 跨 Sheet 模式下公式栏名称框显示的源 Sheet 名称 */
+const formulaBarSourceSheetName = computed(() => {
+  const mgr = formulaEditManager
+  // 只有跨 Sheet 模式时才返回源 Sheet 名称
+  if (!mgr.state.active || 
+      mgr.state.source !== 'formulaBar' || 
+      !mgr.state.isFormulaMode ||
+      mgr.state.sourceSheetId === activeSheetId.value) {
+    return ''
+  }
+  // 获取源 Sheet 名称
+  const sourceSheet = workbook.value.getSheetById(mgr.state.sourceSheetId ?? '')
+  return sourceSheet?.metadata?.name ?? ''
+})
 
 /** 跨 Sheet 格式刷状态 */
 const crossSheetFormatPainter = ref<{
@@ -316,6 +935,13 @@ onMounted(() => {
   setupEventListeners()
   // 在捕获阶段监听键盘事件，以便在 CanvasSheet 处理之前拦截 undo/redo
   document.addEventListener('keydown', handleGlobalKeyDown, true)
+  
+  // 设置 FormulaBar 引用到 CanvasSheet
+  nextTick(() => {
+    if (canvasSheetRef.value && formulaBarRef.value) {
+      canvasSheetRef.value.setFormulaBarRef?.(formulaBarRef.value)
+    }
+  })
 })
 
 onBeforeUnmount(() => {
@@ -421,6 +1047,9 @@ function syncSheetData() {
   nextTick(() => {
     if (!canvasSheetRef.value) return
     
+    // 设置 FormulaBar 引用，让 CanvasSheet 可以访问 FormulaBar 实例
+    canvasSheetRef.value.setFormulaBarRef?.(formulaBarRef.value)
+    
     // 恢复格式刷状态
     if (crossSheetFormatPainter.value.mode !== 'off' && crossSheetFormatPainter.value.data) {
       canvasSheetRef.value.setFormatPainterState?.(crossSheetFormatPainter.value)
@@ -491,11 +1120,68 @@ function saveCurrentSheetState() {
 
 /** 切换工作表 */
 function handleSheetChange(sheetId: string) {
-  // 先保存当前 Sheet 的状态
-  saveCurrentSheetState()
+  log('sheetChange', `切换到 ${sheetId}`, {
+    currentSheetId: activeSheetId.value,
+    formulaEditActive: formulaEditManager.state.active,
+    formulaEditSource: formulaEditManager.state.source,
+    isFormulaMode: formulaEditManager.state.isFormulaMode
+  })
   
-  // 切换到新的 Sheet
-  workbook.value.setActiveSheet(sheetId)
+  const mgr = formulaEditManager
+  
+  // 情况1：未在编辑 → 正常切换
+  if (!mgr.state.active) {
+    log('sheetChange', '未在编辑，正常切换')
+    saveCurrentSheetState()
+    workbook.value.setActiveSheet(sheetId)
+    return
+  }
+  
+  // 情况2：单元格编辑 → 结束编辑后切换
+  if (mgr.state.source === 'cell') {
+    log('sheetChange', '单元格编辑中，结束编辑后切换')
+    canvasSheetRef.value?.confirmEditing?.()
+    saveCurrentSheetState()
+    workbook.value.setActiveSheet(sheetId)
+    return
+  }
+  
+  // 情况3：公式栏编辑
+  if (mgr.state.source === 'formulaBar') {
+    if (mgr.state.isFormulaMode) {
+      // 检查是否处于可选取引用的状态
+      if (!mgr.state.isInSelectableState) {
+        // 不在可选取状态 → 提交内容并退出编辑
+        log('sheetChange', '公式栏公式编辑，但不在可选取状态，提交后切换')
+        handleFormulaBarConfirm()
+        saveCurrentSheetState()
+        workbook.value.setActiveSheet(sheetId)
+      } else {
+        // 在可选取状态 → 进入跨 Sheet 模式（只切换显示，不结束编辑）
+        log('sheetChange', '公式栏公式编辑，进入跨Sheet模式')
+        // 保存当前光标位置（在切换前设置待恢复位置）
+        const cursorPos = formulaBarRef.value?.getCursorPosition() ?? mgr.state.cursorPosition
+        formulaBarRef.value?.setPendingCursorPosition(cursorPos)
+        
+        mgr.switchSheet(sheetId)
+        saveCurrentSheetState()
+        // 设置标志，跳过切换后的首次选区变化（避免自动插入引用）
+        skipNextSelectionChange = true
+        workbook.value.setActiveSheet(sheetId)
+        // 不调用 mgr.confirmEdit()，保持编辑状态
+        // 在下一帧恢复公式栏焦点
+        nextTick(() => {
+          formulaBarRef.value?.focus()
+        })
+      }
+    } else {
+      // 非公式模式 → 确认编辑后切换
+      log('sheetChange', '公式栏非公式编辑，确认后切换')
+      handleFormulaBarConfirm()
+      saveCurrentSheetState()
+      workbook.value.setActiveSheet(sheetId)
+    }
+  }
 }
 
 /** 添加工作表 */

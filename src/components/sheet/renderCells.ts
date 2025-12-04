@@ -9,6 +9,36 @@ import { getRowHeight, getColWidth, getRowTop, getColLeft } from './geometry'
 import { renderCellImage } from './renderCellImage'
 
 /**
+ * 将 HEX 颜色转换为带透明度的 RGBA
+ * @param hex HEX 颜色（支持 #RGB, #RRGGBB）
+ * @param alpha 透明度 (0-1)
+ * @returns RGBA 字符串
+ */
+function hexToRgba(hex: string, alpha: number): string {
+  // 移除 # 前缀
+  const cleanHex = hex.replace('#', '')
+  
+  let r: number, g: number, b: number
+  
+  if (cleanHex.length === 3) {
+    // 短格式 #RGB
+    const r0 = cleanHex.charAt(0)
+    const g0 = cleanHex.charAt(1)
+    const b0 = cleanHex.charAt(2)
+    r = parseInt(r0 + r0, 16)
+    g = parseInt(g0 + g0, 16)
+    b = parseInt(b0 + b0, 16)
+  } else {
+    // 长格式 #RRGGBB
+    r = parseInt(cleanHex.substring(0, 2), 16)
+    g = parseInt(cleanHex.substring(2, 4), 16)
+    b = parseInt(cleanHex.substring(4, 6), 16)
+  }
+  
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/**
  * Build Canvas font string from CellStyle
  * @param style Cell style object
  * @returns CSS font string (e.g., "italic bold 14px Arial")
@@ -319,6 +349,10 @@ export interface CellsRenderConfig {
   endRow: number
   startCol: number
   endCol: number
+  /** 跨 Sheet 选区高亮颜色（用于公式栏跨 Sheet 引用） */
+  crossSheetSelectionColor?: string
+  /** 是否隐藏默认选区（跨 Sheet 公式模式下不显示默认选中单元格） */
+  hideDefaultSelection?: boolean
 }
 
 /**
@@ -743,8 +777,18 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   // 只有当选区包含多个单元格时才绘制背景遮罩，单个单元格（活动单元格）不需要遮罩
   const isSingleCellSelection = selectionRange.startRow === selectionRange.endRow && 
                                  selectionRange.startCol === selectionRange.endCol
-  if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0 && !isSingleCellSelection) {
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)'
+  
+  // 跨 Sheet 公式模式使用自定义颜色
+  const selectionFillColor = config.crossSheetSelectionColor 
+    ? hexToRgba(config.crossSheetSelectionColor, 0.15)
+    : 'rgba(59, 130, 246, 0.1)'
+  const selectionBorderColor = config.crossSheetSelectionColor || '#3b82f6'
+  
+  // 如果隐藏默认选区，跳过选区绘制
+  if (config.hideDefaultSelection) {
+    // 跨 Sheet 公式模式：不绘制默认选区，等待用户主动点击选择
+  } else if (selectionRange.startRow >= 0 && selectionRange.startCol >= 0 && !isSingleCellSelection) {
+    ctx.fillStyle = selectionFillColor
     
     // 记录已绘制的合并区域，避免重复绘制
     const drawnMergedRegions = new Set<string>()
@@ -785,14 +829,14 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     const sy = colHeaderHeight + getRowTop(selectionRange.startRow, sizes, geometryConfig) - viewport.scrollTop
     const ex = rowHeaderWidth + getColLeft(selectionRange.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
     const ey = colHeaderHeight + getRowTop(selectionRange.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
-    ctx.strokeStyle = '#3b82f6'
+    ctx.strokeStyle = selectionBorderColor
     ctx.lineWidth = 2
     ctx.strokeRect(sx + 0.5, sy + 0.5, ex - sx - 1, ey - sy - 1)
   }
 
   // Highlight single selection
   // 如果选中的单元格在合并区域内，且选择范围已经覆盖整个合并区域，则不绘制额外的单选框
-  if (selected.row >= 0 && selected.col >= 0) {
+  if (selected.row >= 0 && selected.col >= 0 && !config.hideDefaultSelection) {
     const mergeInfo = getMergedCellInfo?.(selected.row, selected.col)
     const isInMergedRegion = mergeInfo?.isMerged
     
@@ -809,7 +853,7 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       const sy = colHeaderHeight + getRowTop(selected.row, sizes, geometryConfig) - viewport.scrollTop
       const colWidth = getColWidth(selected.col, sizes, geometryConfig)
       const rowHeight = getRowHeight(selected.row, sizes, geometryConfig)
-      ctx.strokeStyle = '#3b82f6'
+      ctx.strokeStyle = selectionBorderColor
       ctx.lineWidth = 2
       ctx.strokeRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
     }

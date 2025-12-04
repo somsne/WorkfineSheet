@@ -14,7 +14,8 @@ import { handleWheel, handleScrollbarDrag, startVerticalDrag, startHorizontalDra
 import { handleDoubleClick as handleDoubleClickHelper, isClickInsideOverlay } from '../overlay'
 import { handleContextMenu, handleInputDialogConfirm as handleInputDialogConfirmHelper, type ContextMenuConfig } from '../uiMenus'
 import { applyFormats } from '../formatPainter'
-import { parseFormulaReferences } from '../references'
+import { parseAllFormulaReferences } from '../references'
+import { formatCrossSheetReference } from '../formulaEditState'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { SheetInput } from './useSheetInput'
@@ -28,6 +29,14 @@ export interface ClipboardOperations {
   onPaste: () => Promise<void>
 }
 
+/** 跨 Sheet 公式状态 */
+export interface CrossSheetFormulaState {
+  active: boolean
+  sourceSheetId: string
+  currentSheetName: string  // 当前 Sheet 名称（用于生成跨 Sheet 引用）
+  selectionColor?: string
+}
+
 export interface UseSheetMouseOptions {
   state: SheetState
   geometry: SheetGeometry
@@ -38,9 +47,13 @@ export interface UseSheetMouseOptions {
   fillHandle?: FillHandleComposable
   /** 剪贴板操作（可选，用于右键菜单） */
   clipboardOps?: ClipboardOperations
+  /** 跨 Sheet 公式状态（可选，用于处理公式栏编辑时的双击行为） */
+  crossSheetFormulaState?: CrossSheetFormulaState | null
+  /** 请求编辑回调（在跨 Sheet 公式模式下双击时调用） */
+  onRequestEdit?: (row: number, col: number) => void
 }
 
-export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle, clipboardOps }: UseSheetMouseOptions) {
+export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle, clipboardOps, crossSheetFormulaState, onRequestEdit }: UseSheetMouseOptions) {
   const {
     constants,
     container, overlayInput, formulaBarInput,
@@ -95,6 +108,87 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
   
   // 标记是否刚刚完成填充柄拖拽（用于阻止随后的 click 事件）
   let justFinishedFillHandleDrag = false
+  
+  // 公式引用选择模式状态
+  let formulaReferenceMode: {
+    active: boolean
+    editor: any  // RichTextInput 或 FormulaBar 实例
+    isFormulaBarActive: boolean
+    isCrossSheetMode: boolean  // 是否是跨 Sheet 模式
+    editingRow: number  // 正在编辑的单元格行
+    editingCol: number  // 正在编辑的单元格列
+    // 引用选区（不影响 active 单元格）
+    refStartRow: number
+    refStartCol: number
+    refEndRow: number
+    refEndCol: number
+    isDragging: boolean  // 是否正在拖拽选择引用区域
+  } = {
+    active: false,
+    editor: null,
+    isFormulaBarActive: false,
+    isCrossSheetMode: false,
+    editingRow: -1,
+    editingCol: -1,
+    refStartRow: -1,
+    refStartCol: -1,
+    refEndRow: -1,
+    refEndCol: -1,
+    isDragging: false
+  }
+  
+  /**
+   * 插入公式引用
+   * 提取为独立函数，供 mousedown 和 mouseup 调用
+   */
+  function insertFormulaReference(
+    activeEditor: any,
+    isCrossSheet: boolean,
+    startRow: number,
+    startCol: number,
+    endRow: number,
+    endCol: number
+  ): void {
+    // 检查起始单元格的合并区域
+    const startRegion = model.getMergedRegion(startRow, startCol)
+    
+    // 判断是否是范围选择
+    const isRangeSelection = (startRow !== endRow || startCol !== endCol)
+    
+    // 生成引用地址
+    let reference: string
+    if (isCrossSheet && crossSheetFormulaState?.currentSheetName) {
+      // 跨 Sheet 模式：生成 Sheet2!A1 或 Sheet2!A1:B2 格式
+      const sheetName = crossSheetFormulaState.currentSheetName
+      if (isRangeSelection) {
+        reference = formatCrossSheetReference(sheetName, startRow, startCol, endRow, endCol)
+      } else if (startRegion && (startRegion.endRow > startRegion.startRow || startRegion.endCol > startRegion.startCol)) {
+        reference = formatCrossSheetReference(sheetName, startRegion.startRow, startRegion.startCol, startRegion.endRow, startRegion.endCol)
+      } else {
+        reference = formatCrossSheetReference(sheetName, startRow, startCol)
+      }
+    } else {
+      // 同 Sheet 模式：生成 A1 或 A1:B2 格式
+      if (isRangeSelection) {
+        const startAddr = formulaSheet.getCellAddress(startRow, startCol)
+        const endAddr = formulaSheet.getCellAddress(endRow, endCol)
+        reference = `${startAddr}:${endAddr}`
+      } else if (startRegion && (startRegion.endRow > startRegion.startRow || startRegion.endCol > startRegion.startCol)) {
+        const startAddr = formulaSheet.getCellAddress(startRegion.startRow, startRegion.startCol)
+        const endAddr = formulaSheet.getCellAddress(startRegion.endRow, startRegion.endCol)
+        reference = `${startAddr}:${endAddr}`
+      } else {
+        reference = formulaSheet.getCellAddress(startRow, startCol)
+      }
+    }
+    
+    // 插入引用（直接使用完整的引用字符串）
+    const newText = activeEditor.insertCellReference?.(reference) ?? ''
+    
+    // 插入引用后立即更新公式引用高亮（使用返回的新文本）
+    const valueForParsing = newText || activeEditor.getCurrentValue?.() || ''
+    formulaReferences.value = parseAllFormulaReferences(valueForParsing)
+  }
   
   /**
    * 处理点击事件
@@ -326,17 +420,127 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 点击左上角
     if (x < constants.ROW_HEADER_WIDTH && y < constants.COL_HEADER_HEIGHT) return
     
-    // 检查是否在 FormulaBar 公式编辑模式
+    // 重置公式引用选择模式
+    formulaReferenceMode = {
+      active: false,
+      editor: null,
+      isFormulaBarActive: false,
+      isCrossSheetMode: false,
+      editingRow: -1,
+      editingCol: -1,
+      refStartRow: -1,
+      refStartCol: -1,
+      refEndRow: -1,
+      refEndCol: -1,
+      isDragging: false
+    }
+    
+    // 检查是否在公式编辑模式（FormulaBar 或 RichTextInput）
     const activeElement = document.activeElement as HTMLElement | null
     const isFormulaBarActive = activeElement?.closest('.formula-bar') !== null
     const formulaBarInstance = formulaBarInput.value as any
+    const overlayInputInstance = overlayInput.value as any
     
-    if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
-      e.preventDefault()
+    // 判断活动的编辑器
+    let activeEditor: any = null
+    let isFormulaMode = false
+    let editingRow = -1
+    let editingCol = -1
+    let isCrossSheetMode = false
+    
+    // 检查跨 Sheet 公式模式（优先级最高）
+    if (crossSheetFormulaState?.active && formulaBarInstance) {
+      // 跨 Sheet 模式：FormulaBar 在另一个 Sheet 编辑公式，当前 Sheet 用于选择引用
+      activeEditor = formulaBarInstance
+      isFormulaMode = true
+      isCrossSheetMode = true
+      // 跨 Sheet 模式下，编辑的单元格在源 Sheet，这里设为 -1 表示不在当前 Sheet
+      editingRow = -1
+      editingCol = -1
+    } else if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
+      activeEditor = formulaBarInstance
+      isFormulaMode = true
+      editingRow = selected.row
+      editingCol = selected.col
+    } else if (overlay.visible && overlayInputInstance?.formulaMode) {
+      activeEditor = overlayInputInstance
+      isFormulaMode = true
+      editingRow = overlay.row
+      editingCol = overlay.col
     }
     
-    // 检查编辑框
-    if (overlay.visible && overlayInput.value) {
+    // 公式编辑模式处理
+    if (activeEditor && isFormulaMode) {
+      e.preventDefault()
+      
+      const isSelectable = activeEditor?.isInSelectableState ?? false
+      const hasSelection = activeEditor?.hasTextSelection ?? false
+      
+      // 计算点击的单元格
+      const clickedRow = getRowAtY(y)
+      const clickedCol = getColAtX(x)
+      
+      // 检查是否点击了正在编辑的单元格（跨 Sheet 模式下 editingRow=-1，不会命中）
+      const clickedSelf = !isCrossSheetMode && (clickedRow === editingRow && clickedCol === editingCol)
+      if (clickedSelf) {
+        // 点击自身，不处理（允许在编辑器内选择文本）
+        return
+      }
+      
+      // 跨 Sheet 模式或者在可选择状态
+      if (isCrossSheetMode || isSelectable || hasSelection) {
+        // 计算点击的单元格（考虑合并单元格）
+        let refRow = clickedRow
+        let refCol = clickedCol
+        let refEndRow = clickedRow
+        let refEndCol = clickedCol
+        const mergedRegion = model.getMergedRegion(clickedRow, clickedCol)
+        if (mergedRegion) {
+          refRow = mergedRegion.startRow
+          refCol = mergedRegion.startCol
+          refEndRow = mergedRegion.endRow
+          refEndCol = mergedRegion.endCol
+        }
+        
+        // 设置公式引用选择模式（不修改 active 单元格）
+        formulaReferenceMode = {
+          active: true,
+          editor: activeEditor,
+          isFormulaBarActive,
+          isCrossSheetMode,
+          editingRow,
+          editingCol,
+          refStartRow: refRow,
+          refStartCol: refCol,
+          refEndRow: refEndRow,
+          refEndCol: refEndCol,
+          isDragging: true
+        }
+        
+        // 立即插入引用（与普通单元格选择行为一致）
+        insertFormulaReference(activeEditor, isCrossSheetMode, refRow, refCol, refEndRow, refEndCol)
+        
+        onDraw()
+        return
+      } else {
+        // 不在可选择状态，保存并退出编辑
+        const currentValue = activeEditor?.getCurrentValue?.() ?? ''
+        
+        if (overlay.visible) {
+          formulaSheet.setValue(overlay.row, overlay.col, currentValue)
+          overlay.visible = false
+        } else {
+          // FormulaBar 模式，保存到当前选中的单元格
+          formulaSheet.setValue(selected.row, selected.col, currentValue)
+        }
+        
+        formulaReferences.value = []
+        // 继续正常的单元格选择流程
+      }
+    }
+    
+    // 检查编辑框（非公式模式）
+    if (overlay.visible && overlayInput.value && !formulaReferenceMode.active) {
       
       const inputElement = (overlayInput.value as any).getInputElement?.()
       
@@ -355,11 +559,6 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         })) {
           return
         }
-      }
-      
-      if ((overlayInput.value as any).formulaMode) {
-        e.preventDefault()
-      } else {
       }
     }
     
@@ -447,6 +646,13 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     if (mergedRegion) {
       row = mergedRegion.startRow
       col = mergedRegion.startCol
+    }
+    
+    // 🔑 关键：如果处于跨 Sheet 公式模式，发送 request-edit 事件
+    // 让 WorkbookSheet 决定是切换编辑源还是其他处理
+    if (crossSheetFormulaState?.active && onRequestEdit) {
+      onRequestEdit(row, col)
+      return
     }
     
     selected.row = row
@@ -572,7 +778,26 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     
     container.value.style.cursor = cursor
     
-    // 拖拽选择
+    // 公式引用选择拖拽
+    if (formulaReferenceMode.active && formulaReferenceMode.isDragging) {
+      const refRow = getRowAtY(y)
+      const refCol = getColAtX(x)
+      
+      // 考虑合并单元格
+      const mergedRegion = model.getMergedRegion(refRow, refCol)
+      if (mergedRegion) {
+        formulaReferenceMode.refEndRow = mergedRegion.endRow
+        formulaReferenceMode.refEndCol = mergedRegion.endCol
+      } else {
+        formulaReferenceMode.refEndRow = refRow
+        formulaReferenceMode.refEndCol = refCol
+      }
+      
+      scheduleRedraw()
+      return
+    }
+    
+    // 普通拖拽选择
     const changed = updateDragSelection({
       x,
       y,
@@ -632,117 +857,50 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       return
     }
     
-    if (!dragState.isDragging) {
+    // 公式引用选择模式处理（在 mousedown 中已插入初始引用）
+    if (formulaReferenceMode.active && formulaReferenceMode.editor) {
+      const activeEditor = formulaReferenceMode.editor
+      const isCrossSheet = formulaReferenceMode.isCrossSheetMode
+      
+      // 从 formulaReferenceMode 获取引用选区
+      const startRow = Math.min(formulaReferenceMode.refStartRow, formulaReferenceMode.refEndRow)
+      const startCol = Math.min(formulaReferenceMode.refStartCol, formulaReferenceMode.refEndCol)
+      const endRow = Math.max(formulaReferenceMode.refStartRow, formulaReferenceMode.refEndRow)
+      const endCol = Math.max(formulaReferenceMode.refStartCol, formulaReferenceMode.refEndCol)
+      
+      // 检查是否通过拖拽扩展了范围（与初始位置不同）
+      const initialStartRow = formulaReferenceMode.refStartRow
+      const initialStartCol = formulaReferenceMode.refStartCol
+      const hasRangeExpanded = (startRow !== initialStartRow || startCol !== initialStartCol ||
+                                endRow !== initialStartRow || endCol !== initialStartCol) &&
+                               (startRow !== endRow || startCol !== endCol)
+      
+      // 只有在拖拽扩展了范围时才更新引用
+      if (hasRangeExpanded) {
+        insertFormulaReference(activeEditor, isCrossSheet, startRow, startCol, endRow, endCol)
+      }
+      
+      // 重置公式引用选择模式
+      formulaReferenceMode = {
+        active: false,
+        editor: null,
+        isFormulaBarActive: false,
+        isCrossSheetMode: false,
+        editingRow: -1,
+        editingCol: -1,
+        refStartRow: -1,
+        refStartCol: -1,
+        refEndRow: -1,
+        refEndCol: -1,
+        isDragging: false
+      }
+      
+      onDraw()
       return
     }
     
-    // 检查是否在公式编辑模式（RichTextInput 或 FormulaBar）
-    const overlayInputInstance = overlayInput.value as any
-    const formulaBarInstance = formulaBarInput.value as any
-    
-    // 判断当前活动的编辑器是哪个
-    const activeElement = document.activeElement as HTMLElement | null
-    const isFormulaBarActive = activeElement?.closest('.formula-bar') !== null
-    
-    // 选择活动的编辑器实例
-    let activeEditor: any = null
-    let isFormulaMode = false
-    
-    if (isFormulaBarActive && formulaBarInstance?.formulaMode) {
-      activeEditor = formulaBarInstance
-      isFormulaMode = true
-    } else if (overlay.visible && overlayInputInstance?.formulaMode) {
-      activeEditor = overlayInputInstance
-      isFormulaMode = true
-    }
-    
-    if (activeEditor && isFormulaMode) {
-      const isSelectable = activeEditor?.isInSelectableState ?? false
-      const hasSelection = activeEditor?.hasTextSelection ?? false
-      
-      // 如果是 FormulaBar 模式，检查点击的是否是正在编辑的单元格
-      if (isFormulaBarActive) {
-        // FormulaBar 模式：overlay 可能不可见，使用 selected 来判断
-        const clickedSelf = (dragState.startRow === selected.row && dragState.startCol === selected.col)
-        if (clickedSelf) {
-          state.clearDragState()
-          return
-        }
-      } else {
-        // RichTextInput 模式
-        const clickedSelf = (dragState.startRow === overlay.row && dragState.startCol === overlay.col)
-        if (clickedSelf) {
-          return
-        }
-      }
-      
-      if (!isSelectable && !hasSelection) {
-        // 不在可选择状态，保存并退出编辑
-        const currentValue = activeEditor?.getCurrentValue?.() ?? ''
-        
-        if (overlay.visible) {
-          formulaSheet.setValue(overlay.row, overlay.col, currentValue)
-          overlay.visible = false
-        } else {
-          // FormulaBar 模式，保存到当前选中的单元格
-          formulaSheet.setValue(selected.row, selected.col, currentValue)
-        }
-        
-        formulaReferences.value = []
-        
-        selected.row = dragState.startRow
-        selected.col = dragState.startCol
-        state.clearSelectionRange()
-        state.clearDragState()
-        
-        onDraw()
-        return
-      }
-      
-      // 插入引用
-      const startRegion = model.getMergedRegion(dragState.startRow, dragState.startCol)
-      
-      let isActualDrag = false
-      if (startRegion) {
-        isActualDrag = (
-          dragState.currentRow < startRegion.startRow ||
-          dragState.currentRow > startRegion.endRow ||
-          dragState.currentCol < startRegion.startCol ||
-          dragState.currentCol > startRegion.endCol
-        )
-      } else {
-        isActualDrag = (
-          dragState.startRow !== dragState.currentRow ||
-          dragState.startCol !== dragState.currentCol
-        )
-      }
-      
-      let newText = ''
-      if (isActualDrag) {
-        const startAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
-        const endAddr = formulaSheet.getCellAddress(dragState.currentRow, dragState.currentCol)
-        newText = activeEditor.insertRangeReference(startAddr, endAddr)
-      } else if (startRegion && (startRegion.endRow > startRegion.startRow || startRegion.endCol > startRegion.startCol)) {
-        const startAddr = formulaSheet.getCellAddress(startRegion.startRow, startRegion.startCol)
-        const endAddr = formulaSheet.getCellAddress(startRegion.endRow, startRegion.endCol)
-        newText = activeEditor.insertRangeReference(startAddr, endAddr)
-      } else {
-        const cellAddr = formulaSheet.getCellAddress(dragState.startRow, dragState.startCol)
-        newText = activeEditor.insertCellReference(cellAddr)
-      }
-      
-      // 插入引用后立即更新公式引用高亮（使用返回的新文本）
-      const valueForParsing = newText || activeEditor.getCurrentValue?.() || ''
-      formulaReferences.value = parseFormulaReferences(valueForParsing)
-      
-      if (!isFormulaBarActive) {
-        selected.row = overlay.row
-        selected.col = overlay.col
-      }
-      state.clearSelectionRange()
-      state.clearDragState()
-      
-      onDraw()
+    // 普通拖拽选择检查
+    if (!dragState.isDragging) {
       return
     }
     

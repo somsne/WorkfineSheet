@@ -13,14 +13,22 @@ import { getSelectionRangeText as getSelectionText } from '../selection'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { FillHandleComposable } from './useFillHandle'
+import type { FormulaReference } from '../types'
 
 export interface UseSheetDrawingOptions {
   state: SheetState
   geometry: SheetGeometry
   fillHandle?: FillHandleComposable
+  /** 获取跨 Sheet 公式状态（用于选区高亮颜色和跨 Sheet 公式引用） */
+  getCrossSheetFormulaState?: () => { 
+    active: boolean
+    sourceSheetId: string
+    selectionColor?: string
+    formulaReferences?: FormulaReference[]
+  } | null | undefined
 }
 
-export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawingOptions) {
+export function useSheetDrawing({ state, geometry, fillHandle, getCrossSheetFormulaState }: UseSheetDrawingOptions) {
   const { 
     constants,
     container, gridCanvas, contentCanvas,
@@ -138,6 +146,17 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     
     const { startRow, endRow, startCol, endCol } = getVisibleRange(w, h)
     
+    // 获取跨 Sheet 公式状态
+    const crossSheetState = getCrossSheetFormulaState?.()
+    
+    // 决定使用哪个公式引用列表
+    // 如果有跨 Sheet 状态（正在公式栏编辑公式），则使用其公式引用（按当前 Sheet 名称过滤后的）
+    // 即使为空数组也不应该回退到本地（因为本地可能是其他 Sheet 的引用）
+    // 只有当没有跨 Sheet 状态时，才使用本地的 formulaReferences（单元格编辑模式）
+    const effectiveFormulaReferences = crossSheetState?.formulaReferences !== undefined
+      ? crossSheetState.formulaReferences
+      : formulaReferences.value
+
     const cellsConfig: CellsRenderConfig = {
       containerWidth: w,
       containerHeight: h,
@@ -148,7 +167,7 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       copyRange,
       marchingAntsOffset: marchingAntsOffset.value,
       dragState,
-      formulaReferences: formulaReferences.value,
+      formulaReferences: effectiveFormulaReferences,
       sizes: createSizeAccess(),
       geometryConfig: createGeometryConfig(),
       getCellValue: (r, c) => formulaSheet.getFormattedValue(r, c),
@@ -164,7 +183,11 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
       endCol,
       // 单元格内嵌图片
       getCellDisplayImage: (r, c) => model.getCellDisplayImage(r, c),
-      getCellImageCount: (r, c) => model.getCellImageCount(r, c)
+      getCellImageCount: (r, c) => model.getCellImageCount(r, c),
+      // 跨 Sheet 选区高亮颜色
+      crossSheetSelectionColor: crossSheetState?.active ? crossSheetState.selectionColor : undefined,
+      // 跨 Sheet 公式模式下隐藏默认选区（等待用户主动点击选择）
+      hideDefaultSelection: crossSheetState?.active ?? false
     }
     
     renderCells(ctx, cellsConfig)
@@ -297,8 +320,12 @@ export function useSheetDrawing({ state, geometry, fillHandle }: UseSheetDrawing
     drawCells(w, h)
     drawGrid(w, h)
     
-    // 绘制填充柄和预览
-    if (fillHandle) {
+    // 获取跨 Sheet 公式状态（用于判断是否隐藏填充柄）
+    const crossSheetState = getCrossSheetFormulaState?.()
+    const hideForCrossSheet = crossSheetState?.active ?? false
+    
+    // 绘制填充柄和预览（跨 Sheet 公式模式下不显示）
+    if (fillHandle && !hideForCrossSheet) {
       fillHandle.updateFillHandlePosition()
       const ctx = contentCanvas.value!.getContext('2d')!
       fillHandle.drawFillHandle(ctx)

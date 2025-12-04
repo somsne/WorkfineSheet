@@ -4,8 +4,8 @@
  */
 
 import { nextTick, watch } from 'vue'
-import { openOverlay as openOverlayHelper, closeOverlay, getNextCellAfterSave } from '../overlay'
-import { parseFormulaReferences } from '../references'
+import { openOverlay as openOverlayHelper, closeOverlay, getNextCellAfterSave, getNextCellRight } from '../overlay'
+import { parseAllFormulaReferences } from '../references'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 
@@ -21,9 +21,11 @@ export interface UseSheetInputOptions {
   onDraw: () => void
   /** 可选的 UndoRedo 执行器，如果提供则使用它而不是 state.undoRedo */
   undoRedoExecutor?: UndoRedoExecutor
+  /** 单元格值变化回调（删除内容后调用，用于更新 FormulaBar） */
+  onCellValueChange?: () => void
 }
 
-export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: UseSheetInputOptions) {
+export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor, onCellValueChange }: UseSheetInputOptions) {
   const {
     constants,
     overlayInput, imeProxy,
@@ -77,7 +79,7 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
     // 🔧 关键修复：如果初始值是公式，立即初始化公式引用
     // 这样编辑已有公式的单元格时，高亮边框会立即显示
     if (initialValue.startsWith('=')) {
-      formulaReferences.value = parseFormulaReferences(initialValue)
+      formulaReferences.value = parseAllFormulaReferences(initialValue)
     } else {
       formulaReferences.value = []
     }
@@ -86,18 +88,45 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
   }
   
   /**
-   * 保存编辑内容
-   * @param val 要保存的值
-   * @param moveToNext 保存后是否移动到下一个单元格（默认 true）
+   * 移动方向类型
    */
-  function onOverlaySave(val: string, moveToNext: boolean = true) {
-    // 如果 overlay 已经关闭，直接返回（防止重复调用）
-    if (!overlay.visible) {
+  type MoveDirection = 'down' | 'right' | 'none'
+  
+  /**
+   * 保存操作参数
+   */
+  interface SaveOptions {
+    /** 可选的目标行（默认使用 selected.row，即当前活动单元格） */
+    row?: number
+    /** 可选的目标列（默认使用 selected.col，即当前活动单元格） */
+    col?: number
+  }
+  
+  /**
+   * 核心保存逻辑（内部使用）
+   * 
+   * 设计说明：
+   * - row/col 优先使用传入值，否则使用 selected（当前活动单元格）
+   * - selected 是 Sheet 的核心状态，FormulaBar 和 Overlay 都响应它
+   * - overlay.row/col 只用于 overlay 的定位，不作为数据源
+   * 
+   * @param val 要保存的值
+   * @param direction 保存后移动方向
+   * @param options 可选参数（row/col）
+   */
+  function saveAndMove(val: string, direction: MoveDirection, options?: SaveOptions) {
+    // 使用传入的 row/col 或从 selected（当前活动单元格）获取
+    const row = options?.row ?? selected.row
+    const col = options?.col ?? selected.col
+    
+    // 验证 row/col 是否有效
+    if (row < 0 || col < 0) {
+      console.warn('[useSheetInput] saveAndMove: invalid row/col', { row, col, selected: { row: selected.row, col: selected.col } })
       return
     }
     
-    const row = overlay.row
-    const col = overlay.col
+    // 如果 overlay 可见，需要关闭它
+    const shouldCloseOverlay = overlay.visible
     const oldValue = formulaSheet.getDisplayValue(row, col)
     
     // 检查是否需要进行日期格式转换
@@ -129,7 +158,7 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
     // 自动调整行高（仅当设置了自动换行且用户未手动设置行高时）
     const cellStyle = model.getCellStyle(row, col)
     const isWrapText = cellStyle.wrapText ?? false
-    const isManualRowHeight = manualRowHeights.value.has(row)  // 用户是否手动设置了行高
+    const isManualRowHeight = manualRowHeights.value.has(row)
     
     if (isWrapText && !isManualRowHeight && val) {
       const colWidth = getColWidth(col)
@@ -141,24 +170,67 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
       }
     }
     
-    // 关闭覆盖层
-    Object.assign(overlay, closeOverlay())
+    // 关闭覆盖层（如果可见）
+    if (shouldCloseOverlay) {
+      Object.assign(overlay, closeOverlay())
+    }
     formulaReferences.value = []
     
-    if (moveToNext) {
-      // 使用覆盖层模块计算下一个单元格位置
-      const nextCell = getNextCellAfterSave(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
+    // 根据方向移动到下一个单元格
+    if (direction !== 'none') {
+      const nextCell = direction === 'down'
+        ? getNextCellAfterSave(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
+        : getNextCellRight(row, col, constants.DEFAULT_ROWS, constants.DEFAULT_COLS)
+      
+      // 同步更新 selected 和 selectionRange（保持一致性）
       selected.row = nextCell.row
       selected.col = nextCell.col
-      
-      // 清除区域选择
-      state.clearSelectionRange()
+      selectionRange.startRow = nextCell.row
+      selectionRange.startCol = nextCell.col
+      selectionRange.endRow = nextCell.row
+      selectionRange.endCol = nextCell.col
     }
     
     onDraw()
     
     // 编辑完成后，聚焦 IME 代理以便继续输入
     focusImeProxy()
+  }
+  
+  /**
+   * Enter 键保存编辑内容并向下移动
+   * @param val 要保存的值
+   * @param options 可选参数（row/col，用于从 FormulaBar 编辑时传入）
+   */
+  function onOverlayEnter(val: string, options?: SaveOptions) {
+    saveAndMove(val, 'down', options)
+  }
+  
+  /**
+   * Tab 键保存编辑内容并向右移动
+   * @param val 要保存的值
+   * @param options 可选参数（row/col，用于从 FormulaBar 编辑时传入）
+   */
+  function onOverlayTab(val: string, options?: SaveOptions) {
+    saveAndMove(val, 'right', options)
+  }
+  
+  /**
+   * 失焦保存编辑内容（不移动）
+   * @param val 要保存的值
+   * @param options 可选参数（row/col，用于从 FormulaBar 编辑时传入）
+   */
+  function onOverlayBlur(val: string, options?: SaveOptions) {
+    saveAndMove(val, 'none', options)
+  }
+  
+  /**
+   * 保存编辑内容（兼容旧 API）
+   * @param val 要保存的值
+   * @param moveToNext 保存后是否移动到下一个单元格（默认 true，向下移动）
+   */
+  function onOverlaySave(val: string, moveToNext: boolean = true) {
+    saveAndMove(val, moveToNext ? 'down' : 'none')
   }
   
   /**
@@ -402,6 +474,8 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
         checkAndClearCopyRange(selected.row, selected.col)
         formulaSheet.setValue(selected.row, selected.col, '')
         onDraw()
+        // 通知 FormulaBar 更新
+        onCellValueChange?.()
       }
       return
     }
@@ -452,6 +526,9 @@ export function useSheetInput({ state, geometry, onDraw, undoRedoExecutor }: Use
     // Overlay 方法
     openOverlay,
     onOverlaySave,
+    onOverlayEnter,
+    onOverlayTab,
+    onOverlayBlur,
     onOverlayCancel,
     
     // IME 方法

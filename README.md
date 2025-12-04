@@ -9,18 +9,24 @@
 **在线演示**: [https://somsne.github.io/WorkfineSheet/](https://somsne.github.io/WorkfineSheet/)
 
 **项目**: 基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组件  
-**特点**: 🎯 模块化架构 · 📝 Excel 公式支持 · 🎨 单元格样式 · ✅ 完整测试覆盖 · 🤖 100%由AI生成  
-**状态**: 🟢 核心功能完成 · 🎨 样式系统 100% · 687 个单元测试全部通过
+**特点**: 🎯 模块化架构 · 📝 Excel 公式支持 · 🎨 单元格样式 · ✅ 完整测试覆盖 · 🤖 99%由AI生成  
+**状态**: 🟢 核心功能完成 · 🎨 样式系统 100% · 📝 公式编辑代理层开发中 · 827+ 单元测试全部通过
 
 ---
 
-## � 项目亮点
+## 🎯 项目亮点
 
 ### 代码质量
-- ✅ **模块化架构**: 14 个独立模块，职责清晰
+- ✅ **模块化架构**: 16 个独立模块，职责清晰
 - ✅ **样式系统**: 12 种样式属性，支持中英文自动换行和文字旋转
 - ✅ **类型安全**: TypeScript 严格模式，零类型错误
-- ✅ **测试覆盖**: 687 个单元测试，100% 通过率
+- ✅ **测试覆盖**: 827+ 单元测试，100% 通过率
+
+### 公式编辑系统（开发中）
+- 🔧 **FormulaEditManager**: 统一的公式编辑状态代理层
+- ✅ **FormulaBar 集成**: 公式栏完整功能支持
+- ✅ **跨 Sheet 引用**: 支持 `=Sheet2!A1` 格式公式
+- 🔧 **CellOverlay 重构**: 下一步将重构单元格编辑器为纯展示层
 
 ### 性能优化
 - ⚡ **Canvas 渲染**: 比 DOM 性能提升 10 倍以上
@@ -104,6 +110,8 @@ npm run test
 - **[refactor-progress.md](./refactor-progress.md)** - 详细的重构进度跟踪
 
 ### 🔥 最新功能
+- **[docs/features/FORMULA_EDITING_SYSTEM.md](./docs/features/FORMULA_EDITING_SYSTEM.md)** - 公式编辑系统架构文档（FormulaEditManager 代理层）
+- **[docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md](./docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md)** - CellOverlay 重构方案研究
 - **[docs/P0.1-CHECKLIST.md](./docs/P0.1-CHECKLIST.md)** - 单元格样式系统开发进度（100% 完成）
 - **[DEMO_STYLES.md](./DEMO_STYLES.md)** - 单元格样式演示数据说明
 - **[docs/RICHTEXTINPUT_COMPLETE.md](./docs/RICHTEXTINPUT_COMPLETE.md)** - RichTextInput 富文本编辑器完成报告
@@ -125,7 +133,7 @@ npm run test
 ### 🎯 电子表格功能
 - ✅ **公式计算**: 支持 100+ Excel 函数 (SUM, VLOOKUP, IF 等)
 - ✅ **单元格引用**: 相对引用 (A1)、绝对引用 ($A$1)、范围引用 (A1:B2)
-- ✅ **公式编辑**: 可视化单元格选择、彩色引用边框
+- ✅ **公式编辑**: 可视化单元格选择、彩色引用边框、跨 Sheet 引用支持
 - ✅ **单元格样式**: 字体大小/颜色、粗体/斜体/下划线/删除线、对齐方式、背景色、文字旋转、自动换行
 - ✅ **边框设置**: 所有边框/外边框/上下左右边框、多种边框样式（细线/中等/粗线/虚线/点线/双线）、自定义边框颜色
 - ✅ **单元格格式**: 数字、日期、百分比、货币等10+种格式
@@ -136,10 +144,11 @@ npm run test
 - ✅ **隐藏功能**: 隐藏行列、网格线开关
 
 ### 🏗️ 架构优势
-- ✅ **模块化设计**: 14 个独立模块，职责清晰
+- ✅ **模块化设计**: 16 个独立模块，职责清晰
+- ✅ **公式编辑代理层**: FormulaEditManager 统一管理编辑状态
 - ✅ **样式系统**: 12 种样式属性，完整的渲染支持
 - ✅ **类型安全**: 完整的 TypeScript 类型定义
-- ✅ **测试覆盖**: 687 个单元测试，100% 通过率
+- ✅ **测试覆盖**: 827+ 单元测试，100% 通过率
 - ✅ **性能优化**: Canvas 渲染、虚拟滚动、帧调度
 
 ### 🚧 待开发功能
@@ -172,7 +181,7 @@ npm run test
 - 🖨️ **打印输出** - 打印预览与设置
 - 📊 **透视表** - 数据透视分析
 - 🔍 **缩放功能** - 视图缩放控制
-- 📑 **多 Sheet 公式兼容** - 跨工作表引用
+- 📑 **多 Sheet 公式兼容** - 跨工作表引用 **（基础功能已完成）**
 - 💡 **Excel 公式自动补全** - 公式智能提示
 
 #### 🎁 可选增强（未来规划）
@@ -186,33 +195,36 @@ npm run test
 
 ## 🏗️ 项目架构
 
-### 模块化设计（14 个核心模块）
+### 模块化设计（16 个核心模块）
 ```
 src/components/sheet/
-├─ types.ts          # 类型定义
-├─ geometry.ts       # 几何计算（行列位置、尺寸）
-├─ renderCore.ts     # 渲染核心（Canvas 设置、帧调度）
-├─ renderGrid.ts     # 网格渲染（表头、网格线）
-├─ renderCells.ts    # 单元格渲染（内容、选择、引用边框）
-├─ scrollbar.ts      # 滚动条管理
-├─ references.ts     # 公式引用解析
-├─ selection.ts      # 选择与拖拽
-├─ overlay.ts        # 编辑覆盖层
-├─ clipboard.ts      # 剪贴板处理（CSV 解析、Excel 互操作）
-├─ rowcol.ts         # 行列操作（插入、删除、调整）
-├─ uiMenus.ts        # 上下文菜单
-├─ events.ts         # 事件管理器
-└─ api.ts            # 公共 API
+├─ types.ts              # 类型定义
+├─ geometry.ts           # 几何计算（行列位置、尺寸）
+├─ renderCore.ts         # 渲染核心（Canvas 设置、帧调度）
+├─ renderGrid.ts         # 网格渲染（表头、网格线）
+├─ renderCells.ts        # 单元格渲染（内容、选择、引用边框）
+├─ scrollbar.ts          # 滚动条管理
+├─ references.ts         # 公式引用解析
+├─ selection.ts          # 选择与拖拽
+├─ overlay.ts            # 编辑覆盖层
+├─ clipboard.ts          # 剪贴板处理（CSV 解析、Excel 互操作）
+├─ rowcol.ts             # 行列操作（插入、删除、调整）
+├─ uiMenus.ts            # 上下文菜单
+├─ events.ts             # 事件管理器
+├─ api.ts                # 公共 API
+├─ formulaEditState.ts   # 公式编辑状态管理（代理层）⭐ 新增
+└─ formulaEditUtils.ts   # 公式编辑工具函数 ⭐ 新增
 
 lib/
-├─ FormulaEngine.ts  # 公式计算引擎（100+ 函数）
-├─ FormulaSheet.ts   # 公式表格封装
-├─ SheetModel.ts     # 数据模型（支持单元格样式存储）
-├─ UndoRedoManager.ts # 撤销重做管理
-└─ demoData.ts       # 演示数据（展示所有样式功能）
+├─ FormulaEngine.ts      # 公式计算引擎（100+ 函数）
+├─ FormulaSheet.ts       # 公式表格封装
+├─ SheetModel.ts         # 数据模型（支持单元格样式存储）
+├─ Workbook.ts           # 工作簿管理（多 Sheet、视图状态）
+├─ UndoRedoManager.ts    # 撤销重做管理
+└─ demoData.ts           # 演示数据（展示所有样式功能）
 
 types/
-└─ CellStyle.ts      # 单元格样式类型定义（12 种属性）
+└─ CellStyle.ts          # 单元格样式类型定义（12 种属性）
 ```
 
 **设计原则**:
@@ -235,8 +247,8 @@ npm run test:coverage # 生成覆盖率报告
 ```
 
 **测试统计**:
-- ✅ **测试文件**: 19 个
-- ✅ **测试用例**: 687 个
+- ✅ **测试文件**: 21 个
+- ✅ **测试用例**: 827+ 个
 - ✅ **通过率**: 100%
 - ✅ **执行时间**: ~2.0s
 
@@ -253,6 +265,8 @@ npm run test:coverage # 生成覆盖率报告
 - `formatValue.spec.ts` - 单元格格式化（数字、日期、百分比、货币）
 - `fillHandle.spec.ts` - 填充柄功能（模式识别、值生成、公式调整）
 - `UndoRedoManager.spec.ts` - 撤销重做（跨 Sheet 操作、选区恢复）
+- `formulaEditState.spec.ts` - 公式编辑状态管理（79+ 用例）⭐ 新增
+- `formulaEditUtils.spec.ts` - 公式编辑工具函数（51 用例）⭐ 新增
 - `performance.spec.ts` - 性能基准测试
 - `ime-utils.spec.ts` - 中文输入法支持
 
@@ -283,11 +297,13 @@ npm run test:coverage # 生成覆盖率报告
 ```
 
 ### 重构成果
-- **模块架构**: 1 个组件 → 14 个独立模块
+- **模块架构**: 1 个组件 → 16 个独立模块
+- **公式编辑**: FormulaEditManager 代理层，统一管理编辑状态
 - **样式系统**: 12 种样式属性渲染完成（字体、颜色、对齐、背景、旋转、换行）
 - **单元格格式**: 数字、日期、百分比、货币等 10+ 种格式
 - **合并单元格**: 合并/取消合并、边框收集与分发、Excel 行为兼容
-- **测试覆盖**: 0 → 687 个单元测试（19 个测试文件），100% 通过率
+- **跨 Sheet 引用**: 支持 `=Sheet2!A1` 格式公式
+- **测试覆盖**: 0 → 827+ 单元测试（21 个测试文件），100% 通过率
 - **文档完善**: 新增 40+ 个文档文件
 - **构建状态**: ✅ 零错误（302.89 kB, gzip: 95.81 kB）
 - **类型检查**: ✅ 完全通过 TypeScript 严格模式

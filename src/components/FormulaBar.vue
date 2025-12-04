@@ -9,16 +9,18 @@
  */
 
 import { ref, computed, nextTick, watch } from 'vue'
-
-/**
- * 公式引用信息
- */
-interface FormulaReference {
-  ref: string       // 如 "A1" 或 "B2:C5"
-  color: string     // 如 "#4472C4"
-  startIndex: number
-  endIndex: number
-}
+import type { FormulaReferenceTextIndex } from './sheet/formulaEditUtils'
+import {
+  FORMULA_OPERATORS,
+  generateFormulaHtmlFromRefs,
+  getEditorCursorPosition,
+  setEditorCursorPosition,
+  getEditorTextContent,
+  hasTextSelection as hasTextSelectionUtil,
+  parseKeyAction,
+  preventKeyDefault,
+  isInSelectablePosition
+} from './sheet/formulaEditUtils'
 
 // Props
 interface Props {
@@ -37,14 +39,17 @@ interface Props {
   /** 编辑中的值 */
   editingValue?: string
   /** 公式引用列表（用于彩色高亮） */
-  formulaReferences?: FormulaReference[]
+  formulaReferences?: FormulaReferenceTextIndex[]
+  /** 跨 Sheet 模式时的源 Sheet 名称（用于名称框显示） */
+  sourceSheetName?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   endRow: -1,
   endCol: -1,
   editingValue: '',
-  formulaReferences: () => []
+  formulaReferences: () => [],
+  sourceSheetName: ''
 })
 
 // Emits
@@ -59,8 +64,14 @@ const emit = defineEmits<{
   (e: 'confirm'): void
   /** 取消编辑 */
   (e: 'cancel'): void
-  /** 输入值变化 */
-  (e: 'input', value: string): void
+  /** Tab 键确认并向右移动 */
+  (e: 'tab'): void
+  /** 失焦确认（非公式选择模式） */
+  (e: 'blur'): void
+  /** 输入值变化（包含光标位置） */
+  (e: 'input', value: string, cursorPosition: number): void
+  /** 获得焦点（用于编辑源切换） */
+  (e: 'focus'): void
 }>()
 
 // ==================== 名称框 ====================
@@ -138,9 +149,38 @@ function parseRangeAddress(address: string): { startRow: number; startCol: numbe
 }
 
 /**
+ * 格式化 Sheet 名称（如需要则添加引号）
+ */
+function formatSheetName(name: string): string {
+  const needsQuotes = /[\s'!\[\]]/.test(name)
+  if (needsQuotes) {
+    return `'${name.replace(/'/g, "''")}'`
+  }
+  return name
+}
+
+/**
  * 名称框显示的地址
+ * - 跨 Sheet 模式：显示 Sheet1!A1 格式（源单元格）
+ * - 普通模式：显示 A1 或 A1:B5 格式
  */
 const displayAddress = computed(() => {
+  // 跨 Sheet 模式：显示源 Sheet 的单元格地址
+  if (props.sourceSheetName && props.isEditing) {
+    const startAddr = getCellAddress(props.row, props.col)
+    const formattedName = formatSheetName(props.sourceSheetName)
+    
+    // 检查是否有范围选择
+    if (props.endRow >= 0 && props.endCol >= 0 && 
+        (props.endRow !== props.row || props.endCol !== props.col)) {
+      const endAddr = getCellAddress(props.endRow, props.endCol)
+      return `${formattedName}!${startAddr}:${endAddr}`
+    }
+    
+    return `${formattedName}!${startAddr}`
+  }
+  
+  // 普通模式
   const startAddr = getCellAddress(props.row, props.col)
   
   // 检查是否有范围选择
@@ -232,18 +272,37 @@ const formulaInputRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
 /** 标记是否是从 FormulaBar 发起的输入（避免循环更新） */
 const isLocalInput = ref(false)
+/** 待恢复的光标位置（用于跨 Sheet 切换时保持光标） */
+const pendingCursorPosition = ref<number | null>(null)
 
 // 公式编辑相关状态
 const isInSelectableState = ref(false)
 const lastOperatorPos = ref(-1)
-const hasTextSelection = ref(false)
+const hasTextSelectionState = ref(false)
 const cursorPos = ref(0)
 
-// Excel 风格引用选择：操作符列表
-const OPERATORS = ['(', '=', '+', '-', '*', '/', '&', ',', ':', '<', '>', '^', '%']
+// ==================== 以下常量已迁移到 formulaEditUtils.ts ====================
+// @deprecated OPERATORS - 使用 FORMULA_OPERATORS
+// @deprecated CELL_REF_REGEX - 使用 formulaEditUtils 中的版本
 
-// 单元格引用正则表达式
-const CELL_REF_REGEX = /\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/g
+/**
+ * 公式输入区失焦处理
+ * - 如果是公式模式，不触发保存（与 RichTextInput 行为一致）
+ * - 否则触发确认
+ */
+function handleFormulaBlur() {
+  // 如果不在编辑状态，不处理
+  if (!props.isEditing) return
+  
+  // 公式模式不自动保存（与 RichTextInput 保持一致）
+  // 用户可能在点击单元格选择引用，或者在公式中间编辑
+  if (isFormula.value) {
+    return
+  }
+  
+  // 其他情况，触发确认
+  emit('blur')
+}
 
 /**
  * 显示的值（编辑时显示编辑值，否则显示单元格值）
@@ -263,133 +322,30 @@ const isFormula = computed(() => {
   return typeof value === 'string' && value.startsWith('=')
 })
 
-/**
- * HTML 转义
- */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
+// ==================== 以下方法已迁移到 formulaEditUtils.ts ====================
 
 /**
- * 生成带颜色高亮的公式 HTML
+ * @deprecated 使用 formulaEditUtils.escapeHtml
+ * HTML 转义 - 保留用于向后兼容，后期删除
  */
-function generateFormulaHtml(text: string): string {
-  if (!text) return '\u200B'
-  
-  // 非公式或无引用时，返回普通文本
-  if (!isFormula.value || !props.formulaReferences || props.formulaReferences.length === 0) {
-    return escapeHtml(text)
-  }
-  
-  // 构建字符级别的颜色数组
-  const colors: (string | null)[] = new Array(text.length).fill(null)
-  
-  for (const ref of props.formulaReferences) {
-    const startIdx = Math.max(0, Math.min(ref.startIndex, text.length))
-    const endIdx = Math.max(0, Math.min(ref.endIndex, text.length))
-    
-    for (let i = startIdx; i < endIdx; i++) {
-      colors[i] = ref.color
-    }
-  }
-  
-  // 生成 HTML
-  let html = ''
-  let i = 0
-  while (i < text.length) {
-    const color = colors[i]
-    if (color) {
-      let j = i
-      while (j < text.length && colors[j] === color) {
-        j++
-      }
-      const segment = text.slice(i, j)
-      html += `<span style="color: ${color};">${escapeHtml(segment)}</span>`
-      i = j
-    } else {
-      let j = i
-      while (j < text.length && !colors[j]) {
-        j++
-      }
-      const segment = text.slice(i, j)
-      html += escapeHtml(segment)
-      i = j
-    }
-  }
-  
-  return html || '\u200B'
-}
+// function escapeHtml(text: string): string { ... }
+
+// ==================== 以下方法已迁移到 formulaEditUtils.ts ====================
 
 /**
- * 获取光标位置
+ * @deprecated 使用 getEditorCursorPosition
+ * 获取光标位置 - 保留包装函数用于向后兼容
  */
 function getCursorPosition(): number {
-  try {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || !formulaInputRef.value) return 0
-    
-    const range = selection.getRangeAt(0)
-    const preCaretRange = range.cloneRange()
-    preCaretRange.selectNodeContents(formulaInputRef.value)
-    preCaretRange.setEnd(range.endContainer, range.endOffset)
-    
-    return preCaretRange.toString().length
-  } catch {
-    return 0
-  }
+  return getEditorCursorPosition(formulaInputRef.value)
 }
 
 /**
- * 设置光标位置
+ * @deprecated 使用 setEditorCursorPosition
+ * 设置光标位置 - 保留包装函数用于向后兼容
  */
 function setCursorPosition(position: number) {
-  if (!formulaInputRef.value) return
-  
-  try {
-    const selection = window.getSelection()
-    if (!selection) return
-    
-    const range = document.createRange()
-    
-    // 遍历节点找到正确的位置
-    let charCount = 0
-    const textNodes: Text[] = []
-    
-    function collectTextNodes(node: Node) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        textNodes.push(node as Text)
-      } else {
-        node.childNodes.forEach(collectTextNodes)
-      }
-    }
-    collectTextNodes(formulaInputRef.value)
-    
-    
-    for (const textNode of textNodes) {
-      const nodeLength = textNode.length
-      if (charCount + nodeLength >= position) {
-        range.setStart(textNode, position - charCount)
-        range.collapse(true)
-        selection.removeAllRanges()
-        selection.addRange(range)
-        return
-      }
-      charCount += nodeLength
-    }
-    
-    // 如果位置超出，设置到末尾
-    if (textNodes.length > 0) {
-      const lastNode = textNodes[textNodes.length - 1]!
-      range.setStart(lastNode, lastNode.length)
-      range.collapse(true)
-      selection.removeAllRanges()
-      selection.addRange(range)
-    }
-  } catch (e) {
-  }
+  setEditorCursorPosition(formulaInputRef.value, position)
 }
 
 /**
@@ -410,8 +366,16 @@ function updateEditorContent(preserveCursor: boolean = true, forceUpdate: boolea
     return
   }
   
-  const currentPos = preserveCursor && hasFocus ? getCursorPosition() : displayValue.value.length
-  const html = generateFormulaHtml(displayValue.value)
+  // 优先使用待恢复的光标位置（跨 Sheet 切换时设置）
+  let targetCursorPos: number
+  if (pendingCursorPosition.value !== null) {
+    targetCursorPos = pendingCursorPosition.value
+    pendingCursorPosition.value = null // 清除待恢复位置
+  } else {
+    targetCursorPos = preserveCursor && hasFocus ? getCursorPosition() : displayValue.value.length
+  }
+  
+  const html = generateFormulaHtmlFromRefs(displayValue.value, props.formulaReferences, isFormula.value)
   
   
   // 检查 HTML 是否真的需要更新
@@ -420,7 +384,12 @@ function updateEditorContent(preserveCursor: boolean = true, forceUpdate: boolea
     
     // 立即恢复光标位置（不要等 nextTick，因为那样可能太晚）
     if (preserveCursor && hasFocus && props.isEditing) {
-      setCursorPosition(currentPos)
+      setCursorPosition(targetCursorPos)
+    }
+  } else if (pendingCursorPosition.value === null && targetCursorPos !== getCursorPosition()) {
+    // HTML 没变但需要恢复光标位置（跨 Sheet 切换后）
+    if (hasFocus && props.isEditing) {
+      setCursorPosition(targetCursorPos)
     }
   }
 }
@@ -450,7 +419,7 @@ watch(() => props.cellValue, () => {
 // 初始化时设置内容（非编辑状态）
 watch(() => formulaInputRef.value, (el) => {
   if (el && !props.isEditing) {
-    el.innerHTML = generateFormulaHtml(displayValue.value)
+    el.innerHTML = generateFormulaHtmlFromRefs(displayValue.value, props.formulaReferences, isFormula.value)
   }
 }, { immediate: true })
 
@@ -490,6 +459,8 @@ function handleFormulaInputClick(_e: MouseEvent) {
   } else {
     // 已经在编辑状态，确保焦点在 FormulaBar
     formulaInputRef.value?.focus()
+    // 通知父组件焦点已切换到 FormulaBar
+    emit('focus')
   }
 }
 
@@ -499,7 +470,8 @@ function handleFormulaInputClick(_e: MouseEvent) {
 function handleFormulaInput() {
   if (isComposing.value) return
   
-  const text = formulaInputRef.value?.innerText ?? ''
+  // 使用通用函数获取文本（自动移除零宽空格）
+  const text = getEditorTextContent(formulaInputRef.value)
   // 更新光标位置
   const newCursorPos = getCursorPosition()
   cursorPos.value = newCursorPos
@@ -507,14 +479,13 @@ function handleFormulaInput() {
   // 标记为本地输入，避免后续的 watch 触发内容更新导致光标跳动
   // 这个标志会保持到下一个事件循环，确保所有 watch 都被跳过
   isLocalInput.value = true
-  emit('input', text)
+  emit('input', text, newCursorPos)
   
   // 立即更新可选择状态（不等 nextTick，因为鼠标点击可能立即发生）
   updateSelectableState()
   
-  // 更新文本选择状态
-  const selection = window.getSelection()
-  hasTextSelection.value = !!(selection && !selection.isCollapsed)
+  // 更新文本选择状态（使用通用函数）
+  hasTextSelectionState.value = hasTextSelectionUtil()
   
   // 在下一个事件循环重置标志（确保所有同步的 watch 都已执行完）
   setTimeout(() => {
@@ -524,25 +495,33 @@ function handleFormulaInput() {
 
 /**
  * 公式输入区键盘事件
+ * 使用 parseKeyAction 统一解析键盘事件
  */
 function handleFormulaKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.altKey) {
-    e.preventDefault()
-    emit('confirm')
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    emit('cancel')
-  }
+  const action = parseKeyAction(e, 'formulaBar')
   
-  // 导航键：更新光标位置和可选择状态
-  const navigationKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
-  if (navigationKeys.includes(e.key)) {
-    nextTick(() => {
-      cursorPos.value = getCursorPosition()
-      updateSelectableState()
-      const selection = window.getSelection()
-      hasTextSelection.value = !!(selection && !selection.isCollapsed)
-    })
+  if (action) {
+    preventKeyDefault(e, action)
+    
+    switch (action.type) {
+      case 'confirm':
+        emit('confirm')
+        break
+      case 'confirmAndMoveRight':
+        emit('tab')
+        break
+      case 'cancel':
+        emit('cancel')
+        break
+      case 'navigation':
+        // 导航键：更新光标位置和可选择状态
+        nextTick(() => {
+          cursorPos.value = getCursorPosition()
+          updateSelectableState()
+          hasTextSelectionState.value = hasTextSelectionUtil()
+        })
+        break
+    }
   }
 }
 
@@ -575,49 +554,29 @@ function handleCancel() {
 
 /**
  * 更新可选择状态
- * 当光标在操作符后面时，进入可选择状态
+ * 使用 formulaEditUtils.isInSelectablePosition
  * @param textOverride 可选，覆盖使用的文本
  * @param posOverride 可选，覆盖使用的光标位置
  */
 function updateSelectableState(textOverride?: string, posOverride?: number) {
   // 使用传入的值或从 DOM/state 获取
-  const text = (textOverride ?? formulaInputRef.value?.innerText ?? displayValue.value).replace(/\u200B/g, '')
+  const text = getEditorTextContent(formulaInputRef.value) || textOverride || displayValue.value
   const pos = posOverride ?? cursorPos.value
-  const isFormulaText = text?.startsWith('=') ?? false
   
-  if (!isFormulaText) {
-    isInSelectableState.value = false
-    lastOperatorPos.value = -1
-    return
-  }
+  // 使用通用函数判断
+  isInSelectableState.value = isInSelectablePosition(text, pos)
   
-  // 检查光标前一个字符是否是操作符
-  if (pos > 0 && text) {
-    const prevChar = text.charAt(pos - 1)
-    if (prevChar && OPERATORS.includes(prevChar)) {
-      isInSelectableState.value = true
-      lastOperatorPos.value = pos - 1
-      return
-    }
-  }
-  
-  // 检查从最后一个操作符到光标之间是否只有空格或者是单元格引用
-  if (text) {
+  // 更新 lastOperatorPos（用于插入引用时的位置计算）
+  if (isInSelectableState.value && text) {
     for (let i = pos - 1; i >= 0; i--) {
       const char = text.charAt(i)
-      if (char && OPERATORS.includes(char)) {
-        const between = text.substring(i + 1, pos)
-        if (/^\s*$/.test(between) || /^\s*\$?[A-Z]*\$?\d*$/.test(between)) {
-          isInSelectableState.value = true
-          lastOperatorPos.value = i
-          return
-        }
-        break
+      if (char && FORMULA_OPERATORS.includes(char)) {
+        lastOperatorPos.value = i
+        return
       }
     }
   }
-  
-  isInSelectableState.value = false
+  lastOperatorPos.value = -1
 }
 
 // 为了向后兼容，创建别名
@@ -626,22 +585,44 @@ function updateSelectableStateWithText(text: string, pos: number) {
 }
 
 /**
- * 查找光标位置要替换的引用
+ * @deprecated 使用 formulaEditUtils.findReferenceToReplace
+ * 查找光标位置要替换的引用 - 暂时保留，因为有特殊的 lastOperatorPos 逻辑
  */
 function findReferenceToReplace(): { start: number; end: number; ref: string } | null {
-  const text = (formulaInputRef.value?.innerText ?? displayValue.value).replace(/\u200B/g, '')
+  const text = getEditorTextContent(formulaInputRef.value) || displayValue.value
   const isFormulaText = text?.startsWith('=') ?? false
   if (!isFormulaText) return null
   
   const pos = cursorPos.value
   
-  CELL_REF_REGEX.lastIndex = 0
+  // 匹配跨 Sheet 引用和普通引用
+  // 跨 Sheet: 'Sheet Name'!A1:B2 或 SheetName!A1:B2
+  // 普通: A1:B2 或 A1
+  const crossSheetRegex = /(?:'[^']+'|[A-Za-z\u4e00-\u9fa5_][A-Za-z0-9\u4e00-\u9fa5_]*)!\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/gi
+  const simpleRegex = /\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/gi
   
+  // 先尝试匹配跨 Sheet 引用（更长的匹配优先）
+  crossSheetRegex.lastIndex = 0
   let match: RegExpExecArray | null
-  while ((match = CELL_REF_REGEX.exec(text)) !== null) {
+  while ((match = crossSheetRegex.exec(text)) !== null) {
     const start = match.index
     const end = start + match[0].length
     if (pos >= start && pos <= end) {
+      return { start, end, ref: match[0] }
+    }
+  }
+  
+  // 再尝试匹配普通引用
+  simpleRegex.lastIndex = 0
+  while ((match = simpleRegex.exec(text)) !== null) {
+    const start = match.index
+    const end = start + match[0].length
+    if (pos >= start && pos <= end) {
+      // 检查这个匹配是否是跨 Sheet 引用的一部分（已被上面处理）
+      // 通过检查前面是否有 ! 来判断
+      if (start > 0 && text[start - 1] === '!') {
+        continue // 跳过，这是跨 Sheet 引用的一部分
+      }
       return { start, end, ref: match[0] }
     }
   }
@@ -656,8 +637,8 @@ function findReferenceToReplace(): { start: number; end: number; ref: string } |
 function insertCellReference(ref: string): string {
   if (!formulaInputRef.value) return displayValue.value
   
-  // 获取当前文本（移除零宽空格）
-  const text = (formulaInputRef.value.innerText ?? displayValue.value).replace(/\u200B/g, '')
+  // 使用通用函数获取当前文本
+  const text = getEditorTextContent(formulaInputRef.value) || displayValue.value
   const pos = cursorPos.value
   
   
@@ -682,7 +663,7 @@ function insertCellReference(ref: string): string {
   
   
   // 直接更新 formulaInputRef 的内容（立即生效）
-  const html = generateFormulaHtml(newText)
+  const html = generateFormulaHtmlFromRefs(newText, props.formulaReferences, isFormula.value)
   formulaInputRef.value.innerHTML = html
   
   // 更新光标位置
@@ -690,7 +671,7 @@ function insertCellReference(ref: string): string {
   
   // 发送更新到父组件
   isLocalInput.value = true
-  emit('input', newText)
+  emit('input', newText, newCursorPos)
   
   nextTick(() => {
     if (formulaInputRef.value) {
@@ -717,13 +698,13 @@ function insertRangeReference(startAddr: string, endAddr: string): string {
 
 /**
  * 获取当前值
+ * 使用通用函数获取文本
  */
 function getCurrentValue(): string {
   // 优先返回 formulaInputRef 的实际内容（最新的输入）
-  // 因为 displayValue 可能还没更新
-  // 移除零宽空格
+  // 使用通用函数（自动移除零宽空格）
   if (formulaInputRef.value) {
-    return (formulaInputRef.value.innerText ?? displayValue.value).replace(/\u200B/g, '')
+    return getEditorTextContent(formulaInputRef.value) || displayValue.value
   }
   return displayValue.value.replace(/\u200B/g, '')
 }
@@ -733,11 +714,16 @@ defineExpose({
   // 使用 getter 确保返回最新值
   get formulaMode() { return isFormula.value },
   get isInSelectableState() { return isInSelectableState.value },
-  get hasTextSelection() { return hasTextSelection.value },
+  get hasTextSelection() { return hasTextSelectionState.value },
   insertCellReference,
   insertRangeReference,
   getCurrentValue,
-  getEditorElement: () => formulaInputRef.value
+  getEditorElement: () => formulaInputRef.value,
+  setCursorPosition,
+  getCursorPosition,
+  focus: () => formulaInputRef.value?.focus(),
+  /** 设置待恢复的光标位置（用于跨 Sheet 切换时保持光标） */
+  setPendingCursorPosition: (pos: number) => { pendingCursorPosition.value = pos }
 })
 </script>
 
@@ -800,6 +786,7 @@ defineExpose({
         @click="handleFormulaInputClick"
         @input="handleFormulaInput"
         @keydown="handleFormulaKeydown"
+        @blur="handleFormulaBlur"
         @compositionstart="handleCompositionStart"
         @compositionend="handleCompositionEnd"
       ></div>
@@ -921,7 +908,7 @@ defineExpose({
   font-size: 12px;
   font-family: inherit;
   background: #fff;
-  color: #333;
+  color: #333 !important;
   outline: none;
   cursor: pointer;
   overflow: hidden;

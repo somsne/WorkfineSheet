@@ -1,32 +1,18 @@
 <script setup lang="ts">
 import { nextTick, ref, watch, computed } from 'vue'
-
-/**
- * 公式引用信息
- */
-interface FormulaReference {
-  ref: string       // 如 "A1" 或 "B2:C5"
-  color: string     // 如 "#FF0000"
-  startIndex: number
-  endIndex: number
-}
-
-/**
- * 单元格样式
- */
-interface CellStyle {
-  fontFamily?: string
-  fontSize?: number
-  bold?: boolean
-  italic?: boolean
-  color?: string
-  backgroundColor?: string
-  underline?: boolean | 'single' | 'double'  // 统一类型：boolean | 'single' | 'double'
-  strikethrough?: boolean
-  wrapText?: boolean  // 自动换行
-  textAlign?: 'left' | 'center' | 'right'  // 水平对齐
-  verticalAlign?: 'top' | 'middle' | 'bottom'  // 垂直对齐
-}
+import type { CellStyle } from './sheet/types'
+import type { FormulaReferenceTextIndex } from './sheet/formulaEditUtils'
+import {
+  FORMULA_OPERATORS,
+  generateFormulaHtmlFromRefs,
+  getEditorCursorPosition,
+  setEditorCursorPosition,
+  getEditorTextContent,
+  hasTextSelection as hasTextSelectionUtil,
+  parseKeyAction,
+  preventKeyDefault,
+  isInSelectablePosition
+} from './sheet/formulaEditUtils'
 
 const props = defineProps<{
   visible: boolean
@@ -40,13 +26,15 @@ const props = defineProps<{
   mode: 'edit' | 'typing'
   isFormula?: boolean
   cellStyle?: CellStyle
-  formulaReferences?: FormulaReference[]
+  formulaReferences?: FormulaReferenceTextIndex[]
   viewportWidth?: number  // 可视区域宽度，用于计算右边界
 }>()
 
 const emit = defineEmits<{
-  (e: 'save', val: string): void
-  (e: 'cancel'): void
+  (e: 'enter', val: string): void  // Enter 键确认并向下移动
+  (e: 'tab', val: string): void    // Tab 键确认并向右移动
+  (e: 'blur', val: string): void   // 失焦保存（不移动）
+  (e: 'cancel'): void              // Escape 键取消
   (e: 'cellclick', row: number, col: number): void
   (e: 'input-change'): void
 }>()
@@ -93,7 +81,6 @@ function initializeEditor() {
       const len = internal.value.length
       setCursorPosition(len)
       cursorPos.value = len
-    } else {
     }
     
     // 初始化时更新可选择状态（对于输入 = 进入公式模式的情况）
@@ -114,203 +101,23 @@ const autoHeight = ref(props.height)
 const formulaMode = computed(() => internal.value?.startsWith('=') ?? false)
 const isInSelectableState = ref(false)
 const lastOperatorPos = ref(-1)
-const hasTextSelection = ref(false)
+const hasTextSelectionState = ref(false)
 
-// Excel 风格引用选择：操作符列表
-const OPERATORS = ['(', '=', '+', '-', '*', '/', '&', ',', ':', '<', '>', '^', '%']
+// ==================== 光标位置管理（内部包装函数） ====================
 
-// 单元格引用正则表达式（支持绝对引用和区域引用）
-// 匹配：A1, $A$1, A1:B2, $A$1:$B$2 等
-const CELL_REF_REGEX = /\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/g
-
-// ==================== 光标位置管理 ====================
-
-/**
- * 获取当前光标位置（字符偏移量）
- * 边界情况处理：
- * - 无选区时返回 0
- * - 编辑器未挂载时返回 0
- * - Range 异常时返回 0
- */
 function getCursorPosition(): number {
-  try {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || !editorRef) return 0
-    
-    const range = selection.getRangeAt(0)
-    const preCaretRange = range.cloneRange()
-    preCaretRange.selectNodeContents(editorRef)
-    preCaretRange.setEnd(range.endContainer, range.endOffset)
-    
-    return preCaretRange.toString().length
-  } catch (error) {
-    console.warn('[RichTextInput] getCursorPosition error:', error)
-    return 0
-  }
+  return getEditorCursorPosition(editorRef)
 }
 
-/**
- * 设置光标到指定位置
- * 边界情况处理：
- * - 负数位置设为 0
- * - 超出长度的位置设为末尾
- * - 无文本节点时设置到容器末尾
- * - Range 操作异常时捕获并警告
- */
 function setCursorPosition(position: number) {
-  if (!editorRef) return
-  
-  try {
-    const selection = window.getSelection()
-    if (!selection) return
-    
-    // 边界情况：负数位置
-    if (position < 0) position = 0
-    
-    const range = document.createRange()
-    
-    let currentPos = 0
-    const walker = document.createTreeWalker(
-      editorRef,
-      NodeFilter.SHOW_TEXT,
-      null
-    )
-    
-    let node: Node | null
-    while ((node = walker.nextNode())) {
-      const textLength = node.textContent?.length || 0
-      if (currentPos + textLength >= position) {
-        // 边界情况：确保偏移量不超过节点长度
-        const offset = Math.min(position - currentPos, textLength)
-        range.setStart(node, offset)
-        range.collapse(true)
-        selection.removeAllRanges()
-        selection.addRange(range)
-        return
-      }
-      currentPos += textLength
-    }
-    
-    // 如果位置超出或无文本节点，设置到末尾
-    range.selectNodeContents(editorRef)
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
-  } catch (error) {
-    console.warn('[RichTextInput] setCursorPosition error:', error)
-  }
+  setEditorCursorPosition(editorRef, position)
 }
 
-/**
- * 获取纯文本内容
- */
 function getTextContent(): string {
-  // innerText 会自动将 <br> 转换为 \n，并去除大部分不可见字符
-  const text = editorRef?.innerText || ''
-  // 移除零宽空格（用于光标定位的占位符）
-  return text.replace(/\u200B/g, '')
+  return getEditorTextContent(editorRef) || internal.value
 }
 
-// ==================== HTML 转义 ====================
-
-/**
- * 转义 HTML 特殊字符
- */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-}
-
-// ==================== 公式彩色渲染 ====================
-
-/**
- * 生成公式的彩色 HTML
- * 边界情况处理：
- * - 空文本返回 <br> 保持高度
- * - 纯空格文本使用 &nbsp; 保证可见
- * - 超长文本（>10000字符）截断并警告
- */
-function generateFormulaHtml(text: string): string {
-  // 边界情况：空内容 - 使用零宽空格而不是 <br>
-  // <br> 可能会干扰 IME 输入法的组合状态
-  if (!text || text.length === 0) {
-    return '\u200B'  // 零宽空格，保持光标可见但不干扰 IME
-  }
-  
-  // 边界情况：超长文本保护（防止性能问题）
-  const MAX_LENGTH = 10000
-  if (text.length > MAX_LENGTH) {
-    console.warn(`[RichTextInput] Text too long (${text.length} > ${MAX_LENGTH}), truncating`)
-    text = text.slice(0, MAX_LENGTH) + '...'
-  }
-  
-  if (!formulaMode.value || !props.formulaReferences || props.formulaReferences.length === 0) {
-    // 非公式模式或无引用，返回普通转义文本
-    let escaped = escapeHtml(text).replace(/\n/g, '<br>')
-    // 边界情况：纯空格文本需要使用 &nbsp; 保证可见
-    if (/^\s+$/.test(text)) {
-      escaped = escaped.replace(/ /g, '&nbsp;')
-    }
-    
-    // 如果原始文本以换行符结尾，添加零宽空格以便光标定位
-    if (text.endsWith('\n')) {
-      escaped += '\u200B'
-    }
-    
-    return escaped || '<br>'
-  }
-  
-  // 构建字符级别的颜色数组
-  const colors: (string | null)[] = new Array(text.length).fill(null)
-  
-  for (const ref of props.formulaReferences) {
-    // 边界情况：检查索引有效性
-    const startIdx = Math.max(0, Math.min(ref.startIndex, text.length))
-    const endIdx = Math.max(0, Math.min(ref.endIndex, text.length))
-    
-    for (let i = startIdx; i < endIdx; i++) {
-      colors[i] = ref.color
-    }
-  }
-  
-  // 生成 HTML
-  let html = ''
-  let i = 0
-  while (i < text.length) {
-    const color = colors[i]
-    if (color) {
-      // 找到连续的相同颜色
-      let j = i
-      while (j < text.length && colors[j] === color) {
-        j++
-      }
-      const segment = text.slice(i, j)
-      html += `<span style="color: ${color};">${escapeHtml(segment).replace(/\n/g, '<br>')}</span>`
-      i = j
-    } else {
-      // 找到连续的无颜色文本
-      let j = i
-      while (j < text.length && !colors[j]) {
-        j++
-      }
-      const segment = text.slice(i, j)
-      html += escapeHtml(segment).replace(/\n/g, '<br>')
-      i = j
-    }
-  }
-  
-  // 如果原始文本以换行符结尾，需要在生成的 HTML 末尾添加零宽空格
-  // 这样用户可以在最后一个空行上继续输入（光标可以定位）
-  if (text.endsWith('\n')) {
-    html += '\u200B' // 零宽空格
-  }
-  
-  return html || '\u200B' // 空内容用零宽空格保持光标可见
-}
+// ==================== 编辑器内容更新 ====================
 
 /**
  * 更新编辑器内容（保持光标位置）
@@ -326,7 +133,7 @@ function updateEditorContent(text: string, preserveCursor: boolean = true) {
   const isFormulaBarFocused = activeElement?.closest('.formula-bar') !== null
   
   const currentPos = preserveCursor ? getCursorPosition() : text.length
-  const html = generateFormulaHtml(text)
+  const html = generateFormulaHtmlFromRefs(text, props.formulaReferences, formulaMode.value)
   
   // 性能优化：只在内容真正变化时更新 innerHTML
   if (editorRef.innerHTML !== html) {
@@ -349,13 +156,13 @@ function updateEditorContent(text: string, preserveCursor: boolean = true) {
 function handleInput(e: Event) {
   if (isComposing.value) return
   
-  // 获取文本：优先从 editorRef，其次从 event.target
+  // 使用通用函数获取文本
   let text = ''
   if (editorRef) {
-    text = editorRef.innerText
+    text = getEditorTextContent(editorRef)
   } else if (e.target) {
     const target = e.target as HTMLDivElement
-    text = target.innerText
+    text = target.innerText?.replace(/\u200B/g, '') || ''
   } else {
     return // 无法获取文本，跳过
   }
@@ -366,20 +173,10 @@ function handleInput(e: Event) {
   // 更新可选择状态和文本选择状态
   if (formulaMode.value) {
     updateSelectableState()
-    
-    // 检查是否有文本选择
-    const selection = window.getSelection()
-    hasTextSelection.value = !!(selection && !selection.isCollapsed)
+    hasTextSelectionState.value = hasTextSelectionUtil()
   }
   
-  // 🔧 关键修复：不在 handleInput 中调用 updateEditorContent
-  // 彩色渲染由 watch(formulaReferences) 统一处理
-  // 这样可以避免在用户输入时被覆盖
-  
-  // 调整大小
   adjustSize()
-  
-  // 通知父组件（这会触发 CanvasSheet 更新 formulaReferences）
   emit('input-change')
 }
 
@@ -387,49 +184,38 @@ function handleInput(e: Event) {
  * 键盘按下事件
  */
 function handleKeyDown(e: KeyboardEvent) {
-  // Alt+Enter 或 Ctrl+Enter：插入换行符
-  if (e.key === 'Enter' && (e.altKey || e.ctrlKey)) {
-    e.preventDefault()
-    e.stopPropagation()
-    insertLineBreak()
-    return
-  }
+  const action = parseKeyAction(e, 'cell')
   
-  // 单独的 Enter：保存
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    emit('save', internal.value)
-    return
-  }
-  
-  // Escape：取消
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    isCancelling.value = true
-    emit('cancel')
-    return
-  }
-  
-  // Tab：切换单元格（暂时不处理）
-  if (e.key === 'Tab') {
-    e.preventDefault()
-    // TODO: 实现 Tab 切换单元格
-    return
-  }
-  
-  // 方向键等导航键
-  const navigationKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
-  if (navigationKeys.includes(e.key)) {
-    nextTick(() => {
-      cursorPos.value = getCursorPosition()
-      // 光标移动后，更新可选择状态
-      if (formulaMode.value) {
-        updateSelectableState()
-      }
-    })
-    return
+  if (action) {
+    switch (action.type) {
+      case 'insertLineBreak':
+        preventKeyDefault(e, action)
+        insertLineBreak()
+        break
+      case 'confirmAndMoveDown':
+        preventKeyDefault(e, action)
+        emit('enter', internal.value)
+        break
+      case 'confirmAndMoveRight':
+        preventKeyDefault(e, action)
+        emit('tab', internal.value)
+        break
+      case 'cancel':
+        preventKeyDefault(e, action)
+        isCancelling.value = true
+        emit('cancel')
+        break
+      case 'navigation':
+        // 方向键等导航键
+        nextTick(() => {
+          cursorPos.value = getCursorPosition()
+          // 光标移动后，更新可选择状态
+          if (formulaMode.value) {
+            updateSelectableState()
+          }
+        })
+        break
+    }
   }
 }
 
@@ -439,36 +225,27 @@ function handleKeyDown(e: KeyboardEvent) {
 function insertLineBreak() {
   const selection = window.getSelection()
   if (!selection || !editorRef) {
-    // 测试环境降级：直接在文本中插入换行符
-    const text = internal.value || ''
-    internal.value = text + '\n'
-    nextTick(() => {
-      emit('input-change')
-    })
+    // 测试环境降级
+    internal.value = (internal.value || '') + '\n'
+    nextTick(() => emit('input-change'))
     return
   }
   
   const range = selection.getRangeAt(0)
   range.deleteContents()
   
-  // 插入 <br> 标签
   const br = document.createElement('br')
   range.insertNode(br)
   
-  // 移动光标到 <br> 之后
-  // 注意：某些测试环境（JSDOM）可能不支持这些方法，需要错误处理
   try {
     range.setStartAfter(br)
     range.setEndAfter(br)
     
-    // 关键：检查是否在末尾，如果是则插入一个零宽空格来"撑开"位置
-    // 这样光标就能定位在换行后的新行
+    // 在末尾插入零宽空格以便光标定位
     const nextSibling = br.nextSibling
     if (!nextSibling || (nextSibling.nodeType === Node.TEXT_NODE && nextSibling.textContent === '')) {
-      // 在末尾：插入零宽空格
-      const textNode = document.createTextNode('\u200B')  // 零宽空格
+      const textNode = document.createTextNode('\u200B')
       range.insertNode(textNode)
-      // 光标定位在零宽空格之后
       range.setStartAfter(textNode)
       range.setEndAfter(textNode)
     }
@@ -477,11 +254,9 @@ function insertLineBreak() {
     selection.removeAllRanges()
     selection.addRange(range)
   } catch (error) {
-    // 测试环境可能不支持 Range API，降级处理
     console.warn('[RichTextInput] Range API error:', error)
   }
   
-  // 更新内部值
   nextTick(() => {
     internal.value = getTextContent()
     cursorPos.value = getCursorPosition()
@@ -492,18 +267,12 @@ function insertLineBreak() {
 
 /**
  * 粘贴事件（只粘贴纯文本）
- * 边界情况处理：
- * - 空剪贴板内容
- * - 超长文本限制
- * - 清理多余换行和空格
  */
 function handlePaste(e: ClipboardEvent) {
   e.preventDefault()
   
   try {
     let text = e.clipboardData?.getData('text/plain') || ''
-    
-    // 边界情况：空内容
     if (!text) return
     
     // 边界情况：超长文本限制
@@ -540,7 +309,7 @@ function handlePaste(e: ClipboardEvent) {
       if (formulaMode.value) {
         updateSelectableState()
         const selection = window.getSelection()
-        hasTextSelection.value = !!(selection && !selection.isCollapsed)
+        hasTextSelectionState.value = !!(selection && !selection.isCollapsed)
       }
       
       // 调整大小
@@ -570,7 +339,6 @@ function handleCopy(e: ClipboardEvent) {
  */
 function handleCompositionStart(e: CompositionEvent) {
   // 如果已经在组合中，忽略重复的 compositionstart 事件
-  // 这是某些浏览器/输入法的已知问题
   if (isComposing.value) {
     e.stopPropagation()
     return
@@ -578,15 +346,9 @@ function handleCompositionStart(e: CompositionEvent) {
   isComposing.value = true
 }
 
-function handleCompositionUpdate(_e: CompositionEvent) {
-  // 组合更新事件，目前不需要特殊处理
-}
-
 function handleCompositionEnd(e: CompositionEvent) {
   isComposing.value = false
-  // 使用实际的 compositionend 事件来触发 input 处理
   handleInput(e)
-  // 触发 input-change 事件
   emit('input-change')
 }
 
@@ -608,7 +370,7 @@ function handleBlur(e: FocusEvent) {
     }
   }
   
-  emit('save', internal.value)
+  emit('blur', internal.value)
 }
 
 /**
@@ -833,7 +595,7 @@ watch(
       isCancelling.value = false
       isInSelectableState.value = false
       lastOperatorPos.value = -1
-      hasTextSelection.value = false
+      hasTextSelectionState.value = false
       autoWidth.value = props.width
       autoHeight.value = props.height
       
@@ -861,7 +623,7 @@ watch(
       if (newValue !== internal.value) {
         internal.value = newValue
         // 更新 DOM 显示（不设置光标）
-        const html = generateFormulaHtml(newValue)
+        const html = generateFormulaHtmlFromRefs(newValue, props.formulaReferences, formulaMode.value)
         if (editorRef.innerHTML !== html) {
           editorRef.innerHTML = html
         }
@@ -913,11 +675,10 @@ watch(
   { deep: true }
 )
 
-// ==================== Excel 风格引用选择 ====================
+// ==================== 公式引用选择 ====================
 
 /**
  * 更新可选择状态
- * 当光标在操作符后面时，进入可选择状态
  */
 function updateSelectableState() {
   if (!formulaMode.value) {
@@ -929,52 +690,34 @@ function updateSelectableState() {
   const text = internal.value
   const pos = cursorPos.value
   
-  // 检查光标前一个字符是否是操作符
-  if (pos > 0 && text) {
-    const prevChar = text.charAt(pos - 1)
-    if (prevChar && OPERATORS.includes(prevChar)) {
-      isInSelectableState.value = true
-      lastOperatorPos.value = pos - 1
-      return
-    }
-  }
+  isInSelectableState.value = isInSelectablePosition(text, pos)
   
-  // 检查从最后一个操作符到光标之间是否只有空格或者是单元格引用
-  if (text) {
+  // 更新 lastOperatorPos（用于插入引用时的位置计算）
+  if (isInSelectableState.value && text) {
     for (let i = pos - 1; i >= 0; i--) {
       const char = text.charAt(i)
-      if (char && OPERATORS.includes(char)) {
-        // 找到操作符，检查之间的内容
-        const between = text.substring(i + 1, pos)
-        // 如果之间只有空格，或者是合法的单元格引用开始部分，则可选择
-        if (/^\s*$/.test(between) || /^\s*\$?[A-Z]*\$?\d*$/.test(between)) {
-          isInSelectableState.value = true
-          lastOperatorPos.value = i
-          return
-        }
-        break
+      if (char && FORMULA_OPERATORS.includes(char)) {
+        lastOperatorPos.value = i
+        return
       }
     }
   }
-  
-  isInSelectableState.value = false
+  lastOperatorPos.value = -1
 }
 
 /**
  * 查找光标位置要替换的引用
- * 返回要替换的引用的起始和结束位置，如果没有则返回 null
  */
 function findReferenceToReplace(): { start: number; end: number; ref: string } | null {
   if (!formulaMode.value) return null
   
   const text = internal.value
   const pos = cursorPos.value
-  
-  // 重置正则表达式的 lastIndex
-  CELL_REF_REGEX.lastIndex = 0
+  const regex = /\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/gi
+  regex.lastIndex = 0
   
   let match: RegExpExecArray | null
-  while ((match = CELL_REF_REGEX.exec(text)) !== null) {
+  while ((match = regex.exec(text)) !== null) {
     const start = match.index
     const end = start + match[0].length
     
@@ -1059,7 +802,7 @@ defineExpose({
   // 使用 getter 确保返回最新值
   get formulaMode() { return formulaMode.value },
   get isInSelectableState() { return isInSelectableState.value },
-  get hasTextSelection() { return hasTextSelection.value },
+  get hasTextSelection() { return hasTextSelectionState.value },
   insertCellReference,
   insertRangeReference,
   getCurrentValue: () => internal.value,
@@ -1087,7 +830,6 @@ defineExpose({
       @paste="handlePaste"
       @copy="handleCopy"
       @compositionstart="handleCompositionStart"
-      @compositionupdate="handleCompositionUpdate"
       @compositionend="handleCompositionEnd"
       @blur="handleBlur"
       @click.stop="handleClick"

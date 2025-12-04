@@ -78,10 +78,10 @@ WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组�
 - `images/renderImages.ts` - 浮动图片渲染
 
 **数据层** (`src/lib/`):
-- `Workbook.ts` - 工作簿模型，多 Sheet 管理、视图状态保存/恢复、事件系统
+- `Workbook.ts` - 工作簿模型，多 Sheet 管理、FormulaSheet 管理、视图状态保存/恢复、事件系统、跨表公式引用支持
 - `SheetModel.ts` - 单表数据模型，稀疏存储 cells/styles/borders/formats/images/merges
-- `FormulaSheet.ts` - 公式表包装器，异步计算队列、依赖图、值缓存、格式化
-- `FormulaEngine.ts` - 公式计算引擎（基于 hot-formula-parser）
+- `FormulaSheet.ts` - 公式表包装器，异步计算队列、依赖图、值缓存、格式化、跨表引用回调
+- `FormulaEngine.ts` - 公式计算引擎（基于 hot-formula-parser），支持跨表引用语法
 - `UndoRedoManager.ts` - 撤销重做管理器（命令模式，支持跨 Sheet 操作和选区恢复）
 
 **辅助模块** (`src/components/sheet/`):
@@ -90,6 +90,9 @@ WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组�
 - `rowcol.ts` - 行列增删核心逻辑，批量优化
 - `fillHandle.ts` - 填充柄核心逻辑（模式识别、值生成、公式调整）
 - `clipboard.ts` - 剪贴板数据处理
+- `formulaEditState.ts` - **公式编辑代理层**（FormulaEditManager，统一管理编辑状态）
+- `formulaEditUtils.ts` - **公式编辑工具函数**（光标管理、HTML生成、键盘解析）
+- `references.ts` - 公式引用解析（彩色高亮用）
 - `api.ts` - 对外 API 接口 (`SheetAPI`)
 - `uiMenus.ts` - 右键菜单配置
 
@@ -140,6 +143,12 @@ undoRedo.execute({
 ### 4. 公式处理
 - 公式以 `=` 开头，由 `FormulaEngine` (基于 hot-formula-parser) 计算
 - `FormulaSheet.getValue()` 返回计算结果，`getDisplayValue()` 返回原始公式
+- **跨 Sheet 公式引用**：
+  - 支持 `=Sheet2!A1` 和 `='Sheet Name'!A1` 语法
+  - Workbook 统一管理所有 FormulaSheet 实例
+  - `crossSheetValueGetter` 回调由 Workbook 提供给每个 FormulaSheet
+  - 跨表依赖链支持（如 Sheet1 引用 Sheet2 的公式结果）
+  - 详见 `docs/features/CROSS_SHEET_FORMULA.md`
 
 ### 5. 填充柄 (Fill Handle)
 - 核心逻辑在 `fillHandle.ts`，交互在 `useFillHandle.ts`
@@ -190,13 +199,199 @@ undoRedo.execute({
 - **防重复调用**：检查 `overlay.visible`，已关闭时直接返回
 - **RichTextInput 获取值**：使用 `getCurrentValue()` 方法（非 `getValue`）
 
+### 12. 公式编辑系统 - FormulaEditManager 代理层 ⭐
+
+**核心架构**：`FormulaEditManager` 是公式编辑系统的中央协调器，统一管理 FormulaBar 和 RichTextInput 的编辑状态。
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    WorkbookSheet                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │         FormulaEditManager (代理层/状态中心)           │  │
+│  │  state: { active, source, sourceSheetId, row, col,    │  │
+│  │           originalValue, currentValue, cursorPosition,│  │
+│  │           isFormulaMode, isInSelectableState }        │  │
+│  │  methods: startEdit, switchSource, updateValue,       │  │
+│  │           confirmEdit, cancelEdit, insertReference    │  │
+│  └───────────────────────────────────────────────────────┘  │
+│           ↑ 写入                           ↑ 写入           │
+│  ┌─────────────────┐              ┌─────────────────────┐   │
+│  │   FormulaBar    │              │    CanvasSheet      │   │
+│  │  emit('input')  │              │  emit('editing')    │   │
+│  │  emit('confirm')│              │  emit('selection')  │   │
+│  └─────────────────┘              └─────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**文件位置**: `src/components/sheet/formulaEditState.ts`
+
+**编辑源 (source)**:
+| 编辑源 | 触发方式 | 焦点位置 | Overlay |
+|--------|----------|----------|---------|
+| `cell` | 双击/F2/打字 | RichTextInput | 显示，可编辑 |
+| `formulaBar` | 点击公式栏 | FormulaBar | 显示，只读同步 |
+
+**关键方法（基础）**:
+```typescript
+// 开始编辑（必须指定 source）
+formulaEditManager.startEdit({
+  source: 'formulaBar',  // 或 'cell'
+  sheetId, row, col, value, mode
+})
+
+// 切换编辑源（保持内容不变）
+formulaEditManager.switchSource('formulaBar')
+
+// 确认编辑（返回 sheetId 用于跨 Sheet）
+const result = formulaEditManager.confirmEdit()
+// result = { sheetId, row, col, value }
+
+// 跨 Sheet 模式判断
+formulaEditManager.isCrossSheetMode(currentSheetId)
+```
+
+**统一动作流程（推荐使用）**:
+
+所有编辑操作封装为 `action*` 方法，返回需要执行的 UI 动作列表：
+
+```typescript
+// 编辑启动/切换
+actionStartCellEdit(options)       // 开始单元格编辑（双击/F2/打字）
+actionStartFormulaBarEdit(options) // 开始公式栏编辑（点击公式栏）
+actionSwitchToFormulaBar()         // 切换到公式栏
+actionSwitchToCell()               // 切换到单元格
+
+// 输入与光标
+actionInput(value, cursorPos?)     // 输入变化
+actionCursorPositionChange(pos, selection?) // 光标/选区变化
+
+// 确认操作
+actionConfirm()                    // 确认编辑
+actionConfirmAndMoveRight()        // 确认并向右移动（Tab）
+actionConfirmAndMoveDown()         // 确认并向下移动（Enter）
+actionBlurConfirm()                // 失焦确认
+
+// 取消操作
+actionCancel()                     // 取消编辑（Escape）
+
+// 事件响应
+actionSelectionChange(...)         // 选区变化处理（公式引用插入）
+actionSheetChange(sheetId)         // Sheet 切换处理
+actionRequestEdit(row, col)        // 双击请求编辑（跨Sheet模式）
+actionEditingStateChange(payload)  // 单元格编辑状态变化
+
+// 返回格式
+interface EditActionResult {
+  success: boolean
+  actions: EditUIAction[]  // UI 动作列表
+  saveData?: { sheetId, row, col, value }
+  restoreData?: { sheetId, row, col, value }
+}
+
+// 执行 UI 动作
+function executeUIActions(actions) {
+  for (const action of actions) {
+    switch (action.type) {
+      case 'openOverlay': // 打开 overlay
+      case 'closeOverlay': // 关闭 overlay
+      case 'syncOverlayValue': // 同步 overlay 值
+      case 'focusFormulaBar': // 聚焦公式栏
+      case 'focusOverlay': // 聚焦 overlay
+      case 'switchSheet': // 切换 Sheet
+      case 'selectCell': // 选择单元格
+      case 'setCellValue': // 设置单元格值
+      case 'updateFormulaBarDisplay': // 更新公式栏显示
+    }
+  }
+}
+```
+
+**FormulaBar 事件处理** (WorkbookSheet.vue):
+- `@start-edit` → `actionStartFormulaBarEdit()` → `executeUIActions()`
+- `@input` → `actionInput()` → `executeUIActions()`
+- `@confirm` → `actionConfirm()` → `executeUIActions()`
+- `@tab` → `actionConfirmAndMoveRight()` → `executeUIActions()`
+- `@cancel` → `actionCancel()` → `executeUIActions()`
+- `@blur` → `actionBlurConfirm()` → `executeUIActions()`
+- `@focus` → `actionSwitchToFormulaBar()` → `executeUIActions()`
+
+**CanvasSheet 事件处理** (WorkbookSheet.vue):
+- `@editing-state-change` → `actionEditingStateChange()` → `executeUIActions()`
+- `@selection-change` → `actionSelectionChange()` → `executeUIActions()`
+- `@request-edit` → `actionRequestEdit()` → `executeUIActions()`
+
+**跨 Sheet 公式引用**:
+- 公式栏编辑公式时切换 Sheet → 进入跨 Sheet 模式
+- 点击单元格 → 插入 `Sheet2!A1` 格式引用
+- 确认/取消 → 自动切回源 Sheet
+- 名称框显示 `Sheet1!A1` 格式（源单元格）
+
+**零宽空格处理** (FormulaBar.vue):
+```typescript
+// 获取值时必须移除零宽空格，否则公式计算会 #ERROR!
+const text = (formulaInputRef.value?.innerText ?? '').replace(/\u200B/g, '')
+```
+
+**文档**: 详见 `docs/features/FORMULA_EDITING_SYSTEM.md`
+
+### 13. 公式编辑工具函数 (formulaEditUtils.ts)
+
+共享的纯函数工具模块，供 FormulaBar 和 RichTextInput 使用：
+
+```typescript
+// 常量
+FORMULA_OPERATORS  // 公式操作符列表 ['(', '=', '+', '-', '*', '/', ...]
+CELL_REF_REGEX     // 单元格引用正则 /\$?[A-Z]+\$?\d+/
+NAVIGATION_KEYS    // 导航键列表 ['ArrowLeft', 'ArrowRight', ...]
+
+// HTML 处理
+escapeHtml(text)                    // HTML 转义
+generateFormulaHtml(text, refs)     // 生成彩色公式 HTML
+generateFormulaHtmlFromRefs(...)    // 从 FormulaReference[] 生成 HTML
+
+// 光标管理
+getEditorCursorPosition(el)         // 获取 contenteditable 光标位置
+setEditorCursorPosition(el, pos)    // 设置光标位置
+getEditorTextContent(el)            // 获取纯文本（移除零宽空格）
+getEditorSelection(el)              // 获取选区范围
+
+// 键盘事件
+parseKeyAction(e, context)          // 解析键盘动作 → KeyAction
+preventKeyDefault(e, action)        // 阻止默认行为
+
+// 可选择状态
+isInSelectablePosition(value, cursor)  // 判断是否可插入引用
+hasTextSelection()                     // 是否有文本选中
+```
+
+### 14. 下一步重构计划 - CellOverlay 替换 RichTextInput ⚠️
+
+**当前状态**: FormulaBar 功能基本完成，RichTextInput 待重构
+
+**重构目标**: 
+- 用 CellOverlay 替换 RichTextInput
+- CellOverlay 作为纯展示层，FormulaBar 作为编辑大脑
+- 消除 FormulaBar 和 RichTextInput 的代码重复
+
+**新架构设计**:
+```
+FormulaBar (编辑大脑)          CellOverlay (展示视图)
+├─ 维护编辑状态                 ├─ 显示内容和公式引用高亮
+├─ 处理键盘输入                 ├─ 转发鼠标/键盘事件
+├─ 管理光标位置                 ├─ 显示光标位置（同步）
+├─ 生成彩色 HTML                └─ 自适应尺寸
+└─ 插入公式引用
+```
+
+**参考文档**: `docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md`
+
 ## 测试约定
 - 单元测试位于 `src/components/sheet/tests/*.spec.ts` 和 `src/lib/tests/*.spec.ts`
 - HTML 功能测试位于 `tests/*.html`
 - 测试框架: Vitest + jsdom
-- 纯函数模块（geometry, references, clipboard, fillHandle, UndoRedoManager）优先测试
+- 纯函数模块（geometry, references, clipboard, fillHandle, UndoRedoManager, formulaEditState, formulaEditUtils, crossSheetFormula）优先测试
 - 运行单个测试: `npm test -- geometry`
-- 当前测试: 687 个用例
+- 当前测试: 827+ 测试用例，21 个测试文件
 
 ## 目录结构快速导航
 ```

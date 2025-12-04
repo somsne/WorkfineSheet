@@ -389,8 +389,8 @@ describe('RichTextInput 组件', () => {
       const editor = wrapper.find('[contenteditable]')
       await editor.trigger('keydown', { key: 'Enter' })
 
-      expect(wrapper.emitted('save')).toBeTruthy()
-      expect(wrapper.emitted('save')![0]).toEqual(['Test'])
+      expect(wrapper.emitted('enter')).toBeTruthy()
+      expect(wrapper.emitted('enter')![0]).toEqual(['Test'])
     })
 
     it('应该触发 cancel 事件 (Escape 键)', async () => {
@@ -440,8 +440,8 @@ describe('RichTextInput 组件', () => {
       const editor = wrapper.find('[contenteditable]')
       await editor.trigger('keydown', { key: 'Enter', altKey: true })
 
-      // 不应该触发 save
-      expect(wrapper.emitted('save')).toBeFalsy()
+      // 不应该触发 enter
+      expect(wrapper.emitted('enter')).toBeFalsy()
       // 应该触发 input-change
       expect(wrapper.emitted('input-change')).toBeTruthy()
     })
@@ -465,8 +465,9 @@ describe('RichTextInput 组件', () => {
       
       await editor.trigger('keydown', { key: 'Tab' })
       
-      // Tab 应该被阻止（组件内部处理）
-      expect(wrapper.emitted('save')).toBeFalsy()
+      // Tab 应该触发 tab 事件
+      expect(wrapper.emitted('tab')).toBeTruthy()
+      expect(wrapper.emitted('enter')).toBeFalsy()
     })
   })
 

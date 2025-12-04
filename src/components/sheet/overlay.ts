@@ -116,6 +116,31 @@ export function getNextCellAfterSave(
 }
 
 /**
+ * 计算 Tab 键后光标的新位置（向右移动规则）
+ */
+export function getNextCellRight(
+  currentRow: number,
+  currentCol: number,
+  totalRows: number,
+  totalCols: number
+): { row: number; col: number } {
+  // Tab 确认后，光标移动到右边一列
+  // 如果是最后一列，则移动到下一行的第一列
+  if (currentCol < totalCols - 1) {
+    // 不是最后一列，向右移动
+    return { row: currentRow, col: currentCol + 1 }
+  } else {
+    // 是最后一列，移动到下一行的第一列
+    if (currentRow < totalRows - 1) {
+      return { row: currentRow + 1, col: 0 }
+    } else {
+      // 已经是最后一行的最后一列，回到第一行第一列
+      return { row: 0, col: 0 }
+    }
+  }
+}
+
+/**
  * 检查点击位置是否在覆盖层输入框内部
  */
 export function isClickInsideOverlay(

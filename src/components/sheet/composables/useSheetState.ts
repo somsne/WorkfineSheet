@@ -14,7 +14,8 @@ import { SheetModel } from '../../../lib/SheetModel'
 import { UndoRedoManager } from '../../../lib/UndoRedoManager'
 import { FormulaSheet } from '../../../lib/FormulaSheet'
 import { initializeStyleDemoData } from '../../../lib/demoData'
-import { parseFormulaReferences } from '../references'
+import { parseAllFormulaReferences } from '../references'
+import { convertReferencesToTextIndex } from '../formulaEditUtils'
 
 // ==================== 类型定义 ====================
 
@@ -291,33 +292,11 @@ export function useSheetState(options: SheetStateOptions = {}) {
   const formulaReferences = ref<FormulaReference[]>([])
   
   // 为 RichTextInput 转换 FormulaReference 格式
+  // 使用 formulaEditUtils 中的通用函数
   const richTextFormulaReferences = computed(() => {
     const refs = formulaReferences.value
     const text = (overlayInput.value as any)?.getCurrentValue?.() || overlay.value
-    const result: Array<{ ref: string; color: string; startIndex: number; endIndex: number }> = []
-    
-    for (const ref of refs) {
-      const textUpper = text.toUpperCase()
-      const refUpper = ref.range.toUpperCase()
-      
-      let searchStart = 0
-      while (searchStart < text.length) {
-        const startIndex = textUpper.indexOf(refUpper, searchStart)
-        if (startIndex === -1) break
-        
-        const endIndex = startIndex + ref.range.length
-        result.push({
-          ref: ref.range,
-          color: ref.color,
-          startIndex,
-          endIndex
-        })
-        
-        searchStart = endIndex
-      }
-    }
-    
-    return result
+    return convertReferencesToTextIndex(text, refs)
   })
   
   // ==================== 右键菜单状态 ====================
@@ -391,7 +370,7 @@ export function useSheetState(options: SheetStateOptions = {}) {
         // 更新公式引用（只有公式模式才需要）
         const isFormulaMode = currentValue?.startsWith('=') ?? false
         if (isFormulaMode) {
-          formulaReferences.value = parseFormulaReferences(currentValue)
+          formulaReferences.value = parseAllFormulaReferences(currentValue)
         }
       } else {
         formulaReferences.value = []

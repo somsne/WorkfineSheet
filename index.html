@@ -5,42 +5,8 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WorkfineSheet</title>
-    <style>
-      .top-right-btns {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 9999;
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .test-entry-btn {
-        padding: 8px 16px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-        transition: transform 0.2s, box-shadow 0.2s;
-        text-decoration: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .test-entry-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
-      }
-    </style>
   </head>
   <body>
-    <div class="top-right-btns">
-      <a href="/tests/index.html" class="test-entry-btn">🧪 测试中心</a>
-    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

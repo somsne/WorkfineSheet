@@ -38,6 +38,8 @@ export interface UseSheetClipboardOptions {
     height: number
     width: number
   }) => void
+  /** 单元格值变化回调（粘贴后调用，用于更新 FormulaBar） */
+  onCellValueChange?: () => void
 }
 
 export function useSheetClipboard({ 
@@ -46,7 +48,8 @@ export function useSheetClipboard({
   externalClipboard,
   onClipboardChange,
   onClipboardClear,
-  onCutSourceClear
+  onCutSourceClear,
+  onCellValueChange
 }: UseSheetClipboardOptions) {
   const {
     formulaSheet,
@@ -335,6 +338,8 @@ export function useSheetClipboard({
         }
         
         onDraw()
+        // 通知 FormulaBar 更新
+        onCellValueChange?.()
         return
       } else {
         // 系统剪贴板内容已变化（用户从外部复制了新内容），清除内部剪贴板和蚂蚁线
@@ -380,6 +385,8 @@ export function useSheetClipboard({
       }
       
       onDraw()
+      // 通知 FormulaBar 更新
+      onCellValueChange?.()
       return
     }
     
@@ -414,6 +421,8 @@ export function useSheetClipboard({
     }
     
     onDraw()
+    // 通知 FormulaBar 更新
+    onCellValueChange?.()
   }
   
   /**
