@@ -201,138 +201,148 @@ undoRedo.execute({
 
 ### 12. 公式编辑系统 - FormulaEditManager 代理层 ⭐
 
-**核心架构**：`FormulaEditManager` 是公式编辑系统的中央协调器，统一管理 FormulaBar 和 RichTextInput 的编辑状态。
+**设计文档**: `docs/architecture/FORMULA_EDIT_MANAGER_DESIGN.md`
+
+**核心架构**：`FormulaEditManager` 是公式编辑系统的**唯一状态中心**，统一管理所有编辑状态。FormulaBar 和 CellOverlay 退化为**纯渲染组件**。
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    WorkbookSheet                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │         FormulaEditManager (代理层/状态中心)           │  │
-│  │  state: { active, source, sourceSheetId, row, col,    │  │
-│  │           originalValue, currentValue, cursorPosition,│  │
-│  │           isFormulaMode, isInSelectableState }        │  │
-│  │  methods: startEdit, switchSource, updateValue,       │  │
-│  │           confirmEdit, cancelEdit, insertReference    │  │
-│  └───────────────────────────────────────────────────────┘  │
-│           ↑ 写入                           ↑ 写入           │
-│  ┌─────────────────┐              ┌─────────────────────┐   │
-│  │   FormulaBar    │              │    CanvasSheet      │   │
-│  │  emit('input')  │              │  emit('editing')    │   │
-│  │  emit('confirm')│              │  emit('selection')  │   │
-│  └─────────────────┘              └─────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            WorkbookSheet                                     │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                    FormulaEditManager (唯一状态源)                      │  │
+│  │                                                                        │  │
+│  │  状态: active, source, mode, row, col, sourceSheetId, currentSheetId  │  │
+│  │        currentValue, originalValue, cursorPosition, selectionRange    │  │
+│  │        isFormulaMode, formulaReferences, isInSelectableState          │  │
+│  │                                                                        │  │
+│  │  计算属性: displayHtml, isCrossSheetMode, shouldInsertReference       │  │
+│  │                                                                        │  │
+│  │  动作: startEdit, updateValue, updateCursor, insertReference          │  │
+│  │        confirmEdit, cancelEdit, switchSource, switchSheet             │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                              │                                               │
+│              ┌───────────────┼───────────────┐                              │
+│              ↓ props         ↓ props         ↓ 方法调用                      │
+│  ┌───────────────────┐  ┌───────────────────┐  ┌─────────────────────┐      │
+│  │   FormulaBar      │  │   CellOverlay     │  │   CanvasSheet       │      │
+│  │   (纯渲染)        │  │   (纯渲染)        │  │   (事件采集)        │      │
+│  │  显示 displayHtml │  │  显示 displayHtml │  │  - 选区变化         │      │
+│  │  转发键盘事件     │  │  转发键盘事件     │  │  - 双击/F2 编辑     │      │
+│  └───────────────────┘  └───────────────────┘  └─────────────────────┘      │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **文件位置**: `src/components/sheet/formulaEditState.ts`
 
-**编辑源 (source)**:
-| 编辑源 | 触发方式 | 焦点位置 | Overlay |
-|--------|----------|----------|---------|
-| `cell` | 双击/F2/打字 | RichTextInput | 显示，可编辑 |
-| `formulaBar` | 点击公式栏 | FormulaBar | 显示，只读同步 |
+**组件职责划分**:
 
-**关键方法（基础）**:
+| 组件 | 职责 | 不负责 |
+|------|------|--------|
+| FormulaEditManager | 所有编辑状态、光标、公式引用、跨 Sheet | UI 渲染 |
+| FormulaBar | 渲染 displayHtml、转发事件、名称框 | 编辑状态、光标状态 |
+| CellOverlay | 渲染 displayHtml、转发事件、定位 | 编辑状态、光标状态 |
+| CanvasSheet | 选区事件、双击编辑、引用选择 | 编辑状态管理 |
+| WorkbookSheet | 协调中心、事件分发、调用 Manager | 直接状态管理 |
+
+**核心状态**:
 ```typescript
-// 开始编辑（必须指定 source）
-formulaEditManager.startEdit({
-  source: 'formulaBar',  // 或 'cell'
-  sheetId, row, col, value, mode
-})
-
-// 切换编辑源（保持内容不变）
-formulaEditManager.switchSource('formulaBar')
-
-// 确认编辑（返回 sheetId 用于跨 Sheet）
-const result = formulaEditManager.confirmEdit()
-// result = { sheetId, row, col, value }
-
-// 跨 Sheet 模式判断
-formulaEditManager.isCrossSheetMode(currentSheetId)
-```
-
-**统一动作流程（推荐使用）**:
-
-所有编辑操作封装为 `action*` 方法，返回需要执行的 UI 动作列表：
-
-```typescript
-// 编辑启动/切换
-actionStartCellEdit(options)       // 开始单元格编辑（双击/F2/打字）
-actionStartFormulaBarEdit(options) // 开始公式栏编辑（点击公式栏）
-actionSwitchToFormulaBar()         // 切换到公式栏
-actionSwitchToCell()               // 切换到单元格
-
-// 输入与光标
-actionInput(value, cursorPos?)     // 输入变化
-actionCursorPositionChange(pos, selection?) // 光标/选区变化
-
-// 确认操作
-actionConfirm()                    // 确认编辑
-actionConfirmAndMoveRight()        // 确认并向右移动（Tab）
-actionConfirmAndMoveDown()         // 确认并向下移动（Enter）
-actionBlurConfirm()                // 失焦确认
-
-// 取消操作
-actionCancel()                     // 取消编辑（Escape）
-
-// 事件响应
-actionSelectionChange(...)         // 选区变化处理（公式引用插入）
-actionSheetChange(sheetId)         // Sheet 切换处理
-actionRequestEdit(row, col)        // 双击请求编辑（跨Sheet模式）
-actionEditingStateChange(payload)  // 单元格编辑状态变化
-
-// 返回格式
-interface EditActionResult {
-  success: boolean
-  actions: EditUIAction[]  // UI 动作列表
-  saveData?: { sheetId, row, col, value }
-  restoreData?: { sheetId, row, col, value }
-}
-
-// 执行 UI 动作
-function executeUIActions(actions) {
-  for (const action of actions) {
-    switch (action.type) {
-      case 'openOverlay': // 打开 overlay
-      case 'closeOverlay': // 关闭 overlay
-      case 'syncOverlayValue': // 同步 overlay 值
-      case 'focusFormulaBar': // 聚焦公式栏
-      case 'focusOverlay': // 聚焦 overlay
-      case 'switchSheet': // 切换 Sheet
-      case 'selectCell': // 选择单元格
-      case 'setCellValue': // 设置单元格值
-      case 'updateFormulaBarDisplay': // 更新公式栏显示
-    }
-  }
+interface FormulaEditState {
+  active: boolean                    // 是否激活编辑
+  source: 'cell' | 'formulaBar' | null  // 当前焦点位置
+  sourceSheetId: string | null      // 编辑单元格所属 Sheet（不变）
+  currentSheetId: string | null     // 当前浏览的 Sheet（跨 Sheet 时变化）
+  row: number; col: number          // 编辑单元格位置
+  currentValue: string              // 当前编辑值
+  originalValue: string             // 原始值（取消恢复用）
+  cursorPosition: number            // 光标位置
+  isFormulaMode: boolean            // 是否公式（=开头）
+  isInSelectableState: boolean      // 是否可插入引用
+  formulaReferences: FormulaReference[]  // 公式引用列表
 }
 ```
 
-**FormulaBar 事件处理** (WorkbookSheet.vue):
-- `@start-edit` → `actionStartFormulaBarEdit()` → `executeUIActions()`
-- `@input` → `actionInput()` → `executeUIActions()`
-- `@confirm` → `actionConfirm()` → `executeUIActions()`
-- `@tab` → `actionConfirmAndMoveRight()` → `executeUIActions()`
-- `@cancel` → `actionCancel()` → `executeUIActions()`
-- `@blur` → `actionBlurConfirm()` → `executeUIActions()`
-- `@focus` → `actionSwitchToFormulaBar()` → `executeUIActions()`
-
-**CanvasSheet 事件处理** (WorkbookSheet.vue):
-- `@editing-state-change` → `actionEditingStateChange()` → `executeUIActions()`
-- `@selection-change` → `actionSelectionChange()` → `executeUIActions()`
-- `@request-edit` → `actionRequestEdit()` → `executeUIActions()`
-
-**跨 Sheet 公式引用**:
-- 公式栏编辑公式时切换 Sheet → 进入跨 Sheet 模式
-- 点击单元格 → 插入 `Sheet2!A1` 格式引用
-- 确认/取消 → 自动切回源 Sheet
-- 名称框显示 `Sheet1!A1` 格式（源单元格）
-
-**零宽空格处理** (FormulaBar.vue):
+**关键计算属性**:
 ```typescript
-// 获取值时必须移除零宽空格，否则公式计算会 #ERROR!
-const text = (formulaInputRef.value?.innerText ?? '').replace(/\u200B/g, '')
+// 是否跨 Sheet 模式
+isCrossSheetMode = computed(() => 
+  state.active && state.sourceSheetId !== state.currentSheetId
+)
+
+// 是否应该插入引用（点击单元格时判断）
+shouldInsertReference = computed(() =>
+  state.active && state.isFormulaMode && state.isInSelectableState
+)
+
+// 渲染用 HTML（公式着色）
+displayHtml = computed(() => generateFormulaHtml(state.currentValue, refs))
 ```
 
-**文档**: 详见 `docs/features/FORMULA_EDITING_SYSTEM.md`
+**跨 Sheet 公式引用流程**:
+
+```
+1. 用户在 Sheet1!A1 输入 =SUM(
+   → isInSelectableState = true（光标在操作符后）
+
+2. 用户点击 Sheet2 标签
+   → 检测 isInSelectableState === true
+   → 进入跨 Sheet 引用模式（不是普通切换）
+   → manager.switchSheet('sheet2')
+   → 隐藏 CellOverlay（不结束编辑）
+   → FormulaBar 保持显示公式
+
+3. 用户在 Sheet2 点击/拖选 A1:B3
+   → 检测 shouldInsertReference === true
+   → 生成跨 Sheet 引用: formatCrossSheetReference('Sheet2', 0, 0, 2, 1)
+   → manager.insertReference('Sheet2!A1:B3')
+   → currentValue = '=SUM(Sheet2!A1:B3'
+
+4a. 用户按 Enter 确认
+    → manager.confirmEdit()
+    → 返回 { sheetId: 'sheet1', row: 0, col: 0, value: '=SUM(Sheet2!A1:B3)' }
+    → 自动切回 Sheet1
+    → 保存值
+
+4b. 用户按 Escape 取消
+    → manager.cancelEdit()
+    → 自动切回 Sheet1
+    → 恢复原始值
+```
+
+**状态转换矩阵**:
+
+| 当前状态 | 用户操作 | 结果 |
+|----------|----------|------|
+| 未编辑 | 点击 Sheet2 | 普通切换 |
+| 编辑普通文本 | 点击 Sheet2 | 保存后切换 |
+| 编辑公式，光标在操作符后 | 点击 Sheet2 | 进入跨 Sheet 模式 |
+| 跨 Sheet 模式 | 点击单元格 | 插入/替换引用 |
+| 跨 Sheet 模式 | 点击 Sheet3 | 切换到 Sheet3（继续跨 Sheet 模式）|
+| 跨 Sheet 模式 | 点击源 Sheet | 返回源 Sheet（继续编辑）|
+| 跨 Sheet 模式 | Enter/Escape | 确认/取消，返回源 Sheet |
+| 跨 Sheet 模式 | 输入字符 | 继续编辑（在公式栏）|
+
+**isInSelectableState 判断规则**:
+```typescript
+const OPERATORS = ['(', '=', '+', '-', '*', '/', '&', ',', ':', '<', '>', '^', '%', '!']
+
+function isInSelectablePosition(value: string, cursorPos: number): boolean {
+  if (!value.startsWith('=')) return false
+  if (cursorPos <= 0) return false
+  
+  const prevChar = value.charAt(cursorPos - 1)
+  // 1. 直接在操作符后面
+  if (OPERATORS.includes(prevChar)) return true
+  // 2. 在操作符后面，正在输入引用（如 "A" 或 "A1"）
+  // ...详细逻辑见 formulaEditState.ts
+}
+```
+
+**Sheet 名称格式化**:
+```typescript
+// "Sheet1" → Sheet1!A1
+// "My Sheet" → 'My Sheet'!A1
+// "Sheet's Data" → 'Sheet''s Data'!A1
+```
 
 ### 13. 公式编辑工具函数 (formulaEditUtils.ts)
 
@@ -364,26 +374,63 @@ isInSelectablePosition(value, cursor)  // 判断是否可插入引用
 hasTextSelection()                     // 是否有文本选中
 ```
 
-### 14. 下一步重构计划 - CellOverlay 替换 RichTextInput ⚠️
+### 14. 当前架构问题与优化方向 ⚠️
 
-**当前状态**: FormulaBar 功能基本完成，RichTextInput 待重构
+**详细文档**: 
+- `docs/architecture/USER_ACTION_CHAINS.md`
+- `docs/architecture/FORMULA_EDIT_MANAGER_DESIGN.md`
 
-**重构目标**: 
-- 用 CellOverlay 替换 RichTextInput
-- CellOverlay 作为纯展示层，FormulaBar 作为编辑大脑
-- 消除 FormulaBar 和 RichTextInput 的代码重复
+#### 问题优先级总结
 
-**新架构设计**:
+| 问题 | 状态 | 优先级 | 解决方案 |
+|------|------|--------|----------|
+| 状态分散 | 🟡 设计中 | ⭐⭐⭐ | FormulaEditManager 作为唯一数据源 |
+| 事件处理分散 | 🟡 设计中 | ⭐⭐⭐ | 统一事件处理入口 |
+| UI 显示/隐藏分散 | 🟡 设计中 | ⭐⭐ | FormulaBar/CellOverlay 纯渲染化 |
+| 引用插入分支 | 🟡 设计中 | ⭐⭐ | Manager.insertReference 统一处理 |
+| 跨 Sheet 引用 | 🟡 设计中 | ⭐⭐ | isCrossSheetMode + shouldInsertReference |
+
+#### 目标架构（设计完成，待实现）
+
 ```
-FormulaBar (编辑大脑)          CellOverlay (展示视图)
-├─ 维护编辑状态                 ├─ 显示内容和公式引用高亮
-├─ 处理键盘输入                 ├─ 转发鼠标/键盘事件
-├─ 管理光标位置                 ├─ 显示光标位置（同步）
-├─ 生成彩色 HTML                └─ 自适应尺寸
-└─ 插入公式引用
+FormulaEditManager (唯一状态源)
+       │
+       ├─→ FormulaBar (纯渲染：显示 displayHtml，转发事件)
+       ├─→ CellOverlay (纯渲染：显示 displayHtml，转发事件)
+       └─→ CanvasSheet (事件采集：选区变化、双击编辑)
+              │
+              ↓
+       WorkbookSheet (协调中心：接收事件，调用 Manager)
 ```
 
-**参考文档**: `docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md`
+#### 跨 Sheet 引用实现要点
+
+1. **状态判断**：
+   - `isCrossSheetMode`: `sourceSheetId !== currentSheetId`
+   - `shouldInsertReference`: `active && isFormulaMode && isInSelectableState`
+
+2. **Sheet 切换处理**：
+   ```typescript
+   if (manager.state.active && manager.state.isInSelectableState) {
+     // 跨 Sheet 引用模式
+     manager.switchSheet(newSheetId)
+     hideOverlay()  // 隐藏但不结束编辑
+   } else if (manager.state.active) {
+     // 保存后切换
+     confirmAndSave()
+   }
+   ```
+
+3. **选区变化处理**：
+   ```typescript
+   if (manager.shouldInsertReference) {
+     const ref = isCrossSheetMode 
+       ? formatCrossSheetReference(sheetName, ...) 
+       : formatReference(...)
+     manager.insertReference(ref)
+     return  // 阻止默认选区行为
+   }
+   ```
 
 ## 测试约定
 - 单元测试位于 `src/components/sheet/tests/*.spec.ts` 和 `src/lib/tests/*.spec.ts`
@@ -391,7 +438,7 @@ FormulaBar (编辑大脑)          CellOverlay (展示视图)
 - 测试框架: Vitest + jsdom
 - 纯函数模块（geometry, references, clipboard, fillHandle, UndoRedoManager, formulaEditState, formulaEditUtils, crossSheetFormula）优先测试
 - 运行单个测试: `npm test -- geometry`
-- 当前测试: 827+ 测试用例，21 个测试文件
+- 当前测试: **887 测试用例**，25 个测试文件
 
 ## 目录结构快速导航
 ```

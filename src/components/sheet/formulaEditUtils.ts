@@ -73,7 +73,27 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * 根据颜色生成对应的浅色背景色
+ * 类似 Element UI Tag 的 light 主题效果
+ */
+function getLightBackground(color: string): string {
+  return `${color}1a`  // 添加 1a 后缀表示约 10% 透明度
+}
+
+/**
+ * 根据颜色生成边框颜色
+ * 类似 Element UI Tag 的 light 主题效果
+ */
+function getLightBorder(color: string): string {
+  return `${color}4d`  // 添加 4d 后缀表示约 30% 透明度
+}
+
+/**
  * 生成带颜色高亮的公式 HTML
+ * 
+ * 引用样式说明：
+ * - 正常状态（light 主题）：浅色背景 + 深色文字 + 浅色边框
+ * - 当前可编辑引用（dark 主题）：深色背景 + 白色文字，表示可以被方向键或点击替换
  * 
  * 边界情况处理：
  * - 空文本返回零宽空格保持光标可见
@@ -94,9 +114,13 @@ export function generateFormulaHtml(
     isFormula?: boolean
     /** 最大长度限制 */
     maxLength?: number
+    /** 是否处于可选择状态 */
+    isSelectableState?: boolean
+    /** 当前光标位置的可编辑引用（该引用显示 dark 主题） */
+    currentEditableRef?: { start: number; end: number } | null
   } = {}
 ): string {
-  const { isFormula = text?.startsWith('=') ?? false, maxLength = 10000 } = options
+  const { isFormula = text?.startsWith('=') ?? false, maxLength = 10000, isSelectableState = false, currentEditableRef = null } = options
   
   // 边界情况：空内容 - 使用零宽空格保持光标可见
   if (!text || text.length === 0) {
@@ -151,7 +175,31 @@ export function generateFormulaHtml(
         j++
       }
       const segment = text.slice(i, j)
-      html += `<span style="color: ${color};">${escapeHtml(segment).replace(/\n/g, '<br>')}</span>`
+      const escapedSegment = escapeHtml(segment).replace(/\n/g, '<br>')
+      
+      // 判断当前段落是否是可编辑引用（光标所在的引用）
+      const isCurrentEditable = currentEditableRef && 
+        i >= currentEditableRef.start && 
+        j <= currentEditableRef.end
+      
+      console.log('[generateFormulaHtml] 渲染引用段落', {
+        segment,
+        i,
+        j,
+        currentEditableRef,
+        isSelectableState,
+        isCurrentEditable
+      })
+      
+      if (isSelectableState && isCurrentEditable) {
+        // 当前可编辑引用：dark 主题（深色背景 + 白色文字），告知用户可以被替换
+        html += `<span style="color: #fff; background-color: ${color}; border-radius: 4px; padding: 0 4px; margin: 0 1px;">${escapedSegment}</span>`
+      } else {
+        // 其他引用：light 主题（浅色背景 + 深色文字 + 浅色边框）
+        const bgColor = getLightBackground(color)
+        const borderColor = getLightBorder(color)
+        html += `<span style="color: ${color}; background-color: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 4px; padding: 0 4px; margin: 0 1px;">${escapedSegment}</span>`
+      }
       i = j
     } else {
       // 找到连续的无颜色文本
@@ -422,13 +470,25 @@ interface FormulaReferenceInput {
  * @param text - 公式文本
  * @param references - 引用列表（支持 range 或 ref 字段）
  * @param isFormula - 是否为公式模式
+ * @param isSelectableState - 是否处于可选择状态（引用可被替换）
+ * @param currentEditableRef - 当前光标位置的可编辑引用（用于显示 dark 主题）
  * @returns HTML 字符串
  */
 export function generateFormulaHtmlFromRefs(
   text: string,
   references: FormulaReferenceInput[] | undefined,
-  isFormula: boolean
+  isFormula: boolean,
+  isSelectableState: boolean = false,
+  currentEditableRef: { start: number; end: number } | null = null
 ): string {
+  console.log('[generateFormulaHtmlFromRefs] 入参', {
+    text,
+    referencesCount: references?.length,
+    isFormula,
+    isSelectableState,
+    currentEditableRef
+  })
+  
   if (!text || text.length === 0) {
     return '\u200B'
   }
@@ -458,7 +518,7 @@ export function generateFormulaHtmlFromRefs(
     }
   }
   
-  return generateFormulaHtml(text, refs, { isFormula })
+  return generateFormulaHtml(text, refs, { isFormula, isSelectableState, currentEditableRef })
 }
 
 /**

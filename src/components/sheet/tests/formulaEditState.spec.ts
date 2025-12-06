@@ -5,7 +5,9 @@ import {
   findReferenceToReplace,
   insertOrReplaceReference,
   formatCrossSheetReference,
-  getCellAddress
+  getCellAddress,
+  findPartialReferenceBeforeCursor,
+  parseCellReference
 } from '../formulaEditState'
 
 describe('formulaEditState - 辅助函数', () => {
@@ -216,92 +218,6 @@ describe('formulaEditState - FormulaEditManager', () => {
     })
   })
 
-  describe('switchSource', () => {
-    it('应该切换编辑源但保留其他状态', () => {
-      manager.startEdit({
-        source: 'cell',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1+B1',
-        mode: 'edit'
-      })
-      manager.updateValue('=A1+B1+C1')
-
-      manager.switchSource('formulaBar')
-
-      expect(manager.state.source).toBe('formulaBar')
-      expect(manager.state.currentValue).toBe('=A1+B1+C1')
-      expect(manager.state.row).toBe(0)
-      expect(manager.state.col).toBe(0)
-    })
-
-    it('未在编辑时应该忽略切换', () => {
-      manager.switchSource('formulaBar')
-      expect(manager.state.source).toBeNull()
-    })
-
-    it('相同源应该忽略切换', () => {
-      manager.startEdit({
-        source: 'cell',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'test',
-        mode: 'edit'
-      })
-
-      manager.switchSource('cell')
-      expect(manager.state.source).toBe('cell')
-    })
-  })
-
-  describe('isCrossSheetMode', () => {
-    it('非活跃状态返回 false', () => {
-      expect(manager.isCrossSheetMode('sheet1')).toBe(false)
-    })
-
-    it('单元格编辑返回 false', () => {
-      manager.startEdit({
-        source: 'cell',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1',
-        mode: 'edit'
-      })
-
-      expect(manager.isCrossSheetMode('sheet2')).toBe(false)
-    })
-
-    it('公式栏编辑非公式返回 false', () => {
-      manager.startEdit({
-        source: 'formulaBar',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'hello',
-        mode: 'edit'
-      })
-
-      expect(manager.isCrossSheetMode('sheet2')).toBe(false)
-    })
-
-    it('公式栏编辑公式且不同 Sheet 返回 true', () => {
-      manager.startEdit({
-        source: 'formulaBar',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=',
-        mode: 'edit'
-      })
-
-      expect(manager.isCrossSheetMode('sheet1')).toBe(false)
-      expect(manager.isCrossSheetMode('sheet2')).toBe(true)
-    })
-  })
-
   describe('updateValue', () => {
     beforeEach(() => {
       manager.startEdit({
@@ -404,34 +320,6 @@ describe('formulaEditState - FormulaEditManager', () => {
     })
   })
 
-  describe('insertCrossSheetReference', () => {
-    beforeEach(() => {
-      manager.startEdit({
-        source: 'formulaBar',
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=',
-        mode: 'edit'
-      })
-    })
-
-    it('应该插入跨 Sheet 引用', () => {
-      const result = manager.insertCrossSheetReference('Sheet2', 0, 0)
-
-      expect(result).not.toBeNull()
-      expect(result!.newValue).toBe('=Sheet2!A1')
-      expect(manager.state.currentValue).toBe('=Sheet2!A1')
-    })
-
-    it('应该插入带范围的跨 Sheet 引用', () => {
-      const result = manager.insertCrossSheetReference('Sheet2', 0, 0, 2, 2)
-
-      expect(result).not.toBeNull()
-      expect(result!.newValue).toBe('=Sheet2!A1:C3')
-    })
-  })
-
   describe('confirmEdit', () => {
     it('应该返回编辑结果并重置状态', () => {
       manager.startEdit({
@@ -529,56 +417,10 @@ describe('formulaEditState - FormulaEditManager', () => {
     })
   })
 
-  // ==================== 统一动作流程测试 ====================
-
-  describe('actionStartCellEdit', () => {
-    it('应该启动单元格编辑并返回打开 overlay 的动作', () => {
-      const result = manager.actionStartCellEdit({
-        sheetId: 'sheet1',
-        row: 1,
-        col: 2,
-        value: 'hello',
-        mode: 'edit'
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(1)
-      expect(result.actions[0]).toEqual({
-        type: 'openOverlay',
-        row: 1,
-        col: 2,
-        value: 'hello'
-      })
-      expect(manager.state.active).toBe(true)
-      expect(manager.state.source).toBe('cell')
-    })
-  })
-
-  describe('actionStartFormulaBarEdit', () => {
-    it('应该启动公式栏编辑并返回打开 overlay 和聚焦公式栏的动作', () => {
-      const result = manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1'
-      })
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(2)
-      expect(result.actions[0]).toEqual({
-        type: 'openOverlay',
-        row: 0,
-        col: 0,
-        value: '=A1'
-      })
-      expect(result.actions[1]).toEqual({ type: 'focusFormulaBar' })
-      expect(manager.state.active).toBe(true)
-      expect(manager.state.source).toBe('formulaBar')
-    })
-
-    it('从单元格编辑切换到公式栏时应该返回聚焦公式栏的动作', () => {
-      // 先启动单元格编辑
-      manager.actionStartCellEdit({
+  describe('switchSource', () => {
+    it('应该更新编辑来源', () => {
+      manager.startEdit({
+        source: 'cell',
         sheetId: 'sheet1',
         row: 0,
         col: 0,
@@ -586,551 +428,272 @@ describe('formulaEditState - FormulaEditManager', () => {
         mode: 'edit'
       })
 
-      // 切换到公式栏
-      const result = manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1'
-      })
+      expect(manager.state.source).toBe('cell')
 
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(1)
-      expect(result.actions[0]).toEqual({ type: 'focusFormulaBar' })
+      manager.switchSource('formulaBar')
       expect(manager.state.source).toBe('formulaBar')
+
+      manager.switchSource('cell')
+      expect(manager.state.source).toBe('cell')
+    })
+
+    it('未在编辑时不应更新', () => {
+      manager.switchSource('formulaBar')
+      expect(manager.state.source).toBeNull()
     })
   })
 
-  describe('actionSwitchToFormulaBar', () => {
-    it('单元格编辑时应该切换到公式栏', () => {
-      manager.actionStartCellEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'test',
-        mode: 'edit'
-      })
-
-      const result = manager.actionSwitchToFormulaBar()
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(1)
-      expect(result.actions[0]).toEqual({ type: 'focusFormulaBar' })
-      expect(manager.state.source).toBe('formulaBar')
+  describe('isCrossSheetMode 计算属性', () => {
+    it('未编辑时应为 false', () => {
+      expect(manager.isCrossSheetMode.value).toBe(false)
     })
 
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionSwitchToFormulaBar()
-
-      expect(result.success).toBe(false)
-      expect(result.actions).toHaveLength(0)
-    })
-
-    it('已在公式栏编辑时应该返回成功但无动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'test'
-      })
-
-      const result = manager.actionSwitchToFormulaBar()
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(0)
-    })
-  })
-
-  describe('actionInput', () => {
-    it('公式栏编辑时应该返回同步 overlay 的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-
-      const result = manager.actionInput('=A1', 3)
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(1)
-      expect(result.actions[0]).toEqual({
-        type: 'syncOverlayValue',
-        value: '=A1'
-      })
-      expect(manager.state.currentValue).toBe('=A1')
-      expect(manager.state.cursorPosition).toBe(3)
-    })
-
-    it('单元格编辑时应该返回空动作列表', () => {
-      manager.actionStartCellEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '',
-        mode: 'typing'
-      })
-
-      const result = manager.actionInput('hello', 5)
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toHaveLength(0)
-      expect(manager.state.currentValue).toBe('hello')
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionInput('test', 4)
-
-      expect(result.success).toBe(false)
-      expect(result.actions).toHaveLength(0)
-    })
-  })
-
-  describe('actionConfirm', () => {
-    it('公式栏编辑时应该返回保存数据和关闭 overlay 的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 1,
-        col: 2,
-        value: 'original'
-      })
-      manager.actionInput('new value', 9)
-
-      const result = manager.actionConfirm()
-
-      expect(result.success).toBe(true)
-      expect(result.saveData).toEqual({
-        sheetId: 'sheet1',
-        row: 1,
-        col: 2,
-        value: 'new value'
-      })
-      expect(result.actions).toContainEqual({ type: 'setCellValue', row: 1, col: 2, value: 'new value' })
-      expect(result.actions).toContainEqual({ type: 'closeOverlay' })
-      expect(manager.state.active).toBe(false)
-    })
-
-    it('跨 Sheet 编辑时应该返回切换 Sheet 的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-      manager.switchSheet('sheet2')
-
-      const result = manager.actionConfirm()
-
-      expect(result.success).toBe(true)
-      expect(result.actions[0]).toEqual({ type: 'switchSheet', sheetId: 'sheet1' })
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionConfirm()
-
-      expect(result.success).toBe(false)
-    })
-  })
-
-  describe('actionConfirmAndMoveRight', () => {
-    it('应该返回确认动作和移动到右边的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 2,
-        value: 'test'
-      })
-
-      const result = manager.actionConfirmAndMoveRight()
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toContainEqual({ type: 'selectCell', row: 0, col: 3 })
-    })
-  })
-
-  describe('actionCancel', () => {
-    it('应该返回恢复数据和关闭 overlay 的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 1,
-        col: 2,
-        value: 'original'
-      })
-      manager.actionInput('changed', 7)
-
-      const result = manager.actionCancel()
-
-      expect(result.success).toBe(true)
-      expect(result.restoreData).toEqual({
-        sheetId: 'sheet1',
-        row: 1,
-        col: 2,
-        value: 'original'
-      })
-      expect(result.actions).toContainEqual({ type: 'closeOverlay' })
-      expect(result.actions).toContainEqual({ 
-        type: 'updateFormulaBarDisplay', 
-        row: 1, 
-        col: 2, 
-        value: 'original' 
-      })
-      expect(manager.state.active).toBe(false)
-    })
-
-    it('跨 Sheet 编辑时应该返回切换回源 Sheet 的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-      manager.switchSheet('sheet2')
-
-      const result = manager.actionCancel()
-
-      expect(result.success).toBe(true)
-      expect(result.actions[0]).toEqual({ type: 'switchSheet', sheetId: 'sheet1' })
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionCancel()
-
-      expect(result.success).toBe(false)
-    })
-  })
-
-  describe('actionBlurConfirm', () => {
-    it('普通编辑时应该确认', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'test'
-      })
-
-      const result = manager.actionBlurConfirm()
-
-      expect(result.success).toBe(true)
-      expect(manager.state.active).toBe(false)
-    })
-
-    it('公式模式可选择状态时应该忽略', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-      // 此时 isFormulaMode=true, isInSelectableState=true
-
-      const result = manager.actionBlurConfirm()
-
-      expect(result.success).toBe(false)
-      expect(manager.state.active).toBe(true)  // 仍在编辑
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionBlurConfirm()
-
-      expect(result.success).toBe(false)
-    })
-  })
-
-  describe('actionSelectionChange', () => {
-    it('公式栏公式模式可插入时应该插入引用并返回同步动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-
-      const result = manager.actionSelectionChange(
-        'sheet1',
-        { row: 2, col: 3 },
-        { startRow: 2, startCol: 3, endRow: 2, endCol: 3 },
-        () => 'Sheet1'
-      )
-
-      expect(result.consumed).toBe(true)
-      expect(result.actions).toHaveLength(1)
-      expect(result.actions[0]).toEqual({
-        type: 'syncOverlayValue',
-        value: '=D3'
-      })
-      expect(manager.state.currentValue).toBe('=D3')
-    })
-
-    it('跨 Sheet 时应该插入带 Sheet 名称的引用', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-      manager.switchSheet('sheet2')
-
-      const result = manager.actionSelectionChange(
-        'sheet2',
-        { row: 0, col: 0 },
-        { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
-        () => 'Sheet2'
-      )
-
-      expect(result.consumed).toBe(true)
-      expect(manager.state.currentValue).toBe('=Sheet2!A1')
-    })
-
-    it('范围选择应该插入范围引用', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '='
-      })
-
-      const result = manager.actionSelectionChange(
-        'sheet1',
-        { row: 0, col: 0 },
-        { startRow: 0, startCol: 0, endRow: 2, endCol: 3 },
-        () => 'Sheet1'
-      )
-
-      expect(result.consumed).toBe(true)
-      expect(manager.state.currentValue).toBe('=A1:D3')
-    })
-
-    it('未在编辑时应该不消费事件', () => {
-      const result = manager.actionSelectionChange(
-        'sheet1',
-        { row: 0, col: 0 },
-        { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
-        () => 'Sheet1'
-      )
-
-      expect(result.consumed).toBe(false)
-    })
-
-    it('单元格编辑时应该不消费事件', () => {
-      manager.actionStartCellEdit({
+    it('在源 Sheet 编辑时应为 false', () => {
+      manager.startEdit({
+        source: 'formulaBar',
         sheetId: 'sheet1',
         row: 0,
         col: 0,
         value: '=',
         mode: 'edit'
       })
-
-      const result = manager.actionSelectionChange(
-        'sheet1',
-        { row: 1, col: 1 },
-        { startRow: 1, startCol: 1, endRow: 1, endCol: 1 },
-        () => 'Sheet1'
-      )
-
-      expect(result.consumed).toBe(false)
-    })
-  })
-
-  describe('actionSheetChange', () => {
-    it('未在编辑时应该允许切换', () => {
-      const result = manager.actionSheetChange('sheet2')
-
-      expect(result.allowSwitch).toBe(true)
-      expect(result.needConfirm).toBeUndefined()
+      expect(manager.isCrossSheetMode.value).toBe(false)
     })
 
-    it('单元格编辑时应该需要先确认', () => {
-      manager.actionStartCellEdit({
+    it('切换到其他 Sheet 时应为 true', () => {
+      manager.startEdit({
+        source: 'formulaBar',
         sheetId: 'sheet1',
         row: 0,
         col: 0,
-        value: 'test',
+        value: '=',
         mode: 'edit'
       })
-
-      const result = manager.actionSheetChange('sheet2')
-
-      expect(result.allowSwitch).toBe(true)
-      expect(result.needConfirm).toBe(true)
+      
+      manager.switchSheet('sheet2')
+      expect(manager.isCrossSheetMode.value).toBe(true)
     })
 
-    it('公式栏公式模式应该允许切换（跨 Sheet 模式）', () => {
-      manager.actionStartFormulaBarEdit({
+    it('切回源 Sheet 时应为 false', () => {
+      manager.startEdit({
+        source: 'formulaBar',
         sheetId: 'sheet1',
         row: 0,
         col: 0,
-        value: '='
-      })
-
-      const result = manager.actionSheetChange('sheet2')
-
-      expect(result.allowSwitch).toBe(true)
-      expect(result.needConfirm).toBeUndefined()
-      expect(manager.state.currentSheetId).toBe('sheet2')
-    })
-
-    it('公式栏非公式模式应该需要先确认', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'hello'  // 非公式
-      })
-
-      const result = manager.actionSheetChange('sheet2')
-
-      expect(result.allowSwitch).toBe(true)
-      expect(result.needConfirm).toBe(true)
-    })
-  })
-
-  describe('actionConfirmAndMoveDown', () => {
-    it('应该返回确认动作和移动到下一行的动作', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 2,
-        col: 0,
-        value: 'test'
-      })
-
-      const result = manager.actionConfirmAndMoveDown()
-
-      expect(result.success).toBe(true)
-      expect(result.actions).toContainEqual({ type: 'selectCell', row: 3, col: 0 })
-    })
-  })
-
-  describe('actionCursorPositionChange', () => {
-    it('应该更新光标位置', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1+B2'
-      })
-
-      const result = manager.actionCursorPositionChange(3)
-
-      expect(result.success).toBe(true)
-      expect(manager.state.cursorPosition).toBe(3)
-    })
-
-    it('应该更新选择范围', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1+B2'
-      })
-
-      const result = manager.actionCursorPositionChange(3, { start: 1, end: 3 })
-
-      expect(result.success).toBe(true)
-      expect(manager.state.selectionRange).toEqual({ start: 1, end: 3 })
-      expect(manager.state.hasTextSelection).toBe(true)
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionCursorPositionChange(5)
-
-      expect(result.success).toBe(false)
-    })
-  })
-
-  describe('actionRequestEdit', () => {
-    it('公式栏公式模式时应该切换到单元格编辑', () => {
-      manager.actionStartFormulaBarEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1+'
-      })
-
-      const result = manager.actionRequestEdit(0, 0)
-
-      expect(result.success).toBe(true)
-      expect(manager.state.source).toBe('cell')
-      expect(result.actions).toContainEqual({ type: 'focusOverlay' })
-    })
-
-    it('未在编辑时应该返回失败', () => {
-      const result = manager.actionRequestEdit(0, 0)
-
-      expect(result.success).toBe(false)
-    })
-
-    it('单元格编辑时应该返回失败', () => {
-      manager.actionStartCellEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: '=A1',
+        value: '=',
         mode: 'edit'
       })
-
-      const result = manager.actionRequestEdit(1, 1)
-
-      expect(result.success).toBe(false)
+      
+      manager.switchSheet('sheet2')
+      expect(manager.isCrossSheetMode.value).toBe(true)
+      
+      manager.switchSheet('sheet1')
+      expect(manager.isCrossSheetMode.value).toBe(false)
     })
   })
 
-  describe('actionEditingStateChange', () => {
-    it('开始编辑应该设置状态', () => {
-      const result = manager.actionEditingStateChange({
-        isEditing: true,
-        row: 1,
-        col: 2,
+  describe('shouldInsertReference 计算属性', () => {
+    it('未编辑时应为 false', () => {
+      expect(manager.shouldInsertReference.value).toBe(false)
+    })
+
+    it('非公式模式应为 false', () => {
+      manager.startEdit({
+        source: 'cell',
+        sheetId: 'sheet1',
+        row: 0,
+        col: 0,
         value: 'hello',
-        mode: 'edit',
-        sheetId: 'sheet1'
-      })
-
-      expect(result.success).toBe(true)
-      expect(manager.state.active).toBe(true)
-      expect(manager.state.source).toBe('cell')
-      expect(manager.state.row).toBe(1)
-      expect(manager.state.col).toBe(2)
-    })
-
-    it('结束编辑应该重置状态', () => {
-      manager.actionStartCellEdit({
-        sheetId: 'sheet1',
-        row: 0,
-        col: 0,
-        value: 'test',
         mode: 'edit'
       })
-
-      const result = manager.actionEditingStateChange({
-        isEditing: false,
-        row: 0,
-        col: 0,
-        value: '',
-        sheetId: 'sheet1'
-      })
-
-      expect(result.success).toBe(true)
-      expect(manager.state.active).toBe(false)
+      expect(manager.shouldInsertReference.value).toBe(false)
     })
 
-    it('公式栏编辑时应该忽略单元格编辑状态变化', () => {
-      manager.actionStartFormulaBarEdit({
+    it('公式模式且光标在可选择位置应为 true', () => {
+      manager.startEdit({
+        source: 'formulaBar',
         sheetId: 'sheet1',
         row: 0,
         col: 0,
-        value: '=A1'
+        value: '=',
+        mode: 'edit'
       })
+      // 光标在 = 后面
+      expect(manager.shouldInsertReference.value).toBe(true)
+    })
 
-      const result = manager.actionEditingStateChange({
-        isEditing: true,
-        row: 1,
-        col: 1,
-        value: 'other',
-        sheetId: 'sheet1'
+    it('光标在操作符后应为 true', () => {
+      manager.startEdit({
+        source: 'formulaBar',
+        sheetId: 'sheet1',
+        row: 0,
+        col: 0,
+        value: '=A1+',
+        mode: 'edit'
       })
+      expect(manager.shouldInsertReference.value).toBe(true)
+    })
 
-      expect(result.success).toBe(false)
-      expect(manager.state.source).toBe('formulaBar')  // 保持公式栏编辑
+    it('跨 Sheet 模式下应该正确判断', () => {
+      manager.startEdit({
+        source: 'formulaBar',
+        sheetId: 'sheet1',
+        row: 0,
+        col: 0,
+        value: '=SUM(',
+        mode: 'edit'
+      })
+      
+      manager.switchSheet('sheet2')
+      // 跨 Sheet 且光标在 ( 后面
+      expect(manager.isCrossSheetMode.value).toBe(true)
+      expect(manager.shouldInsertReference.value).toBe(true)
+    })
+  })
+})
+
+describe('formulaEditState - findPartialReferenceBeforeCursor', () => {
+  it('非公式返回 null', () => {
+    expect(findPartialReferenceBeforeCursor('hello', 5)).toBeNull()
+  })
+
+  it('光标在开头返回 null', () => {
+    expect(findPartialReferenceBeforeCursor('=', 0)).toBeNull()
+  })
+
+  it('找到部分列引用', () => {
+    const result = findPartialReferenceBeforeCursor('=A', 2)
+    expect(result).toEqual({ start: 1, partial: 'A' })
+  })
+
+  it('找到部分单元格引用', () => {
+    const result = findPartialReferenceBeforeCursor('=A1', 3)
+    expect(result).toEqual({ start: 1, partial: 'A1' })
+  })
+
+  it('在操作符后找到部分引用', () => {
+    const result = findPartialReferenceBeforeCursor('=A1+B', 5)
+    expect(result).toEqual({ start: 4, partial: 'B' })
+  })
+
+  it('在函数括号后找到部分引用', () => {
+    const result = findPartialReferenceBeforeCursor('=SUM(A', 6)
+    expect(result).toEqual({ start: 5, partial: 'A' })
+  })
+
+  it('空白后无部分引用', () => {
+    const result = findPartialReferenceBeforeCursor('=SUM( ', 6)
+    expect(result).toBeNull()
+  })
+
+  it('找到带$的部分引用', () => {
+    const result = findPartialReferenceBeforeCursor('=$A', 3)
+    expect(result).toEqual({ start: 1, partial: '$A' })
+  })
+})
+
+describe('formulaEditState - parseCellReference', () => {
+  it('空字符串返回 null', () => {
+    expect(parseCellReference('')).toBeNull()
+  })
+
+  it('无效引用返回 null', () => {
+    expect(parseCellReference('hello')).toBeNull()
+    expect(parseCellReference('123')).toBeNull()
+    expect(parseCellReference('=')).toBeNull()
+  })
+
+  it('解析简单单元格引用', () => {
+    const result = parseCellReference('A1')
+    expect(result).toEqual({ startRow: 0, startCol: 0 })
+  })
+
+  it('解析大列号引用', () => {
+    const result = parseCellReference('Z10')
+    expect(result).toEqual({ startRow: 9, startCol: 25 })
+  })
+
+  it('解析多字母列引用', () => {
+    const result = parseCellReference('AA1')
+    expect(result).toEqual({ startRow: 0, startCol: 26 })
+  })
+
+  it('解析带绝对引用符号的引用', () => {
+    expect(parseCellReference('$A$1')).toEqual({ startRow: 0, startCol: 0 })
+    expect(parseCellReference('$A1')).toEqual({ startRow: 0, startCol: 0 })
+    expect(parseCellReference('A$1')).toEqual({ startRow: 0, startCol: 0 })
+  })
+
+  it('解析范围引用', () => {
+    const result = parseCellReference('A1:B3')
+    expect(result).toEqual({
+      startRow: 0,
+      startCol: 0,
+      endRow: 2,
+      endCol: 1
+    })
+  })
+
+  it('解析跨 Sheet 简单引用', () => {
+    const result = parseCellReference('Sheet2!A1')
+    expect(result).toEqual({
+      sheetName: 'Sheet2',
+      startRow: 0,
+      startCol: 0
+    })
+  })
+
+  it('解析跨 Sheet 范围引用', () => {
+    const result = parseCellReference('Sheet2!A1:B3')
+    expect(result).toEqual({
+      sheetName: 'Sheet2',
+      startRow: 0,
+      startCol: 0,
+      endRow: 2,
+      endCol: 1
+    })
+  })
+
+  it('解析带引号的 Sheet 名称', () => {
+    const result = parseCellReference("'Sheet 2'!A1")
+    expect(result).toEqual({
+      sheetName: 'Sheet 2',
+      startRow: 0,
+      startCol: 0
+    })
+  })
+
+  it('解析中文 Sheet 名称', () => {
+    const result = parseCellReference('格式示例!A1')
+    expect(result).toEqual({
+      sheetName: '格式示例',
+      startRow: 0,
+      startCol: 0
+    })
+  })
+
+  it('解析带引号的中文 Sheet 名称', () => {
+    const result = parseCellReference("'格式 示例'!A1")
+    expect(result).toEqual({
+      sheetName: '格式 示例',
+      startRow: 0,
+      startCol: 0
+    })
+  })
+
+  it('解析小写列名（大小写不敏感）', () => {
+    const result = parseCellReference('a1')
+    expect(result).toEqual({ startRow: 0, startCol: 0 })
+  })
+
+  it('解析跨 Sheet 带绝对引用的范围', () => {
+    const result = parseCellReference("'My Data'!$A$1:$C$10")
+    expect(result).toEqual({
+      sheetName: 'My Data',
+      startRow: 0,
+      startCol: 0,
+      endRow: 9,
+      endCol: 2
     })
   })
 })

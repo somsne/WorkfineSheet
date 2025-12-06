@@ -84,22 +84,55 @@ describe('generateFormulaHtml', () => {
     expect(generateFormulaHtml('=A1+B1', [])).toBe('=A1+B1')
   })
   
-  it('公式有引用时生成彩色 HTML', () => {
+  it('公式有引用时生成 light 主题彩色 HTML', () => {
     const refs: FormulaReferenceTextIndex[] = [
       { ref: 'A1', color: '#FF0000', startIndex: 1, endIndex: 3 }
     ]
     const html = generateFormulaHtml('=A1+B1', refs)
-    expect(html).toContain('<span style="color: #FF0000;">A1</span>')
+    // light 主题：浅色背景 + 深色文字 + 浅色边框
+    expect(html).toContain('color: #FF0000')
+    expect(html).toContain('background-color: #FF00001a')  // 10% 透明度背景
+    expect(html).toContain('border: 1px solid #FF00004d')  // 30% 透明度边框
+    expect(html).toContain('>A1</span>')
   })
   
-  it('处理多个引用', () => {
+  it('处理多个引用（light 主题）', () => {
     const refs: FormulaReferenceTextIndex[] = [
       { ref: 'A1', color: '#FF0000', startIndex: 1, endIndex: 3 },
       { ref: 'B1', color: '#00FF00', startIndex: 4, endIndex: 6 }
     ]
     const html = generateFormulaHtml('=A1+B1', refs)
-    expect(html).toContain('<span style="color: #FF0000;">A1</span>')
-    expect(html).toContain('<span style="color: #00FF00;">B1</span>')
+    expect(html).toContain('color: #FF0000')
+    expect(html).toContain('>A1</span>')
+    expect(html).toContain('color: #00FF00')
+    expect(html).toContain('>B1</span>')
+  })
+  
+  it('可替换状态时生成 dark 主题', () => {
+    const refs: FormulaReferenceTextIndex[] = [
+      { ref: 'A1', color: '#4472C4', startIndex: 1, endIndex: 3 }
+    ]
+    // 传入 currentEditableRef 指向当前引用位置，才会触发 dark 主题
+    const html = generateFormulaHtml('=A1', refs, { 
+      isSelectableState: true,
+      currentEditableRef: { start: 1, end: 3 }
+    })
+    // dark 主题：深色背景 + 白色文字
+    expect(html).toContain('color: #fff')
+    expect(html).toContain('background-color: #4472C4')
+    expect(html).toContain('>A1</span>')
+  })
+  
+  it('可替换状态无 currentEditableRef 时使用 light 主题', () => {
+    const refs: FormulaReferenceTextIndex[] = [
+      { ref: 'A1', color: '#4472C4', startIndex: 1, endIndex: 3 }
+    ]
+    // 不传入 currentEditableRef，应使用 light 主题
+    const html = generateFormulaHtml('=A1', refs, { isSelectableState: true })
+    // light 主题：浅色背景 + 彩色文字
+    expect(html).toContain('color: #4472C4')
+    expect(html).toContain('background-color: #4472C41a')
+    expect(html).toContain('>A1</span>')
   })
   
   it('换行符转换为 <br>', () => {

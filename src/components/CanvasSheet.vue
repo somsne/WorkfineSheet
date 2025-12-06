@@ -15,29 +15,6 @@
         @keydown="handleImeKeyDown"
       ></textarea>
       
-      <!-- RichTextInput 富文本编辑器 -->
-      <RichTextInput
-        ref="overlayInputRef"
-        :visible="state.overlay.visible"
-        :value="state.overlay.value"
-        :row="state.overlay.row"
-        :col="state.overlay.col"
-        :top="state.overlay.top"
-        :left="state.overlay.left"
-        :width="state.overlay.width"
-        :height="state.overlay.height"
-        :mode="state.overlay.mode"
-        :is-formula="state.overlay.value.startsWith('=')"
-        :cell-style="state.model.getCellStyle(state.overlay.row, state.overlay.col)"
-        :formula-references="state.richTextFormulaReferences.value"
-        :viewport-width="state.container.value?.clientWidth ?? 800"
-        @enter="handleOverlayEnter"
-        @tab="handleOverlayTab"
-        @blur="handleOverlayBlur"
-        @cancel="handleOverlayCancel"
-        @input-change="state.updateFormulaReferences"
-      />
-      
       <!-- 垂直滚动条 -->
       <div
         v-if="state.scrollbar.v.visible"
@@ -110,10 +87,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign, FormulaReference } from './sheet/types'
+import type { CellFormat, CellStyle, CellBorder, CellImageAlignment, CellImageVerticalAlign } from './sheet/types'
 import { createEventManager, type EventHandlers } from './sheet/events'
+import { calculateOverlayPosition, type OverlayPosition } from './sheet/overlay'
 import { createSheetAPI } from './sheet/api'
 import { extractFormats, applyFormats } from './sheet/formatPainter'
+
 import {
   useSheetState,
   useSheetGeometry,
@@ -132,8 +111,7 @@ import type { SheetViewState } from '../lib/Workbook'
 import type { WorkbookClipboard } from './sheet/types'
 import type { UndoRedoManager } from '../lib/UndoRedoManager'
 
-// @ts-ignore
-import RichTextInput from './RichTextInput.vue'
+
 // @ts-ignore
 import ContextMenu from './ContextMenu.vue'
 // @ts-ignore
@@ -155,14 +133,22 @@ interface Props {
   clipboard?: WorkbookClipboard | null
   /** 当前 Sheet ID（用于判断蚂蚁线显示和 UndoRedo 操作记录） */
   sheetId?: string
-  /** 跨 Sheet 公式编辑状态（由 WorkbookSheet 传递） */
-  crossSheetFormulaState?: {
-    active: boolean
-    sourceSheetId: string
-    currentSheetName: string  // 当前 Sheet 名称（用于生成跨 Sheet 引用）
-    selectionColor?: string
-    formulaReferences?: FormulaReference[]  // 当前 Sheet 需要显示的公式引用
-  } | null
+  /** 外部提供的 displayHtml（由 WorkbookSheet 传递，源自 FormulaEditManager） */
+  externalDisplayHtml?: string
+  /** 是否处于公式引用选择模式（由外部 Manager 控制） */
+  isInReferenceSelectMode?: boolean
+  /** 是否处于跨 Sheet 引用模式（当前 Sheet 不是源 Sheet，需要隐藏选区和填充柄） */
+  isCrossSheetReferenceMode?: boolean
+  /** 外部提供的公式引用（由 WorkbookSheet 传递，用于绘制引用区域边框） */
+  externalFormulaReferences?: Array<{
+    range: string
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+    color: string
+    sheetId?: string  // 引用所属的 Sheet ID
+  }>
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -172,7 +158,10 @@ const props = withDefaults(defineProps<Props>(), {
   initialViewState: undefined,
   clipboard: undefined,
   sheetId: '',
-  crossSheetFormulaState: null
+  externalDisplayHtml: undefined,
+  isInReferenceSelectMode: false,
+  isCrossSheetReferenceMode: false,
+  externalFormulaReferences: () => []
 })
 
 // ==================== Events ====================
@@ -216,6 +205,35 @@ const emit = defineEmits<{
   (e: 'overlay-blur', payload: { row: number; col: number; value: string }): void
   /** 单元格编辑器 Cancel 事件 */
   (e: 'overlay-cancel', payload: { row: number; col: number }): void
+  /** 请求打开全局 Overlay（Workbook 层级管理） */
+  (e: 'open-overlay', payload: {
+    sheetId: string
+    row: number
+    col: number
+    value: string
+    top: number
+    left: number
+    width: number
+    height: number
+    mode: 'edit' | 'typing'
+    cellStyle?: import('./sheet/types').CellStyle
+  }): void
+  /** 请求关闭全局 Overlay */
+  (e: 'close-overlay'): void
+  /** 通知 Overlay 位置更新（滚动时） */
+  (e: 'overlay-position-update', payload: {
+    top: number
+    left: number
+    width: number
+    height: number
+  }): void
+  /** 公式引用选择事件（点击单元格时触发，在引用选择模式下） */
+  (e: 'reference-select', payload: {
+    startRow: number
+    startCol: number
+    endRow: number
+    endCol: number
+  }): void
 }>()
 
 // ==================== 初始化状态 ====================
@@ -293,7 +311,6 @@ const undoRedoWithSheetId = {
 const containerRef = ref<HTMLElement | null>(null)
 const gridCanvasRef = ref<HTMLCanvasElement | null>(null)
 const contentCanvasRef = ref<HTMLCanvasElement | null>(null)
-const overlayInputRef = ref<any>(null)
 const imeProxyRef = ref<HTMLTextAreaElement | null>(null)
 
 // 将 DOM 引用同步到 state
@@ -301,7 +318,6 @@ function syncRefs() {
   state.container.value = containerRef.value
   state.gridCanvas.value = gridCanvasRef.value
   state.contentCanvas.value = contentCanvasRef.value
-  state.overlayInput.value = overlayInputRef.value
   state.imeProxy.value = imeProxyRef.value
 }
 
@@ -347,7 +363,8 @@ const drawing = useSheetDrawing({
   state, 
   geometry, 
   fillHandle,
-  getCrossSheetFormulaState: () => props.crossSheetFormulaState
+  // 引用选择模式下隐藏默认选区（包括同 Sheet 和跨 Sheet）
+  getHideDefaultSelection: () => props.isInReferenceSelectMode || props.isCrossSheetReferenceMode
 })
 drawFn = drawing.draw
 scheduleRedrawFn = drawing.scheduleRedraw
@@ -358,7 +375,22 @@ const input = useSheetInput({
   geometry, 
   onDraw: drawing.draw,
   undoRedoExecutor: undoRedoWithSheetId,
-  onCellValueChange: emitSelectionChange
+  // 全局 overlay 回调（通知 WorkbookSheet 管理 CellOverlay）
+  sheetId: props.sheetId,
+  onOpenOverlay: (payload) => {
+    emit('open-overlay', {
+      sheetId: props.sheetId,
+      row: payload.row,
+      col: payload.col,
+      value: payload.value,
+      top: payload.top,
+      left: payload.left,
+      width: payload.width,
+      height: payload.height,
+      mode: payload.mode,
+      cellStyle: payload.cellStyle
+    })
+  }
 })
 
 // 5. 剪贴板（支持外部剪贴板模式）
@@ -417,9 +449,23 @@ const mouse = useSheetMouse({
     onCut: () => clipboard.onCopy(true), // onCut 内部调用 onCopy(true)
     onPaste: clipboard.onPaste
   },
-  crossSheetFormulaState: props.crossSheetFormulaState ?? undefined,
-  onRequestEdit: (row: number, col: number) => {
-    emit('request-edit', { row, col })
+  onOpenOverlay: (payload) => {
+    emit('open-overlay', {
+      sheetId: props.sheetId,
+      row: payload.row,
+      col: payload.col,
+      value: payload.value,
+      top: payload.top,
+      left: payload.left,
+      width: payload.width,
+      height: payload.height,
+      mode: payload.mode,
+      cellStyle: payload.cellStyle
+    })
+  },
+  isInReferenceSelectMode: () => props.isInReferenceSelectMode,
+  onReferenceSelect: (payload) => {
+    emit('reference-select', payload)
   }
 })
 
@@ -810,16 +856,23 @@ watch(
   { deep: true, immediate: true }
 )
 
-// 监听跨 Sheet 公式状态变化，触发重绘（隐藏/显示选区和填充柄、更新公式引用高亮）
+// 监听外部公式引用变化，同步到内部状态用于绘制引用区域边框
+// 只绘制属于当前 Sheet 的引用（通过 sheetId 过滤）
 watch(
-  () => [
-    props.crossSheetFormulaState?.active,
-    props.crossSheetFormulaState?.formulaReferences
-  ],
-  () => {
+  () => props.externalFormulaReferences,
+  (refs) => {
+    if (refs && refs.length > 0) {
+      // 过滤出属于当前 Sheet 或没有指定 sheetId 的引用
+      const filteredRefs = refs.filter(ref => 
+        !ref.sheetId || ref.sheetId === props.sheetId
+      )
+      state.formulaReferences.value = filteredRefs
+    } else {
+      state.formulaReferences.value = []
+    }
     drawing.draw()
   },
-  { deep: true }
+  { deep: true, immediate: true }
 )
 
 // ==================== API 创建 ====================
@@ -845,6 +898,7 @@ const api = createSheetAPI({
   
   // 单元格值
   getCellValue: (row: number, col: number) => state.formulaSheet.getValue(row, col),
+  getRawCellValue: (row: number, col: number) => state.formulaSheet.getDisplayValue(row, col),
   setCellValue: (row: number, col: number, value: string) => {
     state.formulaSheet.setValue(row, col, value)
     drawing.draw()
@@ -1554,46 +1608,6 @@ function setFormatPainterState(formatPainterState: { mode: 'off' | 'single' | 'c
   drawing.draw()
 }
 
-/** 
- * @deprecated 剪贴板现在由 Workbook 层级通过 props.clipboard 管理
- * 保留此方法仅用于向后兼容
- */
-function getClipboardState() {
-  // 返回当前蚂蚁线状态（剪贴板数据由外部管理）
-  return {
-    data: null,
-    startRow: -1,
-    startCol: -1,
-    mergedRegions: [],
-    tsvContent: '',
-    copyTs: 0,
-    copyRange: state.copyRange.visible ? {
-      startRow: state.copyRange.startRow,
-      startCol: state.copyRange.startCol,
-      endRow: state.copyRange.endRow,
-      endCol: state.copyRange.endCol
-    } : null
-  }
-}
-
-/** 
- * @deprecated 剪贴板现在由 Workbook 层级通过 props.clipboard 管理
- * 保留此方法仅用于向后兼容
- */
-function setClipboardState(_clipboardState: { 
-  data: any; 
-  startRow: number; 
-  startCol: number; 
-  mergedRegions: any[]; 
-  tsvContent?: string;
-  copyTs?: number;
-  copyRange?: { startRow: number; startCol: number; endRow: number; endCol: number } | null
-}) {
-  // 剪贴板数据现在通过 props.clipboard 传入，不再在这里设置
-  // 蚂蚁线状态由 watch(props.clipboard) 自动同步
-  console.warn('setClipboardState is deprecated. Clipboard is now managed by Workbook via props.clipboard')
-}
-
 /** 是否正在编辑公式 */
 function isEditingFormula(): boolean {
   return state.overlay.visible && state.overlay.value.startsWith('=')
@@ -1608,36 +1622,6 @@ function getFormulaEditState() {
     value: state.overlay.value,
     mode: state.overlay.mode
   }
-}
-
-// ==================== Overlay 事件处理（向上传递给 WorkbookSheet） ====================
-
-/** RichTextInput Enter 键事件 - 向上传递 */
-function handleOverlayEnter(value: string) {
-  const row = state.overlay.row
-  const col = state.overlay.col
-  emit('overlay-enter', { row, col, value })
-}
-
-/** RichTextInput Tab 键事件 - 向上传递 */
-function handleOverlayTab(value: string) {
-  const row = state.overlay.row
-  const col = state.overlay.col
-  emit('overlay-tab', { row, col, value })
-}
-
-/** RichTextInput Blur 事件 - 向上传递 */
-function handleOverlayBlur(value: string) {
-  const row = state.overlay.row
-  const col = state.overlay.col
-  emit('overlay-blur', { row, col, value })
-}
-
-/** RichTextInput Cancel 事件 - 向上传递 */
-function handleOverlayCancel() {
-  const row = state.overlay.row
-  const col = state.overlay.col
-  emit('overlay-cancel', { row, col })
 }
 
 // ==================== 公式栏支持方法 ====================
@@ -1709,84 +1693,13 @@ function selectRange(startRow: number, startCol: number, endRow: number, endCol:
   // watch 会自动发射选区变化事件
 }
 
-/** 开始编辑当前单元格 */
-function startEditingCurrentCell() {
-  const row = state.selected.row
-  const col = state.selected.col
-  const value = state.formulaSheet.getDisplayValue(row, col) ?? ''
-  
-  input.openOverlay(row, col, value, 'edit')
-}
 
-/** 确认编辑 */
-function confirmEditing() {
-  if (state.overlay.visible) {
-    input.onOverlaySave(state.overlay.value)
-  }
-}
-
-/** 
- * 确认编辑并移动到指定方向 
- * @param value 要保存的值
- * @param direction 移动方向
- * @param options 可选参数（row/col，用于从 FormulaBar 编辑时传入）
- */
-function confirmEditingWithDirection(
-  value: string, 
-  direction: 'down' | 'right' | 'none',
-  options?: { row?: number; col?: number }
-) {
-  // 使用传入的 row/col 或从 overlay 获取
-  const row = options?.row ?? state.overlay.row
-  const col = options?.col ?? state.overlay.col
-  const saveOptions = { row, col }
-  
-  switch (direction) {
-    case 'down':
-      input.onOverlayEnter(value, saveOptions)
-      break
-    case 'right':
-      input.onOverlayTab(value, saveOptions)
-      break
-    case 'none':
-      input.onOverlayBlur(value, saveOptions)
-      break
-  }
-}
-
-/** 取消编辑 */
-function cancelEditing() {
-  if (state.overlay.visible) {
-    input.onOverlayCancel()
-  }
-}
-
-/** 设置编辑中的值 */
-function setEditingValue(value: string) {
-  if (state.overlay.visible) {
-    state.overlay.value = value
-    // watch 会自动发射编辑状态变化事件
-  }
-}
-
-/** 打开 overlay 并设置指定值（用于编辑源切换） */
-function openOverlayWithValue(row: number, col: number, value: string) {
-  input.openOverlay(row, col, value, 'edit')
-}
-
-/** 获取当前编辑值 */
-function getCurrentEditingValue(): string {
-  return state.overlay.value
-}
-
-/** 获取单元格显示值（对于公式单元格返回公式字符串，否则返回原始值） */
-function getCellDisplayValue(row: number, col: number): string {
-  return state.formulaSheet.getDisplayValue(row, col) ?? ''
-}
-
-/** 设置 FormulaBar 引用（供 WorkbookSheet 调用） */
-function setFormulaBarRef(ref: any) {
-  state.formulaBarInput.value = ref
+/** 获取单元格位置信息（用于全局 overlay 定位） */
+function getCellPosition(row: number, col: number): OverlayPosition {
+  const viewport = state.viewport
+  const sizes = geometry.createSizeAccess()
+  const cfg = geometry.createGeometryConfig()
+  return calculateOverlayPosition(row, col, viewport, sizes, cfg)
 }
 
 // 扩展 API 对象
@@ -1796,23 +1709,15 @@ const extendedApi = {
   setViewState,
   getFormatPainterState,
   setFormatPainterState,
-  getClipboardState,
-  setClipboardState,
   isEditingFormula,
   getFormulaEditState,
   // 公式栏支持
   getSelectionRange,
   selectCell,
   selectRange,
-  startEditingCurrentCell,
-  confirmEditing,
-  cancelEditing,
-  setEditingValue,
-  openOverlayWithValue,
-  getCurrentEditingValue,
-  getCellDisplayValue,
-  confirmEditingWithDirection,
-  setFormulaBarRef
+  getCellPosition,
+  // IME 焦点
+  focusImeProxy: input.focusImeProxy
 }
 
 defineExpose(extendedApi)

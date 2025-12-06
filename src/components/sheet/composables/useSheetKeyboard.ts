@@ -30,7 +30,7 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
   } = state
   
   const { ensureVisible } = geometry
-  const { openOverlay, focusImeProxy } = input
+  const { focusImeProxy } = input
   const { onCopy, onCut, clearCopyRange, hasInternalClipboard } = clipboard
   
   /**
@@ -274,9 +274,6 @@ export function useSheetKeyboard({ state, geometry, input, clipboard, drawing, o
     ) {
       if (e.key === '=') {
         e.preventDefault()
-        openOverlay(selected.row, selected.col, '=', 'typing')
-      } else {
-        openOverlay(selected.row, selected.col, '', 'typing')
       }
       return
     }

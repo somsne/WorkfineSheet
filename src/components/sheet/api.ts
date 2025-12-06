@@ -658,9 +658,14 @@ export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAP
   redraw(): void
   
   /**
-   * 获取单元格值
+   * 获取单元格值（计算后的值）
    */
   getCellValue(row: number, col: number): string
+  
+  /**
+   * 获取单元格原始值（公式返回公式字符串，非公式返回原始值）
+   */
+  getRawCellValue(row: number, col: number): string
   
   /**
    * 设置单元格值
@@ -748,6 +753,7 @@ export function createSheetAPI(context: {
   
   // 单元格值
   getCellValue: (row: number, col: number) => string
+  getRawCellValue: (row: number, col: number) => string
   setCellValue: (row: number, col: number, value: string) => void
   
   // 样式相关
@@ -951,6 +957,7 @@ export function createSheetAPI(context: {
     // 其他
     redraw: context.draw,
     getCellValue: context.getCellValue,
+    getRawCellValue: context.getRawCellValue,
     setCellValue: context.setCellValue,
     
     // 样式 API
