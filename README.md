@@ -10,7 +10,7 @@
 
 **项目**: 基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组件  
 **特点**: 🎯 模块化架构 · 📝 Excel 公式支持 · 🎨 单元格样式 · ✅ 完整测试覆盖 · 🤖 99%由AI生成  
-**状态**: 🟢 核心功能完成 · 🎨 样式系统 100% · 📝 公式编辑代理层开发中 · 827+ 单元测试全部通过
+**状态**: 🟢 核心功能完成 · 🎨 样式系统 100% · ✅ 公式编辑系统完成 · 839 单元测试全部通过
 
 ---
 
@@ -20,13 +20,15 @@
 - ✅ **模块化架构**: 16 个独立模块，职责清晰
 - ✅ **样式系统**: 12 种样式属性，支持中英文自动换行和文字旋转
 - ✅ **类型安全**: TypeScript 严格模式，零类型错误
-- ✅ **测试覆盖**: 827+ 单元测试，100% 通过率
+- ✅ **测试覆盖**: 839 单元测试，100% 通过率
 
-### 公式编辑系统（开发中）
-- 🔧 **FormulaEditManager**: 统一的公式编辑状态代理层
-- ✅ **FormulaBar 集成**: 公式栏完整功能支持
-- ✅ **跨 Sheet 引用**: 支持 `=Sheet2!A1` 格式公式
-- 🔧 **CellOverlay 重构**: 下一步将重构单元格编辑器为纯展示层
+### 公式编辑系统 ✅
+- ✅ **FormulaEditManager**: 统一的公式编辑状态中心，所有编辑状态集中管理
+- ✅ **全局 Overlay 架构**: 删除 RichTextInput，统一使用 CellOverlay
+- ✅ **跨 Sheet 引用**: 完整支持 `=Sheet2!A1:B3` 格式，带空格 Sheet 名称自动加引号
+- ✅ **方向键选择模式**: 公式编辑时按方向键自动进入单元格引用选择
+- ✅ **动态引用可视化**: 光标所在引用深色主题，其他引用浅色主题
+- ✅ **智能引用替换**: 光标位置自动判断插入/替换引用
 
 ### 性能优化
 - ⚡ **Canvas 渲染**: 比 DOM 性能提升 10 倍以上
@@ -109,12 +111,14 @@ npm run test
 - **[docs/GITHUB_ACTIONS.md](./docs/GITHUB_ACTIONS.md)** - CI/CD 自动化配置
 - **[refactor-progress.md](./refactor-progress.md)** - 详细的重构进度跟踪
 
-### 🔥 最新功能
-- **[docs/features/FORMULA_EDITING_SYSTEM.md](./docs/features/FORMULA_EDITING_SYSTEM.md)** - 公式编辑系统架构文档（FormulaEditManager 代理层）
-- **[docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md](./docs/features/CELL_OVERLAY_REFACTOR_PROPOSAL.md)** - CellOverlay 重构方案研究
+### 🔥 最新功能（公式编辑系统重构完成）
+- **[docs/architecture/FORMULA_EDIT_MANAGER_DESIGN.md](./docs/architecture/FORMULA_EDIT_MANAGER_DESIGN.md)** - FormulaEditManager 架构设计文档（唯一状态中心）
+- **[docs/features/OVERLAY_CROSS_SHEET_BEHAVIOR.md](./docs/features/OVERLAY_CROSS_SHEET_BEHAVIOR.md)** - CellOverlay 与 FormulaBar 行为文档
+- **[docs/features/GLOBAL_CELL_OVERLAY.md](./docs/features/GLOBAL_CELL_OVERLAY.md)** - 全局 Overlay 设计文档
+- **[docs/architecture/USER_ACTION_CHAINS.md](./docs/architecture/USER_ACTION_CHAINS.md)** - 用户操作流程文档
+- **[docs/architecture/REFACTOR_EXECUTION_PLAN.md](./docs/architecture/REFACTOR_EXECUTION_PLAN.md)** - 重构执行计划
 - **[docs/P0.1-CHECKLIST.md](./docs/P0.1-CHECKLIST.md)** - 单元格样式系统开发进度（100% 完成）
 - **[DEMO_STYLES.md](./DEMO_STYLES.md)** - 单元格样式演示数据说明
-- **[docs/RICHTEXTINPUT_COMPLETE.md](./docs/RICHTEXTINPUT_COMPLETE.md)** - RichTextInput 富文本编辑器完成报告
 
 ### 🧪 测试文档
 - **[docs/TEST_SUMMARY.md](./docs/TEST_SUMMARY.md)** - 测试工作总结
@@ -132,23 +136,31 @@ npm run test
 
 ### 🎯 电子表格功能
 - ✅ **公式计算**: 支持 100+ Excel 函数 (SUM, VLOOKUP, IF 等)
-- ✅ **单元格引用**: 相对引用 (A1)、绝对引用 ($A$1)、范围引用 (A1:B2)
-- ✅ **公式编辑**: 可视化单元格选择、彩色引用边框、跨 Sheet 引用支持
+- ✅ **单元格引用**: 相对引用 (A1)、绝对引用 ($A$1)、范围引用 (A1:B2)、跨 Sheet 引用 (Sheet2!A1)
+- ✅ **公式编辑系统**:
+  - FormulaEditManager 统一状态管理
+  - 可视化单元格选择，彩色引用边框
+  - 方向键选择模式（按方向键自动插入引用）
+  - 动态引用可视化（光标位置引用深色主题）
+  - 智能引用替换（自动判断插入/替换）
+  - 完整跨 Sheet 支持（Sheet2!A1:B3）
 - ✅ **单元格样式**: 字体大小/颜色、粗体/斜体/下划线/删除线、对齐方式、背景色、文字旋转、自动换行
 - ✅ **边框设置**: 所有边框/外边框/上下左右边框、多种边框样式（细线/中等/粗线/虚线/点线/双线）、自定义边框颜色
 - ✅ **单元格格式**: 数字、日期、百分比、货币等10+种格式
 - ✅ **合并单元格**: 合并/取消合并、边框自动处理、Excel 行为兼容
-- ✅ **行列操作**: 插入/删除行列、自定义行高列宽
+- ✅ **行列操作**: 插入/删除行列、自定义行高列宽、隐藏行列
 - ✅ **剪贴板**: Excel 格式互操作、右键菜单剪切/复制/粘贴
 - ✅ **撤销重做**: 完整的操作历史管理、跨 Sheet 支持、选区恢复
-- ✅ **隐藏功能**: 隐藏行列、网格线开关
+- ✅ **多 Sheet 工作簿**: Sheet 切换、增删、重命名、颜色标记、隐藏
 
 ### 🏗️ 架构优势
 - ✅ **模块化设计**: 16 个独立模块，职责清晰
-- ✅ **公式编辑代理层**: FormulaEditManager 统一管理编辑状态
+- ✅ **统一状态管理**: FormulaEditManager 作为唯一编辑状态中心
+- ✅ **全局 Overlay 架构**: WorkbookSheet 统一管理，支持跨 Sheet 编辑
+- ✅ **事件系统重构**: cursor-change 事件、统一键盘处理、IME 完整支持
 - ✅ **样式系统**: 12 种样式属性，完整的渲染支持
 - ✅ **类型安全**: 完整的 TypeScript 类型定义
-- ✅ **测试覆盖**: 827+ 单元测试，100% 通过率
+- ✅ **测试覆盖**: 839 单元测试，100% 通过率
 - ✅ **性能优化**: Canvas 渲染、虚拟滚动、帧调度
 
 ### 🚧 待开发功能
@@ -181,7 +193,7 @@ npm run test
 - 🖨️ **打印输出** - 打印预览与设置
 - 📊 **透视表** - 数据透视分析
 - 🔍 **缩放功能** - 视图缩放控制
-- 📑 **多 Sheet 公式兼容** - 跨工作表引用 **（基础功能已完成）**
+- ✅ **多 Sheet 公式支持** - 跨工作表引用 **（已完成）**
 - 💡 **Excel 公式自动补全** - 公式智能提示
 
 #### 🎁 可选增强（未来规划）
@@ -212,8 +224,8 @@ src/components/sheet/
 ├─ uiMenus.ts            # 上下文菜单
 ├─ events.ts             # 事件管理器
 ├─ api.ts                # 公共 API
-├─ formulaEditState.ts   # 公式编辑状态管理（代理层）⭐ 新增
-└─ formulaEditUtils.ts   # 公式编辑工具函数 ⭐ 新增
+├─ formulaEditState.ts   # 公式编辑状态管理（FormulaEditManager）⭐
+└─ formulaEditUtils.ts   # 公式编辑工具函数（光标管理、HTML 生成）⭐
 
 lib/
 ├─ FormulaEngine.ts      # 公式计算引擎（100+ 函数）
@@ -247,10 +259,10 @@ npm run test:coverage # 生成覆盖率报告
 ```
 
 **测试统计**:
-- ✅ **测试文件**: 21 个
-- ✅ **测试用例**: 827+ 个
+- ✅ **测试文件**: 24 个
+- ✅ **测试用例**: 839 个
 - ✅ **通过率**: 100%
-- ✅ **执行时间**: ~2.0s
+- ✅ **执行时间**: ~1.8s
 
 **覆盖模块**:
 - `geometry.spec.ts` - 几何计算（行列位置、尺寸、隐藏行列）
@@ -265,8 +277,9 @@ npm run test:coverage # 生成覆盖率报告
 - `formatValue.spec.ts` - 单元格格式化（数字、日期、百分比、货币）
 - `fillHandle.spec.ts` - 填充柄功能（模式识别、值生成、公式调整）
 - `UndoRedoManager.spec.ts` - 撤销重做（跨 Sheet 操作、选区恢复）
-- `formulaEditState.spec.ts` - 公式编辑状态管理（79+ 用例）⭐ 新增
-- `formulaEditUtils.spec.ts` - 公式编辑工具函数（51 用例）⭐ 新增
+- `formulaEditState.spec.ts` - 公式编辑状态管理（126 用例）⭐
+- `formulaEditUtils.spec.ts` - 公式编辑工具函数（59 用例）⭐
+- `CellOverlay.spec.ts` - CellOverlay 组件测试（87 用例）⭐ 新增
 - `performance.spec.ts` - 性能基准测试
 - `ime-utils.spec.ts` - 中文输入法支持
 
@@ -297,15 +310,26 @@ npm run test:coverage # 生成覆盖率报告
 ```
 
 ### 重构成果
+
+#### 公式编辑系统重构 ✅ (最新完成)
+- **FormulaEditManager**: 统一编辑状态中心，所有编辑状态集中管理
+- **全局 Overlay 架构**: 删除 RichTextInput，统一使用 CellOverlay.vue
+- **事件系统重构**: cursor-change 事件、统一键盘处理、IME 完整支持
+- **跨 Sheet 引用**: 完整支持 `Sheet2!A1:B3` 格式，带空格 Sheet 名称自动加引号
+- **方向键选择模式**: 公式编辑时按方向键自动进入单元格引用选择
+- **动态引用可视化**: 光标所在引用深色主题，其他引用浅色主题
+- **智能引用替换**: 光标位置自动判断插入/替换引用
+- **代码变更**: 25 个文件，+9961/-5150 行代码
+- **新增文档**: 5 个架构文档（FORMULA_EDIT_MANAGER_DESIGN.md 等）
+
+#### 整体重构成果
 - **模块架构**: 1 个组件 → 16 个独立模块
-- **公式编辑**: FormulaEditManager 代理层，统一管理编辑状态
 - **样式系统**: 12 种样式属性渲染完成（字体、颜色、对齐、背景、旋转、换行）
 - **单元格格式**: 数字、日期、百分比、货币等 10+ 种格式
 - **合并单元格**: 合并/取消合并、边框收集与分发、Excel 行为兼容
-- **跨 Sheet 引用**: 支持 `=Sheet2!A1` 格式公式
-- **测试覆盖**: 0 → 827+ 单元测试（21 个测试文件），100% 通过率
-- **文档完善**: 新增 40+ 个文档文件
-- **构建状态**: ✅ 零错误（302.89 kB, gzip: 95.81 kB）
+- **测试覆盖**: 0 → 839 单元测试（24 个测试文件），100% 通过率
+- **文档完善**: 新增 45+ 个文档文件
+- **构建状态**: ✅ 零错误
 - **类型检查**: ✅ 完全通过 TypeScript 严格模式
 
 详见 [refactor-progress.md](./refactor-progress.md)
