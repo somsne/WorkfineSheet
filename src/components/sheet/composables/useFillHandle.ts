@@ -632,8 +632,14 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
   
   /**
    * 双击填充柄快速填充
-   * 自动向下填充到相邻列数据的末尾行
-   * @returns true 如果执行了填充
+   * 
+   * Excel 逻辑：
+   * 1. 检查左侧相邻列，从源区域起始行开始是否有连续数据
+   * 2. 如果左侧没有数据，检查右侧相邻列
+   * 3. 向下填充到相邻列数据的最后一行
+   * 4. 如果相邻列没有数据，不执行任何操作
+   * 
+   * @returns true 如果事件已处理（即使没有执行填充也返回 true 防止打开 overlay）
    */
   function handleDoubleClick(x: number, y: number): boolean {
     if (!isOnFillHandle(x, y)) return false
@@ -646,42 +652,81 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     fillOptionsMenu.targetRange = null
     fillOptionsMenu.direction = null
     
-    // 查找左侧相邻列数据的末尾行
     const leftCol = selectionRange.startCol - 1
     const rightCol = selectionRange.endCol + 1
+    const startRow = selectionRange.startRow
     
     let targetEndRow = selectionRange.endRow
+    let referenceCol = -1
     
-    // 检查左侧列
+    // 优先检查左侧列（Excel 行为）
     if (leftCol >= 0) {
-      for (let r = selectionRange.endRow + 1; r < totalRows; r++) {
-        const value = model.getValue(r, leftCol)
-        if (!value || value.trim() === '') {
-          break
+      // 检查左侧列在源区域起始行是否有数据
+      const leftStartValue = model.getValue(startRow, leftCol)
+      if (leftStartValue && leftStartValue.trim() !== '') {
+        referenceCol = leftCol
+        // 从源区域结束行的下一行开始，找到左侧列数据的末尾
+        for (let r = selectionRange.endRow + 1; r < totalRows; r++) {
+          const value = model.getValue(r, leftCol)
+          if (!value || value.trim() === '') {
+            break
+          }
+          targetEndRow = r
         }
-        targetEndRow = r
       }
     }
     
-    // 检查右侧列
-    if (rightCol < totalCols && targetEndRow === selectionRange.endRow) {
-      for (let r = selectionRange.endRow + 1; r < totalRows; r++) {
-        const value = model.getValue(r, rightCol)
-        if (!value || value.trim() === '') {
-          break
+    // 如果左侧没有找到数据，检查右侧列
+    if (referenceCol === -1 && rightCol < totalCols) {
+      const rightStartValue = model.getValue(startRow, rightCol)
+      if (rightStartValue && rightStartValue.trim() !== '') {
+        referenceCol = rightCol
+        // 从源区域结束行的下一行开始，找到右侧列数据的末尾
+        for (let r = selectionRange.endRow + 1; r < totalRows; r++) {
+          const value = model.getValue(r, rightCol)
+          if (!value || value.trim() === '') {
+            break
+          }
+          targetEndRow = r
         }
-        targetEndRow = r
       }
     }
     
-    // 如果没有找到数据，向下填充 10 行作为默认
-    if (targetEndRow === selectionRange.endRow) {
-      targetEndRow = Math.min(selectionRange.endRow + 10, totalRows - 1)
+    // 如果左右都没有数据，检查当前选区列下方是否有数据
+    if (referenceCol === -1) {
+      // 检查选区范围内的每一列，找下方第一个有数据的单元格
+      let hasDataBelow = false
+      for (let c = selectionRange.startCol; c <= selectionRange.endCol; c++) {
+        const belowValue = model.getValue(selectionRange.endRow + 1, c)
+        if (belowValue && belowValue.trim() !== '') {
+          hasDataBelow = true
+          break
+        }
+      }
+      
+      if (hasDataBelow) {
+        // 向下扫描直到遇到所有列都为空的行
+        for (let r = selectionRange.endRow + 1; r < totalRows; r++) {
+          let rowHasData = false
+          for (let c = selectionRange.startCol; c <= selectionRange.endCol; c++) {
+            const value = model.getValue(r, c)
+            if (value && value.trim() !== '') {
+              rowHasData = true
+              break
+            }
+          }
+          if (!rowHasData) {
+            break
+          }
+          targetEndRow = r
+        }
+      }
     }
     
-    // 如果目标行和当前行相同，不执行填充
+    // 如果没有需要填充的行，不执行填充
+    // 但仍返回 true 表示事件已处理，防止打开 overlay
     if (targetEndRow <= selectionRange.endRow) {
-      return false
+      return true
     }
     
     // 设置填充状态

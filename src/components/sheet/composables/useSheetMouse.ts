@@ -70,9 +70,11 @@ export interface UseSheetMouseOptions {
   isInReferenceSelectMode?: () => boolean
   /** 公式引用选择回调（点击单元格时触发） */
   onReferenceSelect?: (payload: ReferenceSelectPayload) => void
+  /** 提交编辑回调（填充柄拖拽前触发，请求保存当前编辑内容） */
+  onCommitEdit?: () => void
 }
 
-export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle, clipboardOps, onOpenOverlay, isInReferenceSelectMode, onReferenceSelect }: UseSheetMouseOptions) {
+export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, scheduleRedraw, fillHandle, clipboardOps, onOpenOverlay, isInReferenceSelectMode, onReferenceSelect, onCommitEdit }: UseSheetMouseOptions) {
   const {
     constants,
     container, overlayInput, formulaBarInput,
@@ -591,22 +593,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
 
     // 检测填充柄拖拽
     if (fillHandle && fillHandle.isOnFillHandle(x, y)) {
-      // 如果正在编辑单元格，先保存内容（不移动到下一单元格）
-      if (overlay.visible && overlayInput.value) {
-        // 记住当前编辑的单元格位置
-        const editingRow = overlay.row
-        const editingCol = overlay.col
-        
-        // 设置选区为刚编辑的单元格
-        selected.row = editingRow
-        selected.col = editingCol
-        selectionRange.startRow = editingRow
-        selectionRange.startCol = editingCol
-        selectionRange.endRow = editingRow
-        selectionRange.endCol = editingCol
-        
-        // 更新填充柄位置
-        fillHandle.updateFillHandlePosition()
+      // 如果正在编辑单元格，先通知外部保存内容
+      if (onCommitEdit) {
+        onCommitEdit()
       }
       
       // 开始填充柄拖拽
@@ -653,6 +642,12 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const rect = container.value.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+    
+    // 检查是否双击填充柄（自动填充）
+    if (fillHandle && fillHandle.handleDoubleClick(x, y)) {
+      e.preventDefault()
+      return
+    }
     
     // 在表头区域不处理（可以用于其他操作如调整列宽）
     if (x <= constants.ROW_HEADER_WIDTH || y <= constants.COL_HEADER_HEIGHT) {

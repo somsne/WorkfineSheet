@@ -91,9 +91,9 @@ describe('CellOverlay', () => {
       const wrapper = createWrapper({ top: 100, left: 200 })
       const container = wrapper.find('.cell-overlay')
       const style = container.attributes('style') || ''
-      // 边框补偿 -2
-      expect(style).toContain('top: 98px')
-      expect(style).toContain('left: 198px')
+      // 边框补偿 -1 (使 2px 边框中心对齐网格线)
+      expect(style).toContain('top: 99px')
+      expect(style).toContain('left: 199px')
       wrapper.unmount()
     })
     
@@ -103,8 +103,8 @@ describe('CellOverlay', () => {
       await wrapper.setProps({ top: 200, left: 300 })
       const container = wrapper.find('.cell-overlay')
       const style = container.attributes('style') || ''
-      expect(style).toContain('top: 198px')
-      expect(style).toContain('left: 298px')
+      expect(style).toContain('top: 199px')
+      expect(style).toContain('left: 299px')
       wrapper.unmount()
     })
   })
@@ -114,24 +114,27 @@ describe('CellOverlay', () => {
   describe('边框颜色', () => {
     it('普通模式显示蓝色边框', () => {
       const wrapper = createWrapper({ isFormula: false, isSelectableState: false })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 边框在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('rgb(59, 130, 246)') // #3b82f6
       wrapper.unmount()
     })
     
     it('公式模式显示红色边框', () => {
       const wrapper = createWrapper({ isFormula: true, isSelectableState: false })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 边框在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('rgb(239, 68, 68)') // #ef4444
       wrapper.unmount()
     })
     
     it('可选择状态显示绿色边框（优先级最高）', () => {
       const wrapper = createWrapper({ isFormula: true, isSelectableState: true })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 边框在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('rgb(16, 185, 129)') // #10b981
       wrapper.unmount()
     })
@@ -145,24 +148,27 @@ describe('CellOverlay', () => {
         cellStyle: { backgroundColor: '#ffeeee' },
         isFormula: false 
       })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 背景色在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('rgb(255, 238, 238)')
       wrapper.unmount()
     })
     
     it('普通模式无背景色时使用白色', () => {
       const wrapper = createWrapper({ isFormula: false })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 背景色在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('background-color: white')
       wrapper.unmount()
     })
     
     it('公式模式使用淡红色背景', () => {
       const wrapper = createWrapper({ isFormula: true })
-      const displayArea = wrapper.find('.display-area')
-      const style = displayArea.attributes('style') || ''
+      // 背景色在容器上
+      const container = wrapper.find('.cell-overlay')
+      const style = container.attributes('style') || ''
       expect(style).toContain('rgb(254, 242, 242)') // #fef2f2
       wrapper.unmount()
     })

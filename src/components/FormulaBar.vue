@@ -76,6 +76,35 @@ const emit = defineEmits<{
 const nameBoxRef = ref<HTMLInputElement | null>(null)
 const formulaInputRef = ref<HTMLDivElement | null>(null)
 
+// ==================== 拖动调整高度 ====================
+
+const barHeight = ref(26)  // 默认高度 26px
+const isResizing = ref(false)
+let startY = 0
+let startHeight = 0
+
+function handleResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  isResizing.value = true
+  startY = e.clientY
+  startHeight = barHeight.value
+  document.addEventListener('mousemove', handleResizeMove)
+  document.addEventListener('mouseup', handleResizeEnd)
+}
+
+function handleResizeMove(e: MouseEvent) {
+  if (!isResizing.value) return
+  const delta = e.clientY - startY
+  const newHeight = Math.max(26, Math.min(200, startHeight + delta))  // 最小 26px，最大 200px
+  barHeight.value = newHeight
+}
+
+function handleResizeEnd() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResizeMove)
+  document.removeEventListener('mouseup', handleResizeEnd)
+}
+
 // ==================== 名称框状态（仅名称框需要） ====================
 
 const nameBoxEditing = ref(false)
@@ -84,6 +113,13 @@ const nameBoxValue = ref('')
 // ==================== IME State (唯一内部状态) ====================
 
 const isComposing = ref(false)
+
+// ==================== 待恢复的选区（用于非编辑状态拖选后进入编辑时恢复） ====================
+
+let pendingSelection: { start: number; end: number } | null = null
+
+// 标记是否刚刚恢复了选区范围（用于跳过 cursorPosition watch）
+let justRestoredSelection = false
 
 // ==================== 名称框逻辑 ====================
 
@@ -262,10 +298,31 @@ function getCurrentCursorInfo(): { cursorPosition: number; selection?: { start: 
 }
 
 function handleFormulaInputClick() {
+  console.log('[FormulaBar] handleFormulaInputClick 开始', { 
+    isEditing: props.isEditing, 
+    pendingSelection,
+    currentSelection: getCurrentCursorInfo()
+  })
+  
   // 如果还没有在编辑状态，立即设置 contenteditable 并聚焦
   if (!props.isEditing && formulaInputRef.value) {
+    // 使用 mouseup 时保存的选区（因为设置 contenteditable 会清除选区）
+    const savedSelection = pendingSelection
+    pendingSelection = null  // 用完清除
+    
+    console.log('[FormulaBar] 进入编辑模式，savedSelection=', savedSelection)
+    
     formulaInputRef.value.contentEditable = 'true'
     formulaInputRef.value.focus()
+    
+    // 如果之前有选区，恢复它
+    if (savedSelection && savedSelection.start !== savedSelection.end) {
+      console.log('[FormulaBar] 恢复选区', savedSelection)
+      justRestoredSelection = true  // 标记刚恢复了选区，跳过后续的 cursorPosition watch
+      restoreSelectionRange(savedSelection.start, savedSelection.end)
+      // 延迟清除标志
+      setTimeout(() => { justRestoredSelection = false }, 50)
+    }
   }
   emit('click')
   
@@ -281,14 +338,36 @@ function handleFormulaInputClick() {
  * 处理鼠标释放事件（拖拽选择后）
  */
 function handleMouseUp() {
-  if (!props.isEditing) return
+  console.log('[FormulaBar] handleMouseUp', { isEditing: props.isEditing })
   
-  // 延迟获取选区，确保浏览器已更新
+  // 非编辑状态下，保存选区供 click 时恢复
+  if (!props.isEditing) {
+    const cursorInfo = getCurrentCursorInfo()
+    console.log('[FormulaBar] handleMouseUp 非编辑状态，cursorInfo=', cursorInfo)
+    if (cursorInfo.selection && cursorInfo.selection.start !== cursorInfo.selection.end) {
+      pendingSelection = cursorInfo.selection
+      console.log('[FormulaBar] handleMouseUp: 保存选区到 pendingSelection', pendingSelection)
+    } else {
+      console.log('[FormulaBar] handleMouseUp: 没有有效选区')
+    }
+    return
+  }
+  
+  // 编辑状态下，延迟获取选区，确保浏览器已更新
   requestAnimationFrame(() => {
     const cursorInfo = getCurrentCursorInfo()
     console.log('[FormulaBar] handleMouseUp cursor-change', cursorInfo)
     emit('cursor-change', cursorInfo)
   })
+}
+
+/**
+ * 处理鼠标按下事件
+ */
+function handleMouseDown() {
+  console.log('[FormulaBar] handleMouseDown', { isEditing: props.isEditing })
+  // 清除之前的待恢复选区
+  pendingSelection = null
 }
 
 function handleKeyDown(e: KeyboardEvent) {
@@ -450,6 +529,65 @@ function restoreCursorPosition(pos: number) {
   console.log('[FormulaBar] restoreCursorPosition: 放在末尾')
 }
 
+/**
+ * 恢复选区范围（用于从非编辑状态进入编辑状态时保留用户选择）
+ */
+function restoreSelectionRange(start: number, end: number) {
+  if (!formulaInputRef.value) return
+  
+  const selection = window.getSelection()
+  if (!selection) return
+  
+  console.log('[FormulaBar] restoreSelectionRange', { start, end })
+  
+  // 遍历文本节点找到起始和结束位置
+  const walker = document.createTreeWalker(
+    formulaInputRef.value,
+    NodeFilter.SHOW_TEXT,
+    null
+  )
+  
+  let currentPos = 0
+  let startNode: Text | null = null
+  let startOffset = 0
+  let endNode: Text | null = null
+  let endOffset = 0
+  let node: Text | null = null
+  
+  while ((node = walker.nextNode() as Text | null)) {
+    const text = node.textContent?.replace(/\u200B/g, '') || ''
+    const len = text.length
+    
+    // 找起始位置
+    if (!startNode && currentPos + len >= start) {
+      startNode = node
+      startOffset = start - currentPos
+    }
+    
+    // 找结束位置
+    if (currentPos + len >= end) {
+      endNode = node
+      endOffset = end - currentPos
+      break
+    }
+    
+    currentPos += len
+  }
+  
+  if (startNode && endNode) {
+    try {
+      const range = document.createRange()
+      range.setStart(startNode, Math.min(startOffset, startNode.length))
+      range.setEnd(endNode, Math.min(endOffset, endNode.length))
+      selection.removeAllRanges()
+      selection.addRange(range)
+      console.log('[FormulaBar] restoreSelectionRange: 成功恢复选区')
+    } catch (e) {
+      console.warn('[FormulaBar] restoreSelectionRange: 恢复失败', e)
+    }
+  }
+}
+
 function handleFocus() {
   emit('focus')
 }
@@ -490,15 +628,79 @@ function handleCompositionEnd(_e: CompositionEvent) {
   emit('value-change', { value: currentValue, cursorPosition: cursorPos })
 }
 
+// ==================== 剪贴板事件 ====================
+
+/**
+ * 处理粘贴事件 - 粘贴纯文本并同步到 Manager
+ */
+function handlePaste(e: ClipboardEvent) {
+  e.preventDefault()
+  e.stopPropagation()  // 阻止事件冒泡到 sheet
+  
+  if (!formulaInputRef.value || !props.isEditing) return
+  
+  // 获取纯文本内容
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (!text) return
+  
+  // 获取当前选区
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return
+  
+  const range = selection.getRangeAt(0)
+  
+  // 检查选区是否在 formulaInputRef 内
+  if (!formulaInputRef.value.contains(range.startContainer) && range.startContainer !== formulaInputRef.value) {
+    // 选区不在输入区域内，插入到末尾
+    const currentValue = (formulaInputRef.value.textContent || '').replace(/\u200B/g, '')
+    const newValue = currentValue + text
+    const newCursorPos = newValue.length
+    emit('value-change', { value: newValue, cursorPosition: newCursorPos })
+    return
+  }
+  
+  // 计算选区位置
+  const preStartRange = document.createRange()
+  preStartRange.selectNodeContents(formulaInputRef.value)
+  preStartRange.setEnd(range.startContainer, range.startOffset)
+  const selectionStart = preStartRange.toString().replace(/\u200B/g, '').length
+  
+  const preEndRange = document.createRange()
+  preEndRange.selectNodeContents(formulaInputRef.value)
+  preEndRange.setEnd(range.endContainer, range.endOffset)
+  const selectionEnd = preEndRange.toString().replace(/\u200B/g, '').length
+  
+  // 获取当前值并插入粘贴内容（替换选中部分）
+  const currentValue = (formulaInputRef.value.textContent || '').replace(/\u200B/g, '')
+  const newValue = currentValue.slice(0, selectionStart) + text + currentValue.slice(selectionEnd)
+  const newCursorPos = selectionStart + text.length
+  
+  console.log('[FormulaBar] paste', { text, selectionStart, selectionEnd, currentValue, newValue, newCursorPos })
+  
+  emit('value-change', { value: newValue, cursorPosition: newCursorPos })
+}
+
 // ==================== Watch ====================
 
 // displayHtml 变化时更新内容并恢复光标
 watch(() => props.displayHtml, (html) => {
   if (!formulaInputRef.value) return
   
+  // 如果内容相同，不更新 innerHTML，避免丢失选区
+  if (formulaInputRef.value.innerHTML === html) {
+    console.log('[FormulaBar] watch displayHtml: 内容相同，跳过更新')
+    return
+  }
+  
   console.log('[FormulaBar] watch displayHtml: 更新内容', { html: html?.substring(0, 50), cursorPosition: props.cursorPosition })
   
   formulaInputRef.value.innerHTML = html
+  
+  // 如果刚刚恢复了选区范围，跳过光标恢复（避免覆盖选区）
+  if (justRestoredSelection) {
+    console.log('[FormulaBar] watch displayHtml: 跳过光标恢复（刚恢复了选区）')
+    return
+  }
   
   // 如果正在编辑，恢复光标位置（使用 Manager 提供的位置）
   if (props.isEditing && props.cursorPosition !== undefined && props.cursorPosition >= 0) {
@@ -510,6 +712,11 @@ watch(() => props.displayHtml, (html) => {
 
 // 光标位置变化时恢复光标
 watch(() => props.cursorPosition, (pos) => {
+  // 如果刚刚恢复了选区范围，跳过光标恢复（避免覆盖选区）
+  if (justRestoredSelection) {
+    console.log('[FormulaBar] watch cursorPosition: 跳过（刚恢复了选区）')
+    return
+  }
   if (props.isEditing && pos !== undefined && pos >= 0 && formulaInputRef.value) {
     console.log('[FormulaBar] watch cursorPosition: 恢复光标', { pos })
     nextTick(() => {
@@ -547,51 +754,61 @@ defineExpose({
 </script>
 
 <template>
-  <div class="formula-bar">
-    <!-- 名称框 -->
-    <div class="name-box-container">
-      <input
-        ref="nameBoxRef"
-        type="text"
-        class="name-box"
-        :value="nameBoxEditing ? nameBoxValue : displayAddress"
-        :readonly="!nameBoxEditing"
-        @click="handleNameBoxClick"
-        @blur="handleNameBoxBlur"
-        @keydown="handleNameBoxKeydown"
-        @input="handleNameBoxInput"
-      />
+  <div class="formula-bar-wrapper">
+    <div class="formula-bar" :style="{ height: barHeight + 'px' }">
+      <!-- 名称框 -->
+      <div class="name-box-container">
+        <input
+          ref="nameBoxRef"
+          type="text"
+          class="name-box"
+          :value="nameBoxEditing ? nameBoxValue : displayAddress"
+          :readonly="!nameBoxEditing"
+          @click="handleNameBoxClick"
+          @blur="handleNameBoxBlur"
+          @keydown="handleNameBoxKeydown"
+          @input="handleNameBoxInput"
+        />
+      </div>
+      
+      <!-- 分隔线 -->
+      <div class="separator"></div>
+      
+      <!-- 公式输入区 -->
+      <div class="formula-input-container">
+        <div
+          ref="formulaInputRef"
+          class="formula-input"
+          :class="{ 'formula-mode': isFormula, 'editing': isEditing }"
+          :contenteditable="isEditing"
+          @mousedown="handleMouseDown"
+          @click="handleFormulaInputClick"
+          @mouseup="handleMouseUp"
+          @keydown="handleKeyDown"
+          @beforeinput="handleBeforeInput"
+          @input="handleInput"
+          @focus="handleFocus"
+          @blur="handleBlur"
+          @paste="handlePaste"
+          @compositionstart="handleCompositionStart"
+          @compositionend="handleCompositionEnd"
+        ></div>
+      </div>
     </div>
-    
-    <!-- 分隔线 -->
-    <div class="separator"></div>
-    
-    <!-- 公式输入区 -->
-    <div class="formula-input-container">
-      <div
-        ref="formulaInputRef"
-        class="formula-input"
-        :class="{ 'formula-mode': isFormula, 'editing': isEditing }"
-        :contenteditable="isEditing"
-        @click="handleFormulaInputClick"
-        @mouseup="handleMouseUp"
-        @keydown="handleKeyDown"
-        @beforeinput="handleBeforeInput"
-        @input="handleInput"
-        @focus="handleFocus"
-        @blur="handleBlur"
-        @compositionstart="handleCompositionStart"
-        @compositionend="handleCompositionEnd"
-      ></div>
-    </div>
+    <!-- 拖动手柄 -->
+    <div class="resize-handle" @mousedown="handleResizeStart"></div>
   </div>
 </template>
 
 <style scoped>
+.formula-bar-wrapper {
+  position: relative;
+}
+
 .formula-bar {
   display: flex;
   align-items: stretch;
-  height: 26px;
+  min-height: 26px;
   background: #f3f3f3;
   border-bottom: 1px solid #d4d4d4;
   padding: 0;
@@ -599,17 +816,25 @@ defineExpose({
   user-select: none;
 }
 
+.resize-handle {
+  height: 2px;
+  padding: 1px 0;
+  cursor: ns-resize;
+  background-clip: content-box;
+}
+
 .name-box-container {
   display: flex;
   align-items: center;
+  justify-content: center;
   width: 80px;
   flex-shrink: 0;
-  padding: 0 2px;
+  padding: 4px 3px;
 }
 
 .name-box {
   width: 100%;
-  height: 20px;
+  height: 100%;
   padding: 0 4px;
   border: 1px solid transparent;
   border-radius: 2px;
@@ -640,14 +865,14 @@ defineExpose({
 .formula-input-container {
   flex: 1;
   display: flex;
-  align-items: center;
-  padding: 0 4px;
+  align-items: stretch;
+  padding: 3px 4px;
   min-width: 0;
 }
 
 .formula-input {
   width: 100%;
-  height: 20px;
+  min-height: 20px;
   line-height: 20px;
   padding: 0 6px;
   border: 1px solid transparent;
@@ -659,8 +884,9 @@ defineExpose({
   outline: none;
   cursor: pointer;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
   user-select: text;  /* 覆盖父级的 user-select: none */
   -webkit-user-select: text;
 }

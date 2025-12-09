@@ -87,8 +87,9 @@ const isComposing = ref(false)
 
 // ==================== 自动尺寸 ====================
 
-const autoWidth = ref(props.width)
-const autoHeight = ref(props.height)
+// 初始尺寸：单元格宽高 + 4px（边框补偿 2px + 网格线 2px）
+const autoWidth = ref(props.width + 4)
+const autoHeight = ref(props.height + 4)
 
 // ==================== Computed ====================
 
@@ -110,16 +111,48 @@ const backgroundColor = computed(() => {
 })
 
 /**
- * 显示区域样式
+ * 显示区域样式（文本相关）
  */
 const displayStyle = computed(() => {
   const style = props.cellStyle || {}
+  const verticalAlign = style.verticalAlign || 'middle'
+  
+  // 计算 line-height
+  const fontSize = style.fontSize || 12
+  const lineHeight = fontSize * 1.2
+  
+  // 计算实际内容行数
+  const text = extractTextFromHtml(props.displayHtml)
+  const trimmedText = text.replace(/\n+$/, '')
+  const lines = trimmedText ? trimmedText.split('\n') : ['']
+  const lineCount = lines.length
+  
+  // 使用 padding 实现垂直居中
+  let paddingTop = 0
+  let paddingBottom = 0
+  
+  // 计算需要的垂直内边距
+  // autoHeight 是容器高度（包含边框），边框宽度为 4px（2px x 2）
+  const borderWidth = 4
+  const contentHeight = lineCount * lineHeight
+  const availableHeight = autoHeight.value - borderWidth
+  if (availableHeight > contentHeight) {
+    const extraSpace = availableHeight - contentHeight
+    if (verticalAlign === 'top') {
+      paddingTop = 0
+      paddingBottom = extraSpace
+    } else if (verticalAlign === 'bottom') {
+      paddingTop = extraSpace
+      paddingBottom = 0
+    } else {
+      // middle - 使用 round 确保对称
+      paddingTop = Math.round(extraSpace / 2)
+      paddingBottom = extraSpace - paddingTop
+    }
+  }
+  
   return {
-    width: autoWidth.value + 'px',
-    minHeight: autoHeight.value + 'px',
-    border: '2px solid ' + borderColor.value,
-    backgroundColor: backgroundColor.value,
-    fontSize: (style.fontSize || 12) + 'px',
+    fontSize: fontSize + 'px',
     fontFamily: style.fontFamily || 'Arial, sans-serif',
     fontWeight: style.bold ? 'bold' : 'normal',
     fontStyle: style.italic ? 'italic' : 'normal',
@@ -129,19 +162,25 @@ const displayStyle = computed(() => {
     ].filter(Boolean).join(' ') || 'none',
     color: style.color || '#000',
     textAlign: style.textAlign || 'left',
-    verticalAlign: style.verticalAlign || 'middle',
+    lineHeight: lineHeight + 'px',
+    paddingTop: paddingTop + 'px',
+    paddingBottom: paddingBottom + 'px',
   }
 })
 
 /**
- * 容器定位样式
+ * 容器定位样式（位置 + 尺寸 + 边框）
  */
 const containerStyle = computed(() => ({
   position: 'absolute' as const,
-  top: (props.top - 2) + 'px',  // 边框补偿
-  left: (props.left - 2) + 'px',
+  top: (props.top - 1) + 'px',  // 边框补偿 (1px 偏移，使 2px 边框中心对齐网格线)
+  left: (props.left - 1) + 'px',
+  width: autoWidth.value + 'px',
+  height: autoHeight.value + 'px',
+  border: '2px solid ' + borderColor.value,
+  backgroundColor: backgroundColor.value,
+  boxSizing: 'border-box' as const,
   zIndex: 1000,
-  background: '#fff'
 }))
 
 // ==================== 尺寸调整 ====================
@@ -196,27 +235,41 @@ function calculateWrappedHeight(text: string, containerWidth: number): number {
 }
 
 function extractTextFromHtml(html: string): string {
+  // 先将 <br> 标签转换为换行符，再提取文本
+  const htmlWithNewlines = html.replace(/<br\s*\/?>/gi, '\n')
   const div = document.createElement('div')
-  div.innerHTML = html
-  return div.innerText?.replace(/\u200B/g, '') || ''
+  div.innerHTML = htmlWithNewlines
+  return div.textContent?.replace(/\u200B/g, '') || ''
 }
 
 function adjustSize() {
   const text = extractTextFromHtml(props.displayHtml)
   const wrapText = props.cellStyle?.wrapText ?? false
-  const paddingHorizontal = 4
-  const paddingVertical = 0
-  const minWidth = props.width
-  const minHeight = props.height
+  const paddingHorizontal = 4  // 内容区左右 padding
+  const borderWidth = 4        // 2px 边框 x 2
+  // 最小宽高 = 单元格宽高 + 4px（边框补偿 2px + 网格线 2px）
+  const minWidth = props.width + 4
+  const minHeight = props.height + 4
+  
+  // 调试：检查提取的文本和换行符
+  console.log('[CellOverlay] adjustSize', { 
+    displayHtml: props.displayHtml?.substring(0, 100), 
+    extractedText: text,
+    hasNewline: text.includes('\n'),
+    lines: text.split('\n'),
+    wrapText 
+  })
   
   if (wrapText) {
-    autoWidth.value = minWidth - paddingHorizontal
-    const contentWidth = minWidth - paddingHorizontal
+    // 自动换行模式：宽度固定为单元格宽度，高度根据内容调整
+    autoWidth.value = minWidth
+    const contentWidth = minWidth - borderWidth - paddingHorizontal  // 实际可用内容宽度
     const wrappedHeight = calculateWrappedHeight(text, contentWidth)
-    autoHeight.value = Math.max(minHeight, wrappedHeight + paddingVertical)
+    autoHeight.value = Math.max(minHeight, wrappedHeight + borderWidth)
     return
   }
   
+  // 非换行模式：计算每行宽度，取最大值
   const trimmedText = text.replace(/\n+$/, '')
   const lines = trimmedText ? trimmedText.split('\n') : ['']
   
@@ -226,21 +279,26 @@ function adjustSize() {
     maxLineWidth = Math.max(maxLineWidth, lineWidth)
   }
   
-  const requiredWidth = maxLineWidth + paddingHorizontal
+  // 需要的容器宽度 = 最大行宽 + padding + 边框
+  const requiredWidth = maxLineWidth + paddingHorizontal + borderWidth
   const viewportRight = props.viewportWidth ?? Infinity
   const maxAllowedWidth = viewportRight - props.left
   
   if (requiredWidth <= maxAllowedWidth) {
-    autoWidth.value = Math.max(minWidth - paddingHorizontal, requiredWidth - paddingHorizontal)
+    // 容器宽度取 minWidth 和 requiredWidth 的最大值
+    autoWidth.value = Math.max(minWidth, requiredWidth)
+    // 高度根据行数计算
     const lineCount = lines.length
     const fontSize = props.cellStyle?.fontSize || 12
     const lineHeight = fontSize * 1.2
-    autoHeight.value = Math.max(minHeight, lineCount * lineHeight + paddingVertical)
+    const contentHeight = lineCount * lineHeight
+    autoHeight.value = Math.max(minHeight, contentHeight + borderWidth)
   } else {
-    autoWidth.value = maxAllowedWidth - paddingHorizontal
-    const contentWidth = maxAllowedWidth - paddingHorizontal
+    // 超出视口，需要强制换行
+    autoWidth.value = maxAllowedWidth
+    const contentWidth = maxAllowedWidth - borderWidth - paddingHorizontal
     const wrappedHeight = calculateWrappedHeight(text, contentWidth)
-    autoHeight.value = Math.max(minHeight, wrappedHeight + paddingVertical)
+    autoHeight.value = Math.max(minHeight, wrappedHeight + borderWidth)
   }
 }
 
@@ -363,12 +421,24 @@ function handleMouseUp() {
 }
 
 /**
- * 键盘事件 - 全部转发给父组件处理
+ * 键盘事件 - 大部分转发给父组件处理
+ * 但剪切/复制/粘贴由浏览器原生处理
  */
 function handleKeyDown(e: KeyboardEvent) {
   console.log('[CellOverlay] handleKeyDown', e.key, 'isComposing:', isComposing.value)
   // IME 组合期间不转发
   if (isComposing.value) return
+  
+  // Ctrl/Cmd + C/X/V 用于文本的剪切/复制/粘贴，不转发给父组件
+  // 让浏览器原生处理这些操作
+  const isMod = e.ctrlKey || e.metaKey
+  if (isMod && (e.key === 'c' || e.key === 'x' || e.key === 'v')) {
+    // 不阻止默认行为，让浏览器处理
+    // 不转发给父组件
+    console.log('[CellOverlay] 文本剪切/复制/粘贴，由浏览器处理')
+    return
+  }
+  
   emit('keydown', e)
 }
 
@@ -512,6 +582,106 @@ function handleBlur(e: FocusEvent) {
   emit('blur', e)
 }
 
+// ==================== 剪贴板事件（文本编辑） ====================
+
+/**
+ * 处理粘贴事件 - 粘贴纯文本并同步到 Manager
+ */
+function handlePaste(e: ClipboardEvent) {
+  e.preventDefault()
+  e.stopPropagation()  // 阻止事件冒泡到 sheet
+  
+  if (!displayRef.value) return
+  
+  // 获取纯文本内容
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (!text) return
+  
+  // 获取当前选区
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    console.log('[CellOverlay] paste: no selection')
+    return
+  }
+  
+  const range = selection.getRangeAt(0)
+  
+  // 检查选区是否在 displayRef 内
+  if (!displayRef.value.contains(range.startContainer) && range.startContainer !== displayRef.value) {
+    console.log('[CellOverlay] paste: selection not in displayRef')
+    // 选区不在显示区域内，插入到末尾
+    const currentValue = (displayRef.value.textContent || '').replace(/\u200B/g, '')
+    const newValue = currentValue + text
+    const newCursorPos = newValue.length
+    emit('value-change', { value: newValue, cursorPosition: newCursorPos })
+    return
+  }
+  
+  // 计算选区位置
+  const preStartRange = document.createRange()
+  preStartRange.selectNodeContents(displayRef.value)
+  preStartRange.setEnd(range.startContainer, range.startOffset)
+  const selectionStart = preStartRange.toString().replace(/\u200B/g, '').length
+  
+  const preEndRange = document.createRange()
+  preEndRange.selectNodeContents(displayRef.value)
+  preEndRange.setEnd(range.endContainer, range.endOffset)
+  const selectionEnd = preEndRange.toString().replace(/\u200B/g, '').length
+  
+  // 获取当前值并插入粘贴内容（替换选中部分）
+  const currentValue = (displayRef.value.textContent || '').replace(/\u200B/g, '')
+  const newValue = currentValue.slice(0, selectionStart) + text + currentValue.slice(selectionEnd)
+  const newCursorPos = selectionStart + text.length
+  
+  console.log('[CellOverlay] paste', { text, selectionStart, selectionEnd, currentValue, newValue, newCursorPos })
+  
+  emit('value-change', { value: newValue, cursorPosition: newCursorPos })
+}
+
+/**
+ * 处理剪切事件 - 复制选中文本到剪贴板并删除
+ */
+function handleCut(e: ClipboardEvent) {
+  if (!displayRef.value) return
+  
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return
+  
+  // 计算选区位置
+  const range = selection.getRangeAt(0)
+  const preStartRange = document.createRange()
+  preStartRange.selectNodeContents(displayRef.value)
+  preStartRange.setEnd(range.startContainer, range.startOffset)
+  const selectionStart = preStartRange.toString().replace(/\u200B/g, '').length
+  
+  const preEndRange = document.createRange()
+  preEndRange.selectNodeContents(displayRef.value)
+  preEndRange.setEnd(range.endContainer, range.endOffset)
+  const selectionEnd = preEndRange.toString().replace(/\u200B/g, '').length
+  
+  // 如果没有选中内容，不处理
+  if (selectionStart === selectionEnd) {
+    e.preventDefault()
+    return
+  }
+  
+  // 获取选中的文本
+  const currentValue = (displayRef.value.textContent || '').replace(/\u200B/g, '')
+  const selectedText = currentValue.slice(selectionStart, selectionEnd)
+  
+  // 写入剪贴板
+  e.clipboardData?.setData('text/plain', selectedText)
+  e.preventDefault()
+  
+  // 删除选中内容
+  const newValue = currentValue.slice(0, selectionStart) + currentValue.slice(selectionEnd)
+  const newCursorPos = selectionStart
+  
+  console.log('[CellOverlay] cut', { selectedText, selectionStart, selectionEnd, newValue, newCursorPos })
+  
+  emit('value-change', { value: newValue, cursorPosition: newCursorPos })
+}
+
 // ==================== Watch ====================
 
 // displayHtml 变化时更新内容并恢复光标
@@ -608,6 +778,8 @@ defineExpose({
       @compositionstart="handleCompositionStart"
       @compositionupdate="handleCompositionUpdate"
       @compositionend="handleCompositionEnd"
+      @paste="handlePaste"
+      @cut="handleCut"
       @focus="handleFocus"
       @blur="handleBlur"
       @mousedown.stop
@@ -635,7 +807,7 @@ defineExpose({
 }
 
 .display-area {
-  box-sizing: content-box;
+  box-sizing: border-box;
   padding: 0 2px;
   outline: none;
   overflow: hidden;
@@ -643,6 +815,12 @@ defineExpose({
   word-break: break-all;
   cursor: text;
   caret-color: #000;
+  /* 使用 width: 100% 和 height: 100% 填满容器 */
+  width: 100%;
+  height: 100%;
+  /* 移除 flex，使用 line-height 方式支持垂直居中 */
+  /* 空内容时需要 min-height 保证光标可见 */
+  min-height: 1.2em;
 }
 
 .display-area:focus {

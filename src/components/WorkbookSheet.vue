@@ -56,6 +56,7 @@
         @close-overlay="handleCloseOverlay"
         @overlay-position-update="handleOverlayPositionUpdate"
         @reference-select="handleReferenceSelect"
+        @commit-edit="handleCommitEdit"
       />
       
       <!-- 全局 CellOverlay（Workbook 层级，不随 Sheet 切换销毁） -->
@@ -450,32 +451,32 @@ interface EditingStateChangePayload {
  * 2. 在公式编辑的可选择状态下，插入单元格引用
  */
 function handleSelectionChange(payload: SelectionChangePayload) {
-  const { selected, selectionRange, multiSelection, cellValue } = payload
+  const { selected, selectionRange: newRange, multiSelection: newMultiSelection, cellValue } = payload
   
   log('selectionChange', '选区变化', {
     selected,
-    selectionRange,
+    selectionRange: newRange,
     isEditing: formulaEditManager.state.active,
     shouldInsertReference: formulaEditManager.shouldInsertReference.value
   })
   
   // 更新工具栏状态
   currentSelection.value = { row: selected.row, col: selected.col }
-  selectionRange.startRow = selectionRange.startRow
-  selectionRange.startCol = selectionRange.startCol
-  selectionRange.endRow = selectionRange.endRow
-  selectionRange.endCol = selectionRange.endCol
+  selectionRange.value.startRow = newRange.startRow
+  selectionRange.value.startCol = newRange.startCol
+  selectionRange.value.endRow = newRange.endRow
+  selectionRange.value.endCol = newRange.endCol
   
-  if (multiSelection) {
-    multiSelection.ranges = multiSelection.ranges
-    multiSelection.active = multiSelection.active
+  if (newMultiSelection) {
+    multiSelection.value.ranges = newMultiSelection.ranges
+    multiSelection.value.active = newMultiSelection.active
   }
   
   // 更新公式栏位置
-  formulaBarRow.value = selectionRange.startRow
-  formulaBarCol.value = selectionRange.startCol
-  formulaBarEndRow.value = selectionRange.endRow
-  formulaBarEndCol.value = selectionRange.endCol
+  formulaBarRow.value = newRange.startRow
+  formulaBarCol.value = newRange.startCol
+  formulaBarEndRow.value = newRange.endRow
+  formulaBarEndCol.value = newRange.endCol
   
   // 检查是否应该插入引用（公式编辑模式且光标在可插入位置）
   if (formulaEditManager.shouldInsertReference.value) {
@@ -497,20 +498,20 @@ function handleSelectionChange(payload: SelectionChangePayload) {
       
       reference = formatCrossSheetReference(
         sheetName,
-        selectionRange.startRow,
-        selectionRange.startCol,
-        selectionRange.endRow !== selectionRange.startRow || selectionRange.endCol !== selectionRange.startCol
-          ? selectionRange.endRow : undefined,
-        selectionRange.endRow !== selectionRange.startRow || selectionRange.endCol !== selectionRange.startCol
-          ? selectionRange.endCol : undefined
+        newRange.startRow,
+        newRange.startCol,
+        newRange.endRow !== newRange.startRow || newRange.endCol !== newRange.startCol
+          ? newRange.endRow : undefined,
+        newRange.endRow !== newRange.startRow || newRange.endCol !== newRange.startCol
+          ? newRange.endCol : undefined
       )
     } else {
       // 同 Sheet 引用
       reference = formatCellReference(
-        selectionRange.startRow,
-        selectionRange.startCol,
-        selectionRange.endRow,
-        selectionRange.endCol
+        newRange.startRow,
+        newRange.startCol,
+        newRange.endRow,
+        newRange.endCol
       )
     }
     
@@ -519,8 +520,8 @@ function handleSelectionChange(payload: SelectionChangePayload) {
     
     // 进入方向键选择模式（使用选区左上角作为起始位置）
     formulaEditManager.enterArrowSelectMode(
-      selectionRange.startRow,
-      selectionRange.startCol,
+      newRange.startRow,
+      newRange.startCol,
       formulaEditManager.isCrossSheetMode.value ? activeSheetId.value ?? undefined : undefined
     )
     
@@ -535,6 +536,30 @@ function handleSelectionChange(payload: SelectionChangePayload) {
     
     log('selectionChange', '插入引用', { reference, newValue: formulaEditManager.state.currentValue })
     return  // 不更新 formulaBarCellValue，保持公式编辑状态
+  }
+  
+  // 编辑状态但不是可选择状态：用户点击了其他单元格，应该先保存编辑
+  if (formulaEditManager.state.active) {
+    // 检查是否点击了不同的单元格
+    const isOtherCell = formulaEditManager.state.row !== newRange.startRow || 
+                        formulaEditManager.state.col !== newRange.startCol
+    
+    if (isOtherCell) {
+      console.log('[handleSelectionChange] 点击其他单元格，保存编辑并更新')
+      // 先保存当前编辑
+      const result = formulaEditManager.confirmEdit()
+      if (result) {
+        const sheetData = workbook.value.getSheetById(result.sheetId)
+        if (sheetData) {
+          sheetData.model.setValue(result.row, result.col, result.value)
+        }
+      }
+      formulaBarIsEditing.value = false
+      globalOverlay.value.visible = false
+      // 更新公式栏为新单元格的值
+      formulaBarCellValue.value = cellValue
+      return
+    }
   }
   
   // 非编辑状态：更新公式栏显示的值
@@ -1034,6 +1059,30 @@ function handleCloseOverlay() {
   if (formulaEditManager.state.active) {
     formulaEditManager.reset()
     formulaBarIsEditing.value = false
+  }
+}
+
+/**
+ * 填充柄拖拽前请求提交编辑
+ */
+function handleCommitEdit() {
+  if (formulaEditManager.state.active) {
+    // 获取当前编辑的单元格位置
+    const editRow = formulaEditManager.state.row
+    const editCol = formulaEditManager.state.col
+    
+    // 确认编辑并保存
+    const result = formulaEditManager.confirmEdit()
+    if (result && result.value !== undefined) {
+      // 通过 CanvasSheet 的 API 设置单元格值
+      canvasSheetRef.value?.setCellValue?.(editRow, editCol, result.value)
+      
+      // 更新选区到刚编辑的单元格（确保填充柄从正确位置开始）
+      canvasSheetRef.value?.selectCell?.(editRow, editCol)
+    }
+    
+    // 触发重绘
+    canvasSheetRef.value?.redraw?.()
   }
 }
 

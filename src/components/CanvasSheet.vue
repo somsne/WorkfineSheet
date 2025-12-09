@@ -234,6 +234,8 @@ const emit = defineEmits<{
     endRow: number
     endCol: number
   }): void
+  /** 请求提交当前编辑（填充柄拖拽前触发） */
+  (e: 'commit-edit'): void
 }>()
 
 // ==================== 初始化状态 ====================
@@ -466,6 +468,9 @@ const mouse = useSheetMouse({
   isInReferenceSelectMode: () => props.isInReferenceSelectMode,
   onReferenceSelect: (payload) => {
     emit('reference-select', payload)
+  },
+  onCommitEdit: () => {
+    emit('commit-edit')
   }
 })
 
@@ -1655,12 +1660,22 @@ function selectCell(row: number, col: number) {
   targetRow = Math.max(0, targetRow)
   targetCol = Math.max(0, targetCol)
   
+  // 检查是否是合并单元格的一部分
+  const mergedRegion = state.model.getMergedRegion(targetRow, targetCol)
+  
   state.selected.row = targetRow
   state.selected.col = targetCol
   state.selectionRange.startRow = targetRow
   state.selectionRange.startCol = targetCol
-  state.selectionRange.endRow = targetRow
-  state.selectionRange.endCol = targetCol
+  
+  // 如果是合并单元格，选区扩展到整个合并区域
+  if (mergedRegion) {
+    state.selectionRange.endRow = mergedRegion.endRow
+    state.selectionRange.endCol = mergedRegion.endCol
+  } else {
+    state.selectionRange.endRow = targetRow
+    state.selectionRange.endCol = targetCol
+  }
   
   // 确保单元格可见（滚动到视图）
   geometry.ensureVisible(targetRow, targetCol)
