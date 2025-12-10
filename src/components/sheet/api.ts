@@ -22,6 +22,13 @@ export interface RowColSizeAPI {
   setRowHeight(row: number, height: number): void
   
   /**
+   * 批量设置多行的行高
+   * @param rows 行号数组
+   * @param height 行高
+   */
+  setRowsHeight(rows: number[], height: number): void
+  
+  /**
    * 获取列宽
    */
   getColWidth(col: number): number
@@ -30,6 +37,13 @@ export interface RowColSizeAPI {
    * 设置列宽
    */
   setColWidth(col: number, width: number): void
+  
+  /**
+   * 批量设置多列的列宽
+   * @param cols 列号数组
+   * @param width 列宽
+   */
+  setColsWidth(cols: number[], width: number): void
 }
 
 /**
@@ -38,33 +52,57 @@ export interface RowColSizeAPI {
 export interface RowColOperationAPI {
   /**
    * 在指定行上方插入行
+   * @param row 行号
+   * @param count 插入行数，默认为 1
    */
-  insertRowAbove(row: number): Promise<void>
+  insertRowAbove(row: number, count?: number): Promise<void>
   
   /**
    * 在指定行下方插入行
+   * @param row 行号
+   * @param count 插入行数，默认为 1
    */
-  insertRowBelow(row: number): Promise<void>
+  insertRowBelow(row: number, count?: number): Promise<void>
   
   /**
    * 删除指定行
+   * @param row 起始行号
+   * @param count 删除行数，默认为 1
    */
-  deleteRow(row: number): Promise<void>
+  deleteRow(row: number, count?: number): Promise<void>
+  
+  /**
+   * 批量删除多行（不连续的行）
+   * @param rows 行号数组
+   */
+  deleteRows(rows: number[]): Promise<void>
   
   /**
    * 在指定列左侧插入列
+   * @param col 列号
+   * @param count 插入列数，默认为 1
    */
-  insertColLeft(col: number): Promise<void>
+  insertColLeft(col: number, count?: number): Promise<void>
   
   /**
    * 在指定列右侧插入列
+   * @param col 列号
+   * @param count 插入列数，默认为 1
    */
-  insertColRight(col: number): Promise<void>
+  insertColRight(col: number, count?: number): Promise<void>
   
   /**
    * 删除指定列
+   * @param col 起始列号
+   * @param count 删除列数，默认为 1
    */
-  deleteCol(col: number): Promise<void>
+  deleteCol(col: number, count?: number): Promise<void>
+  
+  /**
+   * 批量删除多列（不连续的列）
+   * @param cols 列号数组
+   */
+  deleteCols(cols: number[]): Promise<void>
 }
 
 /**
@@ -102,9 +140,45 @@ export interface VisibilityAPI {
   hideRow(row: number): void
   
   /**
+   * 批量隐藏多行
+   * @param rows 行号数组
+   */
+  hideRows(rows: number[]): void
+  
+  /**
+   * 隐藏连续行范围
+   * @param startRow 起始行
+   * @param endRow 结束行
+   */
+  hideRowRange(startRow: number, endRow: number): void
+  
+  /**
    * 取消隐藏行
    */
   unhideRow(row: number): void
+  
+  /**
+   * 批量取消隐藏多行
+   * @param rows 行号数组
+   */
+  unhideRows(rows: number[]): void
+  
+  /**
+   * 取消隐藏连续行范围
+   * @param startRow 起始行
+   * @param endRow 结束行
+   */
+  unhideRowRange(startRow: number, endRow: number): void
+  
+  /**
+   * 检查行是否隐藏
+   */
+  isRowHidden(row: number): boolean
+  
+  /**
+   * 获取所有隐藏的行
+   */
+  getHiddenRows(): number[]
   
   /**
    * 隐藏列
@@ -112,9 +186,45 @@ export interface VisibilityAPI {
   hideColumn(col: number): void
   
   /**
+   * 批量隐藏多列
+   * @param cols 列号数组
+   */
+  hideColumns(cols: number[]): void
+  
+  /**
+   * 隐藏连续列范围
+   * @param startCol 起始列
+   * @param endCol 结束列
+   */
+  hideColumnRange(startCol: number, endCol: number): void
+  
+  /**
    * 取消隐藏列
    */
   unhideColumn(col: number): void
+  
+  /**
+   * 批量取消隐藏多列
+   * @param cols 列号数组
+   */
+  unhideColumns(cols: number[]): void
+  
+  /**
+   * 取消隐藏连续列范围
+   * @param startCol 起始列
+   * @param endCol 结束列
+   */
+  unhideColumnRange(startCol: number, endCol: number): void
+  
+  /**
+   * 检查列是否隐藏
+   */
+  isColumnHidden(col: number): boolean
+  
+  /**
+   * 获取所有隐藏的列
+   */
+  getHiddenColumns(): number[]
   
   /**
    * 设置网格线显示状态
@@ -651,7 +761,58 @@ export interface FormatPainterAPI {
 /**
  * 完整的公开 API
  */
-export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI, CellImageAPI, FormatPainterAPI {
+/**
+ * 批量数据操作 API
+ */
+export interface BatchDataAPI {
+  /**
+   * 批量设置范围内的值
+   * @param startRow 起始行（0-based）
+   * @param startCol 起始列（0-based）
+   * @param values 值的二维数组
+   * @example
+   * ```ts
+   * api.setValues(0, 0, [
+   *   ['姓名', '年龄', '城市'],
+   *   ['张三', '25', '北京'],
+   *   ['李四', '30', '上海']
+   * ])
+   * ```
+   */
+  setValues(startRow: number, startCol: number, values: string[][]): void
+  
+  /**
+   * 批量获取范围内的值
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @returns 值的二维数组
+   */
+  getValues(startRow: number, startCol: number, endRow: number, endCol: number): string[][]
+  
+  /**
+   * 清除范围内的所有值
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   */
+  clearValues(startRow: number, startCol: number, endRow: number, endCol: number): void
+  
+  /**
+   * 获取有数据的范围（数据边界）
+   * @returns 包含数据的最小矩形范围，如果没有数据返回 null
+   */
+  getDataRange(): { startRow: number; startCol: number; endRow: number; endCol: number } | null
+  
+  /**
+   * 获取有数据的单元格总数
+   */
+  getCellCount(): number
+}
+
+export interface SheetAPI extends RowColSizeAPI, RowColOperationAPI, SelectionAPI, VisibilityAPI, FreezeAPI, StyleAPI, BorderAPI, FormatAPI, MergeAPI, UndoRedoAPI, ImageAPI, CellImageAPI, FormatPainterAPI, BatchDataAPI {
   /**
    * 刷新绘制
    */
@@ -735,12 +896,12 @@ export function createSheetAPI(context: {
   manualRowHeights: Set<number>
   
   // 行列操作
-  insertRowAbove: (row: number) => Promise<void>
-  insertRowBelow: (row: number) => Promise<void>
-  deleteRow: (row: number) => Promise<void>
-  insertColLeft: (col: number) => Promise<void>
-  insertColRight: (col: number) => Promise<void>
-  deleteCol: (col: number) => Promise<void>
+  insertRowAbove: (row: number, count?: number) => Promise<void>
+  insertRowBelow: (row: number, count?: number) => Promise<void>
+  deleteRow: (row: number, count?: number) => Promise<void>
+  insertColLeft: (col: number, count?: number) => Promise<void>
+  insertColRight: (col: number, count?: number) => Promise<void>
+  deleteCol: (col: number, count?: number) => Promise<void>
   
   // 选择相关
   selected: SelectedCell
@@ -833,6 +994,13 @@ export function createSheetAPI(context: {
   updateCellImageAlignmentFn?: (row: number, col: number, imageId: string, horizontalAlign?: CellImageAlignment, verticalAlign?: CellImageVerticalAlign) => void
   openCellImagePreviewFn?: (row: number, col: number) => void
   closeCellImagePreviewFn?: () => void
+  
+  // 批量数据操作相关
+  setValuesFn?: (startRow: number, startCol: number, values: string[][]) => void
+  getValuesFn?: (startRow: number, startCol: number, endRow: number, endCol: number) => string[][]
+  clearValuesFn?: (startRow: number, startCol: number, endRow: number, endCol: number) => void
+  getDataRangeFn?: () => { startRow: number; startCol: number; endRow: number; endCol: number } | null
+  getCellCountFn?: () => number
 }): SheetAPI {
   return {
     // 行高列宽
@@ -860,14 +1028,51 @@ export function createSheetAPI(context: {
       }
       context.draw()
     },
+    setRowsHeight(rows: number[], height: number): void {
+      for (const row of rows) {
+        if (height <= 0) {
+          context.hiddenRows?.add(row)
+        } else {
+          context.hiddenRows?.delete(row)
+          context.rowHeights.set(row, height)
+          context.manualRowHeights.add(row)
+        }
+      }
+      context.draw()
+    },
+    setColsWidth(cols: number[], width: number): void {
+      for (const col of cols) {
+        if (width <= 0) {
+          context.hiddenCols?.add(col)
+        } else {
+          context.hiddenCols?.delete(col)
+          context.colWidths.set(col, width)
+        }
+      }
+      context.draw()
+    },
     
     // 行列操作
     insertRowAbove: context.insertRowAbove,
     insertRowBelow: context.insertRowBelow,
     deleteRow: context.deleteRow,
+    async deleteRows(rows: number[]): Promise<void> {
+      // 从大到小排序，避免索引偏移
+      const sortedRows = [...rows].sort((a, b) => b - a)
+      for (const row of sortedRows) {
+        await context.deleteRow(row, 1)
+      }
+    },
     insertColLeft: context.insertColLeft,
     insertColRight: context.insertColRight,
     deleteCol: context.deleteCol,
+    async deleteCols(cols: number[]): Promise<void> {
+      // 从大到小排序，避免索引偏移
+      const sortedCols = [...cols].sort((a, b) => b - a)
+      for (const col of sortedCols) {
+        await context.deleteCol(col, 1)
+      }
+    },
     
     // 选择
     getSelection(): { row: number; col: number } {
@@ -901,15 +1106,69 @@ export function createSheetAPI(context: {
         context.draw()
       }
     },
+    hideRows(rows: number[]): void {
+      if (context.hiddenRows) {
+        for (const row of rows) {
+          context.hiddenRows.add(row)
+        }
+        context.draw()
+      }
+    },
+    hideRowRange(startRow: number, endRow: number): void {
+      if (context.hiddenRows) {
+        for (let row = startRow; row <= endRow; row++) {
+          context.hiddenRows.add(row)
+        }
+        context.draw()
+      }
+    },
     unhideRow(row: number): void {
       if (context.hiddenRows) {
         context.hiddenRows.delete(row)
         context.draw()
       }
     },
+    unhideRows(rows: number[]): void {
+      if (context.hiddenRows) {
+        for (const row of rows) {
+          context.hiddenRows.delete(row)
+        }
+        context.draw()
+      }
+    },
+    unhideRowRange(startRow: number, endRow: number): void {
+      if (context.hiddenRows) {
+        for (let row = startRow; row <= endRow; row++) {
+          context.hiddenRows.delete(row)
+        }
+        context.draw()
+      }
+    },
+    isRowHidden(row: number): boolean {
+      return context.hiddenRows?.has(row) ?? false
+    },
+    getHiddenRows(): number[] {
+      return context.hiddenRows ? Array.from(context.hiddenRows).sort((a, b) => a - b) : []
+    },
     hideColumn(col: number): void {
       if (context.hiddenCols) {
         context.hiddenCols.add(col)
+        context.draw()
+      }
+    },
+    hideColumns(cols: number[]): void {
+      if (context.hiddenCols) {
+        for (const col of cols) {
+          context.hiddenCols.add(col)
+        }
+        context.draw()
+      }
+    },
+    hideColumnRange(startCol: number, endCol: number): void {
+      if (context.hiddenCols) {
+        for (let col = startCol; col <= endCol; col++) {
+          context.hiddenCols.add(col)
+        }
         context.draw()
       }
     },
@@ -918,6 +1177,28 @@ export function createSheetAPI(context: {
         context.hiddenCols.delete(col)
         context.draw()
       }
+    },
+    unhideColumns(cols: number[]): void {
+      if (context.hiddenCols) {
+        for (const col of cols) {
+          context.hiddenCols.delete(col)
+        }
+        context.draw()
+      }
+    },
+    unhideColumnRange(startCol: number, endCol: number): void {
+      if (context.hiddenCols) {
+        for (let col = startCol; col <= endCol; col++) {
+          context.hiddenCols.delete(col)
+        }
+        context.draw()
+      }
+    },
+    isColumnHidden(col: number): boolean {
+      return context.hiddenCols?.has(col) ?? false
+    },
+    getHiddenColumns(): number[] {
+      return context.hiddenCols ? Array.from(context.hiddenCols).sort((a, b) => a - b) : []
     },
     setShowGridLines(show: boolean): void {
       if (context.setShowGridLinesFn) {
@@ -959,6 +1240,64 @@ export function createSheetAPI(context: {
     getCellValue: context.getCellValue,
     getRawCellValue: context.getRawCellValue,
     setCellValue: context.setCellValue,
+    
+    // 批量数据操作 API
+    setValues(startRow: number, startCol: number, values: string[][]): void {
+      if (context.setValuesFn) {
+        context.setValuesFn(startRow, startCol, values)
+      } else {
+        // 回退实现：逐个设置
+        for (let i = 0; i < values.length; i++) {
+          const row = values[i]
+          if (row) {
+            for (let j = 0; j < row.length; j++) {
+              context.setCellValue(startRow + i, startCol + j, row[j] ?? '')
+            }
+          }
+        }
+      }
+      context.draw()
+    },
+    getValues(startRow: number, startCol: number, endRow: number, endCol: number): string[][] {
+      if (context.getValuesFn) {
+        return context.getValuesFn(startRow, startCol, endRow, endCol)
+      }
+      // 回退实现：逐个获取
+      const result: string[][] = []
+      for (let r = startRow; r <= endRow; r++) {
+        const row: string[] = []
+        for (let c = startCol; c <= endCol; c++) {
+          row.push(context.getCellValue(r, c))
+        }
+        result.push(row)
+      }
+      return result
+    },
+    clearValues(startRow: number, startCol: number, endRow: number, endCol: number): void {
+      if (context.clearValuesFn) {
+        context.clearValuesFn(startRow, startCol, endRow, endCol)
+      } else {
+        // 回退实现：逐个清除
+        for (let r = startRow; r <= endRow; r++) {
+          for (let c = startCol; c <= endCol; c++) {
+            context.setCellValue(r, c, '')
+          }
+        }
+      }
+      context.draw()
+    },
+    getDataRange(): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
+      if (context.getDataRangeFn) {
+        return context.getDataRangeFn()
+      }
+      return null
+    },
+    getCellCount(): number {
+      if (context.getCellCountFn) {
+        return context.getCellCountFn()
+      }
+      return 0
+    },
     
     // 样式 API
     getCellStyle: context.getCellStyleFn,

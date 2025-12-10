@@ -1,12 +1,75 @@
 /**
  * Cell content rendering module: draws cell text, selection highlights, and formula references.
  * Depends on geometry module for positions and the FormulaSheet for values.
+ * 
+ * 性能优化 v1.2.0：
+ * - 支持通过 positionAccessor 注入缓存的位置计算函数
+ * - 当提供 positionAccessor 时，使用 O(1) 的 PositionIndex 查找
+ * - 否则回退到原来的 O(n) 累加计算
  */
 
-import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge, MergedCellInfo, MergedRegion, CellImage } from './types'
+import type { GeometryConfig, SizeAccess, FormulaReference, CellStyle, CellBorder, BorderEdge, MergedCellInfo, MergedRegion, CellImage, PositionAccessor } from './types'
 import { BORDER_PRESETS } from './types'
-import { getRowHeight, getColWidth, getRowTop, getColLeft } from './geometry'
+import { getRowHeight as geomGetRowHeight, getColWidth as geomGetColWidth, getRowTop as geomGetRowTop, getColLeft as geomGetColLeft } from './geometry'
 import { renderCellImage } from './renderCellImage'
+
+/**
+ * 简单的 LRU 缓存实现，用于 measureText 缓存
+ */
+class TextMeasureCache {
+  private cache = new Map<string, number>()
+  private maxSize: number
+  
+  constructor(maxSize = 500) {
+    this.maxSize = maxSize
+  }
+  
+  /**
+   * 获取或计算文本宽度
+   * @param ctx Canvas context
+   * @param text 要测量的文本
+   * @param font 字体字符串
+   * @returns 文本宽度
+   */
+  measure(ctx: CanvasRenderingContext2D, text: string, font: string): number {
+    const key = `${font}|${text}`
+    const cached = this.cache.get(key)
+    if (cached !== undefined) {
+      // LRU: 将访问过的项移到末尾
+      this.cache.delete(key)
+      this.cache.set(key, cached)
+      return cached
+    }
+    
+    // 确保使用正确的字体
+    if (ctx.font !== font) {
+      ctx.font = font
+    }
+    const width = ctx.measureText(text).width
+    
+    // 缓存大小限制
+    if (this.cache.size >= this.maxSize) {
+      // 删除最老的条目（Map 的第一个）
+      const firstKey = this.cache.keys().next().value
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey)
+      }
+    }
+    
+    this.cache.set(key, width)
+    return width
+  }
+  
+  /**
+   * 清空缓存
+   */
+  clear() {
+    this.cache.clear()
+  }
+}
+
+// 全局文本测量缓存实例
+const textMeasureCache = new TextMeasureCache()
 
 /**
  * 将 HEX 颜色转换为带透明度的 RGBA
@@ -353,6 +416,8 @@ export interface CellsRenderConfig {
   crossSheetSelectionColor?: string
   /** 是否隐藏默认选区（跨 Sheet 公式模式下不显示默认选中单元格） */
   hideDefaultSelection?: boolean
+  /** 位置访问器（可选，提供时使用缓存的 O(1) 查找） */
+  positionAccessor?: PositionAccessor
 }
 
 /**
@@ -380,10 +445,17 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     startRow,
     endRow,
     startCol,
-    endCol
+    endCol,
+    positionAccessor
   } = config
   
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
+  
+  // 使用 positionAccessor（如果提供）或回退到 geometry 函数
+  const getRowHeight = positionAccessor?.getRowHeight ?? ((r: number) => geomGetRowHeight(r, sizes, geometryConfig))
+  const getColWidth = positionAccessor?.getColWidth ?? ((c: number) => geomGetColWidth(c, sizes, geometryConfig))
+  const getRowTop = positionAccessor?.getRowTop ?? ((r: number) => geomGetRowTop(r, sizes, geometryConfig))
+  const getColLeft = positionAccessor?.getColLeft ?? ((c: number) => geomGetColLeft(c, sizes, geometryConfig))
   
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
   
@@ -395,11 +467,15 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
 
   ctx.textBaseline = 'middle'
 
+  // 性能优化：跟踪当前字体和颜色，避免重复设置
+  let currentFont = ''
+  let currentFillStyle = ''
+
   // 辅助函数：计算合并单元格的总宽度
   const getMergedWidth = (startC: number, endC: number): number => {
     let width = 0
     for (let c = startC; c <= endC; c++) {
-      width += getColWidth(c, sizes, geometryConfig)
+      width += getColWidth(c)
     }
     return width
   }
@@ -408,12 +484,13 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   const getMergedHeight = (startR: number, endR: number): number => {
     let height = 0
     for (let r = startR; r <= endR; r++) {
-      height += getRowHeight(r, sizes, geometryConfig)
+      height += getRowHeight(r)
     }
     return height
   }
 
   // 辅助函数：渲染单元格内容
+  // 性能优化：合并背景和文本的 save/clip/restore 为一次调用
   const renderCellContent = (
     r: number, 
     c: number, 
@@ -438,12 +515,16 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       textRotation: 0
     }
     
-    // Save current drawing state
+    // 计算裁剪区域（只计算一次）
+    const clipX = Math.max(cellX, rowHeaderWidth)
+    const clipY = Math.max(cellY, colHeaderHeight)
+    
+    // Save current drawing state - 只保存一次
     ctx.save()
     
     // Create clipping region limited to current cell (or merged cell area)
     ctx.beginPath()
-    ctx.rect(Math.max(cellX, rowHeaderWidth), Math.max(cellY, colHeaderHeight), colWidth, rowHeight)
+    ctx.rect(clipX, clipY, colWidth, rowHeight)
     ctx.clip()
     
     // Draw background color if specified (留出1px的网格线空间)
@@ -451,8 +532,6 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       ctx.fillStyle = style.backgroundColor
       ctx.fillRect(cellX + 0.5, cellY + 0.5, colWidth - 1, rowHeight - 1)
     }
-    
-    ctx.restore()
     
     // Render cell image if present (图片优先于文本)
     if (getCellDisplayImage && getCellImageCount) {
@@ -473,24 +552,30 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
           style.verticalAlign // 传递单元格垂直对齐
         )
         // 如果有图片，不渲染文本（图片和文本不共存）
+        ctx.restore()
         return
       }
     }
     
     const displayValue = getCellValue(r, c)
-    if (displayValue === null || displayValue === undefined) return
+    if (displayValue === null || displayValue === undefined) {
+      ctx.restore()
+      return
+    }
     
-    // Save current drawing state for text
-    ctx.save()
+    // 继续在同一裁剪区域内渲染文本（无需再次 save/clip）
     
-    // Create clipping region limited to current cell (or merged cell area)
-    ctx.beginPath()
-    ctx.rect(Math.max(cellX, rowHeaderWidth), Math.max(cellY, colHeaderHeight), colWidth, rowHeight)
-    ctx.clip()
-    
-    // Apply cell style
-    ctx.font = buildFontString(style)
-    ctx.fillStyle = style.color || '#000'
+    // Apply cell style - 性能优化：只在变化时设置
+    const font = buildFontString(style)
+    if (font !== currentFont) {
+      ctx.font = font
+      currentFont = font
+    }
+    const fillStyle = style.color || '#000'
+    if (fillStyle !== currentFillStyle) {
+      ctx.fillStyle = fillStyle
+      currentFillStyle = fillStyle
+    }
     
     // Handle newlines and wrapping
     const text = String(displayValue)
@@ -511,8 +596,8 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     
     if (lines.length === 1) {
       // Single line: apply alignment
-      const textMetrics = ctx.measureText(text)
-      const textWidth = textMetrics.width
+      // 使用缓存的文本测量
+      const textWidth = textMeasureCache.measure(ctx, text, font)
       
       // Calculate vertical alignment
       const { textY, textBaseline } = calculateTextY(
@@ -575,8 +660,8 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       ctx.textBaseline = 'middle'
       
       lines.forEach((line, idx) => {
-        const lineMetrics = ctx.measureText(line)
-        const lineWidth = lineMetrics.width
+        // 使用缓存的文本测量
+        const lineWidth = textMeasureCache.measure(ctx, line, font)
         const lineX = calculateTextX(cellX, colWidth, lineWidth, style.textAlign || 'left')
         const lineY = startY + idx * lineHeight
         
@@ -595,6 +680,9 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     }
     
     ctx.restore()
+    // restore 会恢复字体状态，需要重置缓存变量
+    currentFont = ''
+    currentFillStyle = ''
   }
 
   // 收集需要渲染的合并区域（主单元格在可视区域外，但合并区域与可视区域有交集）
@@ -620,8 +708,8 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   for (const region of mergedRegions) {
     const key = `${region.startRow},${region.startCol}`
     if (mergedRegionsToRender.has(key)) {
-      const cellX = rowHeaderWidth + getColLeft(region.startCol, sizes, geometryConfig) - viewport.scrollLeft
-      const cellY = colHeaderHeight + getRowTop(region.startRow, sizes, geometryConfig) - viewport.scrollTop
+      const cellX = rowHeaderWidth + getColLeft(region.startCol) - viewport.scrollLeft
+      const cellY = colHeaderHeight + getRowTop(region.startRow) - viewport.scrollTop
       const mergedWidth = getMergedWidth(region.startCol, region.endCol)
       const mergedHeight = getMergedHeight(region.startRow, region.endRow)
       
@@ -629,16 +717,26 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     }
   }
 
+  // 性能优化：预计算可见列的宽度和左边位置
+  const colWidthCache: number[] = []
+  const colLeftCache: number[] = []
+  for (let c = startCol; c <= endCol; c++) {
+    colWidthCache[c - startCol] = getColWidth(c)
+    colLeftCache[c - startCol] = getColLeft(c)
+  }
+
   // Draw visible cells from model
   for (let r = startRow; r <= endRow; r++) {
-    const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    const rowHeight = getRowHeight(r)
     // 跳过隐藏的行
     if (rowHeight <= 0) continue
     
-    const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+    const cellY = colHeaderHeight + getRowTop(r) - viewport.scrollTop
     
     for (let c = startCol; c <= endCol; c++) {
-      const colWidth = getColWidth(c, sizes, geometryConfig)
+      // 使用预计算的列宽和位置缓存
+      const cacheIdx = c - startCol
+      const colWidth = colWidthCache[cacheIdx]!
       // 跳过隐藏的列
       if (colWidth <= 0) continue
       
@@ -650,8 +748,8 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
         continue
       }
 
-      // 计算单元格位置和尺寸
-      const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+      // 计算单元格位置和尺寸 - 使用预计算缓存
+      const cellX = rowHeaderWidth + colLeftCache[cacheIdx]! - viewport.scrollLeft
       let actualColWidth = colWidth
       let actualRowHeight = rowHeight
 
@@ -673,18 +771,20 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     const drawnMergedBorders = new Set<string>()
     
     for (let r = startRow; r <= endRow; r++) {
-      const rowHeight = getRowHeight(r, sizes, geometryConfig)
+      const rowHeight = getRowHeight(r)
       // 跳过隐藏的行
       if (rowHeight <= 0) continue
       
-      const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+      const cellY = colHeaderHeight + getRowTop(r) - viewport.scrollTop
       
       for (let c = startCol; c <= endCol; c++) {
-        const colWidth = getColWidth(c, sizes, geometryConfig)
+        // 使用预计算的列宽和位置缓存
+        const cacheIdx = c - startCol
+        const colWidth = colWidthCache[cacheIdx]!
         // 跳过隐藏的列
         if (colWidth <= 0) continue
         
-        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+        const cellX = rowHeaderWidth + colLeftCache[cacheIdx]! - viewport.scrollLeft
         
         // 检查单元格是否在合并区域内
         const mergeInfo = getMergedCellInfo?.(r, c)
@@ -701,10 +801,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
             const masterBorder = config.model.getCellBorder(region.startRow, region.startCol)
             if (masterBorder) {
               // 计算合并区域的实际位置和大小
-              const mergeX = rowHeaderWidth + getColLeft(region.startCol, sizes, geometryConfig) - viewport.scrollLeft
-              const mergeY = colHeaderHeight + getRowTop(region.startRow, sizes, geometryConfig) - viewport.scrollTop
-              const mergeWidth = getColLeft(region.endCol + 1, sizes, geometryConfig) - getColLeft(region.startCol, sizes, geometryConfig)
-              const mergeHeight = getRowTop(region.endRow + 1, sizes, geometryConfig) - getRowTop(region.startRow, sizes, geometryConfig)
+              const mergeX = rowHeaderWidth + getColLeft(region.startCol) - viewport.scrollLeft
+              const mergeY = colHeaderHeight + getRowTop(region.startRow) - viewport.scrollTop
+              const mergeWidth = getColLeft(region.endCol + 1) - getColLeft(region.startCol)
+              const mergeHeight = getRowTop(region.endRow + 1) - getRowTop(region.startRow)
               
               // 在合并区域的边界上绘制边框
               drawCellBorder(ctx, mergeX, mergeY, mergeWidth, mergeHeight, masterBorder)
@@ -739,19 +839,19 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
             const regionKey = `${mergeInfo.region.startRow},${mergeInfo.region.startCol}`
             if (!drawnMergedRegions.has(regionKey)) {
               drawnMergedRegions.add(regionKey)
-              const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol, sizes, geometryConfig) - viewport.scrollLeft
-              const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow, sizes, geometryConfig) - viewport.scrollTop
-              const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-              const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+              const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol) - viewport.scrollLeft
+              const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow) - viewport.scrollTop
+              const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1) - viewport.scrollLeft
+              const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1) - viewport.scrollTop
               if (ex > 0 && sx < w && ey > 0 && sy < h) {
                 ctx.fillRect(sx, sy, ex - sx, ey - sy)
               }
             }
           } else {
-            const sx = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-            const sy = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
-            const colWidth = getColWidth(c, sizes, geometryConfig)
-            const rowHeight = getRowHeight(r, sizes, geometryConfig)
+            const sx = rowHeaderWidth + getColLeft(c) - viewport.scrollLeft
+            const sy = colHeaderHeight + getRowTop(r) - viewport.scrollTop
+            const colWidth = getColWidth(c)
+            const rowHeight = getRowHeight(r)
             
             if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
               ctx.fillRect(sx, sy, colWidth, rowHeight)
@@ -761,10 +861,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       }
       
       // 绘制多选区边框（使用虚线样式区分）
-      const sx = rowHeaderWidth + getColLeft(range.startCol, sizes, geometryConfig) - viewport.scrollLeft
-      const sy = colHeaderHeight + getRowTop(range.startRow, sizes, geometryConfig) - viewport.scrollTop
-      const ex = rowHeaderWidth + getColLeft(range.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-      const ey = colHeaderHeight + getRowTop(range.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+      const sx = rowHeaderWidth + getColLeft(range.startCol) - viewport.scrollLeft
+      const sy = colHeaderHeight + getRowTop(range.startRow) - viewport.scrollTop
+      const ex = rowHeaderWidth + getColLeft(range.endCol + 1) - viewport.scrollLeft
+      const ey = colHeaderHeight + getRowTop(range.endRow + 1) - viewport.scrollTop
       ctx.strokeStyle = '#3b82f6'
       ctx.lineWidth = 1
       ctx.setLineDash([3, 3])
@@ -803,20 +903,20 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
           if (!drawnMergedRegions.has(regionKey)) {
             drawnMergedRegions.add(regionKey)
             // 绘制整个合并区域
-            const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol, sizes, geometryConfig) - viewport.scrollLeft
-            const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow, sizes, geometryConfig) - viewport.scrollTop
-            const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-            const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+            const sx = rowHeaderWidth + getColLeft(mergeInfo.region.startCol) - viewport.scrollLeft
+            const sy = colHeaderHeight + getRowTop(mergeInfo.region.startRow) - viewport.scrollTop
+            const ex = rowHeaderWidth + getColLeft(mergeInfo.region.endCol + 1) - viewport.scrollLeft
+            const ey = colHeaderHeight + getRowTop(mergeInfo.region.endRow + 1) - viewport.scrollTop
             if (ex > 0 && sx < w && ey > 0 && sy < h) {
               ctx.fillRect(sx, sy, ex - sx, ey - sy)
             }
           }
         } else {
           // 普通单元格：正常绘制
-          const sx = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-          const sy = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
-          const colWidth = getColWidth(c, sizes, geometryConfig)
-          const rowHeight = getRowHeight(r, sizes, geometryConfig)
+          const sx = rowHeaderWidth + getColLeft(c) - viewport.scrollLeft
+          const sy = colHeaderHeight + getRowTop(r) - viewport.scrollTop
+          const colWidth = getColWidth(c)
+          const rowHeight = getRowHeight(r)
           
           if (sx + colWidth > 0 && sx < w && sy + rowHeight > 0 && sy < h) {
             ctx.fillRect(sx, sy, colWidth, rowHeight)
@@ -825,10 +925,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
       }
     }
     // Draw border around selection range
-    const sx = rowHeaderWidth + getColLeft(selectionRange.startCol, sizes, geometryConfig) - viewport.scrollLeft
-    const sy = colHeaderHeight + getRowTop(selectionRange.startRow, sizes, geometryConfig) - viewport.scrollTop
-    const ex = rowHeaderWidth + getColLeft(selectionRange.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-    const ey = colHeaderHeight + getRowTop(selectionRange.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+    const sx = rowHeaderWidth + getColLeft(selectionRange.startCol) - viewport.scrollLeft
+    const sy = colHeaderHeight + getRowTop(selectionRange.startRow) - viewport.scrollTop
+    const ex = rowHeaderWidth + getColLeft(selectionRange.endCol + 1) - viewport.scrollLeft
+    const ey = colHeaderHeight + getRowTop(selectionRange.endRow + 1) - viewport.scrollTop
     ctx.strokeStyle = selectionBorderColor
     ctx.lineWidth = 2
     ctx.strokeRect(sx + 0.5, sy + 0.5, ex - sx - 1, ey - sy - 1)
@@ -849,10 +949,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     
     // 只有当选中单元格不在合并区域内，或者选择范围没有覆盖合并区域时，才绘制单选框
     if (!selectionCoversRegion) {
-      const sx = rowHeaderWidth + getColLeft(selected.col, sizes, geometryConfig) - viewport.scrollLeft
-      const sy = colHeaderHeight + getRowTop(selected.row, sizes, geometryConfig) - viewport.scrollTop
-      const colWidth = getColWidth(selected.col, sizes, geometryConfig)
-      const rowHeight = getRowHeight(selected.row, sizes, geometryConfig)
+      const sx = rowHeaderWidth + getColLeft(selected.col) - viewport.scrollLeft
+      const sy = colHeaderHeight + getRowTop(selected.row) - viewport.scrollTop
+      const colWidth = getColWidth(selected.col)
+      const rowHeight = getRowHeight(selected.row)
       ctx.strokeStyle = selectionBorderColor
       ctx.lineWidth = 2
       ctx.strokeRect(sx + 0.5, sy + 0.5, colWidth - 1, rowHeight - 1)
@@ -862,10 +962,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   // Draw colored borders for formula references (Excel style)
   if (formulaReferences.length > 0) {
     for (const ref of formulaReferences) {
-      const sx = rowHeaderWidth + getColLeft(ref.startCol, sizes, geometryConfig) - viewport.scrollLeft
-      const sy = colHeaderHeight + getRowTop(ref.startRow, sizes, geometryConfig) - viewport.scrollTop
-      const ex = rowHeaderWidth + getColLeft(ref.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-      const ey = colHeaderHeight + getRowTop(ref.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+      const sx = rowHeaderWidth + getColLeft(ref.startCol) - viewport.scrollLeft
+      const sy = colHeaderHeight + getRowTop(ref.startRow) - viewport.scrollTop
+      const ex = rowHeaderWidth + getColLeft(ref.endCol + 1) - viewport.scrollLeft
+      const ey = colHeaderHeight + getRowTop(ref.endRow + 1) - viewport.scrollTop
       const width = ex - sx
       const height = ey - sy
       
@@ -892,10 +992,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
     const endCol = Math.max(dragState.startCol, dragState.currentCol)
 
     // Calculate dashed box coordinates
-    const sx = rowHeaderWidth + getColLeft(startCol, sizes, geometryConfig) - viewport.scrollLeft
-    const sy = colHeaderHeight + getRowTop(startRow, sizes, geometryConfig) - viewport.scrollTop
-    const ex = rowHeaderWidth + getColLeft(endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-    const ey = colHeaderHeight + getRowTop(endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+    const sx = rowHeaderWidth + getColLeft(startCol) - viewport.scrollLeft
+    const sy = colHeaderHeight + getRowTop(startRow) - viewport.scrollTop
+    const ex = rowHeaderWidth + getColLeft(endCol + 1) - viewport.scrollLeft
+    const ey = colHeaderHeight + getRowTop(endRow + 1) - viewport.scrollTop
     const width = ex - sx
     const height = ey - sy
 
@@ -930,10 +1030,10 @@ export function drawCells(ctx: CanvasRenderingContext2D, config: CellsRenderConf
   // 蚂蚁线层级最高，在所有选择框之上
   const { copyRange, marchingAntsOffset = 0 } = config
   if (copyRange && copyRange.visible && copyRange.startRow >= 0) {
-    const sx = rowHeaderWidth + getColLeft(copyRange.startCol, sizes, geometryConfig) - viewport.scrollLeft
-    const sy = colHeaderHeight + getRowTop(copyRange.startRow, sizes, geometryConfig) - viewport.scrollTop
-    const ex = rowHeaderWidth + getColLeft(copyRange.endCol + 1, sizes, geometryConfig) - viewport.scrollLeft
-    const ey = colHeaderHeight + getRowTop(copyRange.endRow + 1, sizes, geometryConfig) - viewport.scrollTop
+    const sx = rowHeaderWidth + getColLeft(copyRange.startCol) - viewport.scrollLeft
+    const sy = colHeaderHeight + getRowTop(copyRange.startRow) - viewport.scrollTop
+    const ex = rowHeaderWidth + getColLeft(copyRange.endCol + 1) - viewport.scrollLeft
+    const ey = colHeaderHeight + getRowTop(copyRange.endRow + 1) - viewport.scrollTop
     const width = ex - sx
     const height = ey - sy
     

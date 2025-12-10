@@ -325,12 +325,22 @@ export class FormulaSheet {
       return rawValue
     }
 
+    // 保存计算时的公式，用于验证结果
+    const formulaAtStart = rawValue
+
     // 更新状态为待计算
     this.updateCellState(row, col, { state: 'pending' })
 
     try {
       // 添加到计算队列
       const result = await this.calculationQueue.addTask(row, col, rawValue, priority)
+      
+      // 检查单元格值是否在计算期间被修改（防止竞态条件）
+      const currentValue = this.getRawValue(row, col)
+      if (currentValue !== formulaAtStart) {
+        // 单元格值已被修改，丢弃计算结果
+        return currentValue
+      }
       
       // 缓存结果
       this.formulaCache.set(cellKey, result)
@@ -340,6 +350,11 @@ export class FormulaSheet {
       
       return result
     } catch (error) {
+      // 如果是任务被取消的错误，静默处理
+      if (error instanceof Error && error.message.includes('cancelled')) {
+        return this.getRawValue(row, col)
+      }
+      
       const errorMsg = error instanceof Error ? error.message : '#ERROR!'
       
       // 更新状态为错误
@@ -435,6 +450,9 @@ export class FormulaSheet {
    */
   setValue(row: number, col: number, value: string): void {
     const cellKey = `${row}_${col}`
+    
+    // 取消该单元格的待处理异步计算任务（防止竞态条件）
+    this.calculationQueue.cancelTask(cellKey)
     
     // 清除该单元格的旧状态和缓存
     this.cellStates.delete(cellKey)

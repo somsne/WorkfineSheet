@@ -49,10 +49,10 @@ export interface UseFillHandleOptions {
   getUndoRedoManager: () => UndoRedoManager
   /** 获取当前 Sheet ID（用于 UndoRedo 操作记录） */
   getSheetId?: () => string | undefined
-  /** 总行数 */
-  totalRows: number
-  /** 总列数 */
-  totalCols: number
+  /** 获取总行数 */
+  getTotalRows: () => number
+  /** 获取总列数 */
+  getTotalCols: () => number
   /** 触发重绘 */
   scheduleRedraw: () => void
   /** 更新选择范围 */
@@ -103,8 +103,8 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     getFormulaSheet,
     getUndoRedoManager,
     getSheetId,
-    totalRows,
-    totalCols,
+    getTotalRows,
+    getTotalCols,
     scheduleRedraw,
     updateSelectionRange,
     isMultiSelectionActive
@@ -196,6 +196,8 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     fillHandleState.direction = direction
     
     // 计算当前鼠标位置对应的单元格
+    const totalRows = getTotalRows()
+    const totalCols = getTotalCols()
     const currentRow = getRowAtY(y, viewport, sizes, geometryConfig, totalRows)
     const currentCol = getColAtX(x, viewport, sizes, geometryConfig, totalCols)
     
@@ -646,6 +648,8 @@ export function useFillHandle(options: UseFillHandleOptions): FillHandleComposab
     
     const selectionRange = getSelectionRange()
     const model = getModel()
+    const totalRows = getTotalRows()
+    const totalCols = getTotalCols()
     
     // 清除菜单状态，避免影响填充
     fillOptionsMenu.sourceRange = null

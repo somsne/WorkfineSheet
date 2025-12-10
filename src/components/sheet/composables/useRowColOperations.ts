@@ -4,7 +4,6 @@
  */
 
 import {
-  insertRowBelow as insertRowBelowHelper,
   insertRowsAboveBatch,
   deleteRow as deleteRowHelper,
   insertColsLeftBatch,
@@ -25,14 +24,17 @@ export interface UseRowColOperationsOptions {
     execute(action: { name: string; undo: () => void; redo: () => void }): void
     record(action: { name: string; undo: () => void; redo: () => void }): void
   }
+  /** 检测是否处于批量操作模式（如果是则跳过中间渲染） */
+  isInBatchMode?: () => boolean
 }
 
-export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor }: UseRowColOperationsOptions) {
+export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor, isInBatchMode }: UseRowColOperationsOptions) {
   const {
     constants,
     model, formulaSheet, undoRedo,
     rowHeights, colWidths, manualRowHeights,
     hiddenRows, hiddenCols,
+    totalRows, totalCols,
     selected,
     inputDialog,
     saveRowHeightsSnapshot, restoreRowHeights,
@@ -46,8 +48,11 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
   
   /**
    * 创建行列配置对象
+   * @param forceSkipRedraw 强制跳过重绘（用于批量操作内部循环）
    */
-  function createRowColConfig(): RowColConfig {
+  function createRowColConfig(forceSkipRedraw: boolean = false): RowColConfig {
+    // 在 batch 模式时自动跳过重绘
+    const shouldSkipRedraw = forceSkipRedraw || (isInBatchMode?.() ?? false)
     return {
       formulaSheet,
       sizeConfig: {
@@ -55,11 +60,12 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
         colWidths: colWidths.value,
         defaultRowHeight: constants.ROW_HEIGHT,
         defaultColWidth: constants.COL_WIDTH,
-        totalRows: constants.DEFAULT_ROWS,
-        totalCols: constants.DEFAULT_COLS
+        totalRows: totalRows.value,
+        totalCols: totalCols.value
       },
       selected,
-      onRedraw: onDraw
+      onRedraw: onDraw,
+      skipRedraw: shouldSkipRedraw
     }
   }
   
@@ -72,13 +78,18 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
+    const oldTotalRows = totalRows.value
     
     // 使用优化的批量插入函数（一次性移动所有内容）
     await insertRowsAboveBatch(row, count, createRowColConfig())
     
+    // 自动扩展总行数
+    totalRows.value += count
+    
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
+    const newTotalRows = totalRows.value
     
     const actionName = count > 1 
       ? `在第 ${row + 1} 行上方插入 ${count} 行`
@@ -89,6 +100,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreRowHeights(rowHeightsSnapshot)
+        totalRows.value = oldTotalRows
         selected.row = oldSelected.row
         selected.col = oldSelected.col
         onDraw()
@@ -96,6 +108,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       redo: () => {
         model.restoreFromSnapshot(newModelSnapshot)
         restoreRowHeights(newRowHeightsSnapshot)
+        totalRows.value = newTotalRows
         selected.row = newSelected.row
         selected.col = newSelected.col
         onDraw()
@@ -105,21 +118,24 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
   }
   
   /**
-   * 在指定行下方插入行（支持批量插入）
+   * 在指定行下方插入行（支持批量插入 - 使用优化的批量函数）
    */
   async function insertRowBelow(row: number, count: number = 1) {
     const modelSnapshot = model.createSnapshot()
     const rowHeightsSnapshot = saveRowHeightsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
+    const oldTotalRows = totalRows.value
     
-    // 批量插入（从后往前插入，保持相对位置）
-    for (let i = 0; i < count; i++) {
-      await insertRowBelowHelper(row, createRowColConfig())
-    }
+    // 使用优化的批量插入函数（在 row+1 的上方插入）
+    await insertRowsAboveBatch(row + 1, count, createRowColConfig())
+    
+    // 自动扩展总行数
+    totalRows.value += count
     
     const newModelSnapshot = model.createSnapshot()
     const newRowHeightsSnapshot = saveRowHeightsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
+    const newTotalRows = totalRows.value
     
     const actionName = count > 1 
       ? `在第 ${row + 1} 行下方插入 ${count} 行`
@@ -130,6 +146,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreRowHeights(rowHeightsSnapshot)
+        totalRows.value = oldTotalRows
         selected.row = oldSelected.row
         selected.col = oldSelected.col
         onDraw()
@@ -137,6 +154,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       redo: () => {
         model.restoreFromSnapshot(newModelSnapshot)
         restoreRowHeights(newRowHeightsSnapshot)
+        totalRows.value = newTotalRows
         selected.row = newSelected.row
         selected.col = newSelected.col
         onDraw()
@@ -201,13 +219,18 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
+    const oldTotalCols = totalCols.value
     
     // 使用优化的批量插入函数
     await insertColsLeftBatch(col, count, createRowColConfig())
     
+    // 自动扩展总列数
+    totalCols.value += count
+    
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
+    const newTotalCols = totalCols.value
     
     const actionName = count > 1 
       ? `在第 ${col + 1} 列左侧插入 ${count} 列`
@@ -218,6 +241,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreColWidths(colWidthsSnapshot)
+        totalCols.value = oldTotalCols
         selected.row = oldSelected.row
         selected.col = oldSelected.col
         onDraw()
@@ -225,6 +249,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       redo: () => {
         model.restoreFromSnapshot(newModelSnapshot)
         restoreColWidths(newColWidthsSnapshot)
+        totalCols.value = newTotalCols
         selected.row = newSelected.row
         selected.col = newSelected.col
         onDraw()
@@ -240,13 +265,18 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
     const modelSnapshot = model.createSnapshot()
     const colWidthsSnapshot = saveColWidthsSnapshot()
     const oldSelected = { row: selected.row, col: selected.col }
+    const oldTotalCols = totalCols.value
     
     // 使用优化的批量插入函数（在 col+1 的左侧插入）
     await insertColsLeftBatch(col + 1, count, createRowColConfig())
     
+    // 自动扩展总列数
+    totalCols.value += count
+    
     const newModelSnapshot = model.createSnapshot()
     const newColWidthsSnapshot = saveColWidthsSnapshot()
     const newSelected = { row: selected.row, col: selected.col }
+    const newTotalCols = totalCols.value
     
     const actionName = count > 1 
       ? `在第 ${col + 1} 列右侧插入 ${count} 列`
@@ -257,6 +287,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       undo: () => {
         model.restoreFromSnapshot(modelSnapshot)
         restoreColWidths(colWidthsSnapshot)
+        totalCols.value = oldTotalCols
         selected.row = oldSelected.row
         selected.col = oldSelected.col
         onDraw()
@@ -264,6 +295,7 @@ export function useRowColOperations({ state, geometry, onDraw, undoRedoExecutor 
       redo: () => {
         model.restoreFromSnapshot(newModelSnapshot)
         restoreColWidths(newColWidthsSnapshot)
+        totalCols.value = newTotalCols
         selected.row = newSelected.row
         selected.col = newSelected.col
         onDraw()

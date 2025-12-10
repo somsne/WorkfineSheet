@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>表格渲染性能测试 - WorkfineSheet</title>
+  <style>
+    :root {
+      --primary: #667eea;
+      --success: #48bb78;
+      --warning: #ed8936;
+      --danger: #f56565;
+    }
+    
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+    }
+    
+    .navbar {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .navbar a { color: white; text-decoration: none; opacity: 0.8; }
+    .navbar a:hover { opacity: 1; }
+    .navbar h1 { font-size: 1.25rem; flex: 1; }
+    
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    
+    .main-layout {
+      display: grid;
+      grid-template-columns: 400px 1fr;
+      gap: 24px;
+    }
+    
+    @media (max-width: 1024px) {
+      .main-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .card h3 {
+      color: #1f2937;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1rem;
+    }
+    
+    .card .desc {
+      color: #6b7280;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    
+    .metric-card {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    
+    .metric-card .value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #667eea;
+    }
+    
+    .metric-card .label {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    
+    .btn-primary:hover { background: #5a67d8; }
+    .btn-primary:disabled { background: #a0aec0; cursor: not-allowed; }
+    
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #4a5568;
+    }
+    
+    .btn-secondary:hover { background: #cbd5e0; }
+    
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+    
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+    
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .input-row label {
+      font-size: 0.85rem;
+      color: #4a5568;
+      min-width: 40px;
+    }
+    
+    .input-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.85rem;
+    }
+    
+    .progress {
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 2px;
+      width: 0;
+      transition: width 0.3s;
+    }
+    
+    .result {
+      font-family: 'Monaco', 'Consolas', monospace;
+      font-size: 0.8rem;
+      background: #1f2937;
+      color: #e5e7eb;
+      padding: 12px;
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    
+    .result:empty { display: none; }
+    
+    .rating {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    
+    .rating.fast { background: #c6f6d5; color: #22543d; }
+    .rating.medium { background: #feebc8; color: #744210; }
+    .rating.slow { background: #fed7d7; color: #822727; }
+    
+    /* 表格容器样式 */
+    .sheet-panel {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sheet-container {
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sheet-container-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 10px 16px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .sheet-container-body {
+      flex: 1;
+      min-height: 500px;
+    }
+    
+    .status-badge {
+      background: rgba(255,255,255,0.2);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+    }
+    
+    /* 历史记录 */
+    .history-list {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 0.85rem;
+    }
+    
+    .history-item:last-child {
+      border-bottom: none;
+    }
+    
+    .history-item .size {
+      color: #6b7280;
+    }
+    
+    .history-item .time {
+      font-weight: 600;
+      color: #1f2937;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="index.html">← 返回测试首页</a>
+    <h1>📊 表格渲染性能测试</h1>
+  </nav>
+  
+  <div class="container">
+    <div class="main-layout">
+      <!-- 左侧控制面板 -->
+      <div class="sidebar">
+        <!-- 统计信息 -->
+        <div class="card">
+          <h3>📈 测试统计</h3>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="value" id="totalTests">0</div>
+              <div class="label">测试次数</div>
+            </div>
+            <div class="metric-card">
+              <div class="value" id="totalCells">0</div>
+              <div class="label">单元格数</div>
+            </div>
+            <div class="metric-card">
+              <div class="value" id="avgRenderTime">-</div>
+              <div class="label">平均渲染</div>
+            </div>
+            <div class="metric-card">
+              <div class="value" id="avgTimePerCell">-</div>
+              <div class="label">单元格耗时</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 快速测试 -->
+        <div class="card">
+          <h3>🚀 快速测试</h3>
+          <p class="desc">选择预设规模快速测试渲染性能</p>
+          <div class="controls">
+            <div class="btn-row">
+              <button class="btn-primary btn-sm" onclick="runTest(100, 10)">1K</button>
+              <button class="btn-primary btn-sm" onclick="runTest(500, 20)">10K</button>
+              <button class="btn-primary btn-sm" onclick="runTest(1000, 26)">26K</button>
+              <button class="btn-warning btn-sm" onclick="runTest(2000, 30)">60K</button>
+              <button class="btn-warning btn-sm" onclick="runTest(5000, 50)">250K</button>
+              <button class="btn-danger btn-sm" onclick="runTest(10000, 50)">500K</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 自定义测试 -->
+        <div class="card">
+          <h3>⚙️ 自定义测试</h3>
+          <p class="desc">输入自定义的行列数进行测试</p>
+          <div class="controls">
+            <div class="input-row">
+              <label>行数:</label>
+              <input type="number" id="customRows" value="1000" min="1" max="100000">
+            </div>
+            <div class="input-row">
+              <label>列数:</label>
+              <input type="number" id="customCols" value="26" min="1" max="100">
+            </div>
+            <div class="btn-row">
+              <button class="btn-success" onclick="runCustomTest()">开始测试</button>
+              <button class="btn-secondary" onclick="clearSheet()">清空表格</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 压力测试 -->
+        <div class="card">
+          <h3>🔥 压力测试</h3>
+          <p class="desc">逐步增加数据量测试性能极限</p>
+          <div class="controls">
+            <div class="btn-row">
+              <button class="btn-danger" onclick="runStressTest()">开始压力测试</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 进度和日志 -->
+        <div class="card">
+          <h3>📋 测试日志</h3>
+          <div class="progress" style="margin-bottom: 12px;">
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+          <div id="result" class="result"></div>
+        </div>
+        
+        <!-- 历史记录 -->
+        <div class="card">
+          <h3>📜 测试历史</h3>
+          <div class="history-list" id="historyList">
+            <div style="color: #9ca3af; font-size: 0.85rem;">暂无测试记录</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 右侧表格区域 -->
+      <div class="sheet-panel">
+        <div class="sheet-container">
+          <div class="sheet-container-header">
+            <span>📊 WorkfineSheet 预览</span>
+            <span class="status-badge" id="sheetStatus">就绪</span>
+          </div>
+          <div class="sheet-container-body" id="sheetMount"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module">
+    import { Workbook } from '../src/lib/Workbook.js'
+    import { createApp, h, shallowRef, nextTick } from 'vue'
+    import WorkbookSheet from '../src/components/WorkbookSheet.vue'
+    
+    // ==================== 全局状态 ====================
+    let testResults = []
+    let isRunning = false
+    let sheetApp = null
+    let workbook = null
+    let sheetApi = null
+    
+    // ==================== 工具函数 ====================
+    function formatNumber(num) {
+      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+      if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+      return num.toString()
+    }
+    
+    function formatTime(ms) {
+      if (ms < 1) return ms.toFixed(3) + ' ms'
+      if (ms < 1000) return ms.toFixed(2) + ' ms'
+      return (ms / 1000).toFixed(2) + ' s'
+    }
+    
+    function getRating(timePerCell) {
+      if (timePerCell < 0.5) return { text: '极速', class: 'fast' }
+      if (timePerCell < 2) return { text: '优秀', class: 'fast' }
+      if (timePerCell < 5) return { text: '良好', class: 'medium' }
+      if (timePerCell < 20) return { text: '一般', class: 'medium' }
+      return { text: '较慢', class: 'slow' }
+    }
+    
+    function updateProgress(percent) {
+      document.getElementById('progressBar').style.width = percent + '%'
+    }
+    
+    function log(message, clear = false) {
+      const el = document.getElementById('result')
+      if (clear) {
+        el.textContent = message + '\n'
+      } else {
+        el.textContent += message + '\n'
+      }
+      el.scrollTop = el.scrollHeight
+    }
+    
+    function updateStatus(text) {
+      document.getElementById('sheetStatus').textContent = text
+    }
+    
+    function updateMetrics() {
+      document.getElementById('totalTests').textContent = testResults.length
+      
+      if (testResults.length > 0) {
+        const totalCells = testResults.reduce((sum, r) => sum + r.cellCount, 0)
+        const avgRender = testResults.reduce((sum, r) => sum + r.renderTime, 0) / testResults.length
+        const avgPerCell = testResults.reduce((sum, r) => sum + r.timePerCell, 0) / testResults.length
+        
+        document.getElementById('totalCells').textContent = formatNumber(totalCells)
+        document.getElementById('avgRenderTime').textContent = formatTime(avgRender)
+        document.getElementById('avgTimePerCell').textContent = avgPerCell.toFixed(2) + ' μs'
+      }
+    }
+    
+    function updateHistory() {
+      const list = document.getElementById('historyList')
+      if (testResults.length === 0) {
+        list.innerHTML = '<div style="color: #9ca3af; font-size: 0.85rem;">暂无测试记录</div>'
+        return
+      }
+      
+      // 显示最近 10 条
+      const recent = testResults.slice(-10).reverse()
+      list.innerHTML = recent.map(r => {
+        const rating = getRating(r.timePerCell)
+        return `
+          <div class="history-item">
+            <span class="size">${r.rows}×${r.cols}</span>
+            <span class="time">${formatTime(r.renderTime)}</span>
+            <span class="rating ${rating.class}">${rating.text}</span>
+          </div>
+        `
+      }).join('')
+    }
+    
+    // ==================== 初始化表格 ====================
+    async function initSheet() {
+      const mountPoint = document.getElementById('sheetMount')
+      
+      // 创建 Workbook
+      workbook = new Workbook()
+      
+      // 创建 Vue 应用
+      const app = createApp({
+        setup() {
+          const workbookRef = shallowRef(workbook)
+          const sheetRef = shallowRef(null)
+          
+          // 暴露 ref 供外部访问
+          const getSheetRef = () => sheetRef.value
+          
+          return { workbookRef, sheetRef, getSheetRef }
+        },
+        render() {
+          return h(WorkbookSheet, {
+            ref: 'sheetRef',
+            workbook: this.workbookRef,
+            style: { width: '100%', height: '100%' }
+          })
+        },
+        mounted() {
+          // 组件挂载后获取引用
+          sheetApi = this.$refs.sheetRef
+          console.log('Sheet API ready from $refs', sheetApi)
+          updateStatus('就绪')
+        }
+      })
+      
+      // 挂载
+      sheetApp = app
+      app.mount(mountPoint)
+      
+      // 等待组件挂载
+      await nextTick()
+      await new Promise(r => setTimeout(r, 50))
+      
+      console.log('Sheet initialized, api:', !!sheetApi)
+    }
+    
+    // ==================== 测试函数 ====================
+    
+    // 默认表格尺寸
+    const DEFAULT_ROWS = 200
+    const DEFAULT_COLS = 50
+    
+    // 当前表格实际尺寸（会动态扩展）
+    let currentTotalRows = DEFAULT_ROWS
+    let currentTotalCols = DEFAULT_COLS
+    
+    // 扩展表格行列（如果需要）- 使用 batch 模式避免中间渲染
+    async function ensureSheetSize(targetRows, targetCols) {
+      if (!sheetApi) {
+        console.error('sheetApi not ready')
+        return
+      }
+      
+      const rowsToAdd = targetRows > currentTotalRows ? targetRows - currentTotalRows : 0
+      const colsToAdd = targetCols > currentTotalCols ? targetCols - currentTotalCols : 0
+      
+      if (rowsToAdd === 0 && colsToAdd === 0) {
+        return // 无需扩展
+      }
+      
+      // 使用 batch 模式批量插入，跳过所有中间渲染
+      await workbook.batch(async () => {
+        // 需要扩展的行数
+        if (rowsToAdd > 0) {
+          log(`扩展行数: ${currentTotalRows} → ${targetRows} (+${rowsToAdd})`)
+          // 在最后一行下方批量插入
+          await sheetApi.insertRowBelow(currentTotalRows - 1, rowsToAdd)
+          currentTotalRows = targetRows
+        }
+        
+        // 需要扩展的列数
+        if (colsToAdd > 0) {
+          log(`扩展列数: ${currentTotalCols} → ${targetCols} (+${colsToAdd})`)
+          // 在最后一列右侧批量插入
+          await sheetApi.insertColRight(currentTotalCols - 1, colsToAdd)
+          currentTotalCols = targetCols
+        }
+      })
+    }
+    
+    // 填充测试数据
+    function fillTestData(rows, cols) {
+      const model = workbook.getActiveModel()
+      if (!model) {
+        console.error('No active model')
+        return
+      }
+      
+      // 使用 batch 模式
+      workbook.batch(() => {
+        const data = []
+        for (let r = 0; r < rows; r++) {
+          const rowData = []
+          for (let c = 0; c < cols; c++) {
+            let value
+            if (r === 0) {
+              value = `列${c + 1}`
+            } else if (c === 0) {
+              value = r
+            } else if ((r + c) % 7 === 0) {
+              value = `=A${r + 1}*${c}`
+            } else if ((r + c) % 3 === 0) {
+              value = (Math.random() * 1000).toFixed(2)
+            } else {
+              value = `R${r}C${c}`
+            }
+            rowData.push(String(value))
+          }
+          data.push(rowData)
+        }
+        model.setValues(0, 0, data)
+      })
+    }
+    
+    // 测量渲染时间
+    async function measureRenderTime() {
+      return new Promise((resolve) => {
+        const start = performance.now()
+        
+        if (sheetApi && sheetApi.redraw) {
+          sheetApi.redraw()
+        }
+        
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve(performance.now() - start)
+          })
+        })
+      })
+    }
+    
+    // 运行测试
+    window.runTest = async function(rows, cols) {
+      if (isRunning) {
+        alert('测试正在进行中，请等待...')
+        return
+      }
+      
+      // 检查 API 是否就绪
+      if (!sheetApi) {
+        alert('表格尚未初始化完成，请稍候再试')
+        return
+      }
+      
+      isRunning = true
+      const cellCount = rows * cols
+      
+      log(`测试: ${rows}×${cols} (${formatNumber(cellCount)} 单元格)`, true)
+      updateProgress(10)
+      updateStatus('准备中...')
+      
+      // 清空现有数据（使用 sheetApi 确保公式缓存也被清除）
+      const model = workbook.getActiveModel()
+      if (model && sheetApi) {
+        let maxRow = -1, maxCol = -1
+        model.forEach((r, c) => {
+          if (r > maxRow) maxRow = r
+          if (c > maxCol) maxCol = c
+        })
+        if (maxRow >= 0 && maxCol >= 0) {
+          // 使用 clearValues 确保公式缓存也被清除
+          sheetApi.clearValues(0, 0, maxRow, maxCol)
+        }
+      }
+      await nextTick()
+      updateProgress(20)
+      
+      // 扩展表格尺寸（如果需要）
+      log('检查表格尺寸...')
+      updateStatus('扩展表格...')
+      const expandStart = performance.now()
+      await ensureSheetSize(rows, cols)
+      const expandTime = performance.now() - expandStart
+      if (expandTime > 1) {
+        log(`表格扩展: ${formatTime(expandTime)}`)
+      }
+      updateProgress(40)
+      
+      // 生成数据
+      log('生成测试数据...')
+      updateStatus(`生成 ${rows}×${cols}`)
+      const dataStart = performance.now()
+      fillTestData(rows, cols)
+      const dataTime = performance.now() - dataStart
+      log(`数据生成: ${formatTime(dataTime)}`)
+      updateProgress(55)
+      
+      // 等待响应
+      await nextTick()
+      await new Promise(r => setTimeout(r, 50))
+      updateProgress(70)
+      
+      // 测量渲染
+      log('测量渲染...')
+      updateStatus('测量渲染...')
+      const renderTime = await measureRenderTime()
+      updateProgress(90)
+      
+      // 计算结果
+      const timePerCell = (renderTime * 1000) / cellCount
+      const rating = getRating(timePerCell)
+      
+      const result = { rows, cols, cellCount, dataTime, renderTime, timePerCell, expandTime }
+      testResults.push(result)
+      
+      // 输出结果
+      log('')
+      log(`📊 结果:`)
+      log(`   表格尺寸: ${currentTotalRows}×${currentTotalCols}`)
+      if (expandTime > 1) {
+        log(`   扩展耗时: ${formatTime(expandTime)}`)
+      }
+      log(`   渲染耗时: ${formatTime(renderTime)}`)
+      log(`   每单元格: ${timePerCell.toFixed(2)} μs`)
+      log(`   性能评级: ${rating.text}`)
+      
+      updateProgress(100)
+      updateStatus(`${rows}×${cols} - ${rating.text}`)
+      updateMetrics()
+      updateHistory()
+      
+      // 确保显示
+      if (sheetApi && sheetApi.redraw) {
+        sheetApi.redraw()
+      }
+      
+      isRunning = false
+    }
+    
+    // 自定义测试
+    window.runCustomTest = async function() {
+      const rows = parseInt(document.getElementById('customRows').value) || 1000
+      const cols = parseInt(document.getElementById('customCols').value) || 26
+      await window.runTest(rows, cols)
+    }
+    
+    // 压力测试
+    window.runStressTest = async function() {
+      if (isRunning) {
+        alert('测试正在进行中，请等待...')
+        return
+      }
+      
+      log('========== 压力测试 ==========', true)
+      log('逐步增加数据量...')
+      
+      const testSizes = [
+        { rows: 1000, cols: 26 },
+        { rows: 2000, cols: 30 },
+        { rows: 5000, cols: 40 },
+        { rows: 10000, cols: 50 }
+      ]
+      
+      for (const ts of testSizes) {
+        await window.runTest(ts.rows, ts.cols)
+        
+        const lastResult = testResults[testResults.length - 1]
+        if (lastResult && lastResult.timePerCell > 50) {
+          log(`\n⚠️ 性能瓶颈: 在 ${ts.rows}×${ts.cols} 规模时性能明显下降`)
+          break
+        }
+        
+        await new Promise(r => setTimeout(r, 500))
+      }
+      
+      log('\n压力测试完成')
+    }
+    
+    // 清空表格
+    window.clearSheet = function() {
+      const model = workbook.getActiveModel()
+      if (model && sheetApi) {
+        let maxRow = -1, maxCol = -1
+        model.forEach((r, c) => {
+          if (r > maxRow) maxRow = r
+          if (c > maxCol) maxCol = c
+        })
+        if (maxRow >= 0 && maxCol >= 0) {
+          // 使用 clearValues 确保公式缓存也被清除
+          sheetApi.clearValues(0, 0, maxRow, maxCol)
+        }
+        // 注意：清空数据不会缩减表格尺寸，currentTotalRows/Cols 保持不变
+        updateStatus('已清空')
+        log(`表格已清空 (当前尺寸: ${currentTotalRows}×${currentTotalCols})`, true)
+      }
+    }
+    
+    // 页面加载完成后初始化
+    initSheet()
+  </script>
+</body>
+</html>

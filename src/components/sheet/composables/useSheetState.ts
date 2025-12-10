@@ -130,8 +130,16 @@ export function useSheetState(options: SheetStateOptions = {}) {
   const imeProxy = ref<HTMLTextAreaElement | null>(null)
   
   // ==================== 核心数据模型 ====================
+  // 调试日志
+  console.log('[useSheetState] Initializing with options:', {
+    hasExternalModel: !!options.externalModel,
+    hasExternalUndoRedo: !!options.externalUndoRedo,
+    skipDemoData: options.skipDemoData
+  })
+  
   // 如果提供了外部 model，使用外部的；否则创建新的
   const model = options.externalModel ?? new SheetModel()
+  
   const formulaSheet = new FormulaSheet(model, true) // 启用异步计算
   // 如果提供了外部 undoRedo，使用外部的；否则创建新的
   const undoRedo = options.externalUndoRedo ?? new UndoRedoManager(100)
@@ -150,6 +158,10 @@ export function useSheetState(options: SheetStateOptions = {}) {
   // ==================== 隐藏行列状态 ====================
   const hiddenRows = ref<Set<number>>(new Set())
   const hiddenCols = ref<Set<number>>(new Set())
+  
+  // ==================== 动态行列总数（可扩展）====================
+  const totalRows = ref<number>(constants.DEFAULT_ROWS)
+  const totalCols = ref<number>(constants.DEFAULT_COLS)
   
   // ==================== 网格线显示开关 ====================
   const showGridLines = ref<boolean>(true)
@@ -443,6 +455,8 @@ export function useSheetState(options: SheetStateOptions = {}) {
     manualRowHeights,
     hiddenRows,
     hiddenCols,
+    totalRows,
+    totalCols,
     showGridLines,
     
     // 调整大小和悬停

@@ -43,6 +43,15 @@ export interface FormulaSheetAdapter {
     adjustImagesForRowDelete(row: number, count?: number): void
     adjustImagesForColInsert(col: number, count?: number): void
     adjustImagesForColDelete(col: number, count?: number): void
+    // 高性能批量操作方法
+    shiftRowsDown?(startRow: number, count: number): void
+    shiftAllDataRowsDown?(startRow: number, count: number): void
+    inheritRowStyles?(sourceRow: number, targetStartRow: number, count: number, totalCols: number): void
+    inheritRowStylesSparse?(sourceRow: number, targetStartRow: number, count: number): void
+    countFormulaCellsFromRow?(startRow: number): number
+    shiftColsRight?(startCol: number, count: number): void
+    shiftAllDataColsRight?(startCol: number, count: number): void
+    countFormulaCellsFromCol?(startCol: number): number
   }
 }
 
@@ -67,6 +76,18 @@ export interface SelectedCell {
 }
 
 /**
+ * 批量操作配置选项
+ */
+export interface BulkOperationOptions {
+  /** 是否跳过公式调整（当插入区域无公式引用时可设为 true） */
+  skipFormulaAdjust?: boolean
+  /** 大批量操作的阈值（超过此值可能需要特殊处理） */
+  bulkThreshold?: number
+  /** 清空撤销/重做栈的回调（批量操作时可选择清空） */
+  onClearUndoStack?: () => void
+}
+
+/**
  * 行列操作配置
  */
 export interface RowColConfig {
@@ -76,6 +97,8 @@ export interface RowColConfig {
   onRedraw: () => void
   /** 是否跳过重绘（用于批量操作时延迟重绘） */
   skipRedraw?: boolean
+  /** 批量操作选项 */
+  bulkOptions?: BulkOperationOptions
 }
 
 /**
@@ -233,7 +256,8 @@ export async function insertRowAbove(row: number, config: RowColConfig): Promise
 
 /**
  * 批量在指定行上方插入多行（优化版本）
- * 相比循环调用 insertRowAbove，此函数一次性完成所有数据移动，性能提升显著
+ * - count < 100: 使用标准路径
+ * - count >= 100: 自动切换高性能稀疏键移动
  */
 export async function insertRowsAboveBatch(row: number, count: number, config: RowColConfig): Promise<void> {
   if (count <= 0) return
@@ -242,83 +266,64 @@ export async function insertRowsAboveBatch(row: number, count: number, config: R
     return insertRowAbove(row, config)
   }
   
-  const { formulaSheet, sizeConfig, onRedraw } = config
-  
-  // 步骤1: 批量调整所有公式
-  await formulaSheet.adjustAllFormulasAsync('insertRow', row, count)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const { formulaSheet, sizeConfig, onRedraw, bulkOptions } = config
   const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
   
-  model.forEach((r, c, cell) => {
-    if (r >= row && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
-    }
-  })
+  // 大批量阈值（默认 100）
+  const BULK_THRESHOLD = bulkOptions?.bulkThreshold ?? 100
+  const useFastPath = count >= BULK_THRESHOLD
   
-  nonFormulaCellsToMove.sort((a, b) => b.row - a.row)
+  // 大批量操作时，如果有清空撤销栈的回调则调用
+  if (useFastPath && bulkOptions?.onClearUndoStack) {
+    bulkOptions.onClearUndoStack()
+  }
   
-  // 步骤3: 移动非公式单元格（一次性移动 count 行）
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')
-    model.setValue(r + count, c, value)
-  })
-  
-  // 步骤4-6: 合并遍历 - 同时收集样式、边框、格式（性能优化核心）
-  const dataToMove: Array<{
-    row: number
-    col: number
-    style?: CellStyle
-    border?: CellBorder
-    format?: CellFormat
-  }> = []
-  
-  for (let c = 0; c < sizeConfig.totalCols; c++) {
-    for (let r = sizeConfig.totalRows - 1; r >= row; r--) {
-      const hasStyle = model.hasCellStyle(r, c)
-      const hasBorder = model.hasCellBorder(r, c)
-      const hasFormat = model.hasCellFormat(r, c)
-      
-      if (hasStyle || hasBorder || hasFormat) {
-        dataToMove.push({
-          row: r,
-          col: c,
-          style: hasStyle ? model.getCellStyle(r, c) : undefined,
-          border: hasBorder ? model.getCellBorder(r, c)! : undefined,
-          format: hasFormat ? model.getCellFormat(r, c) : undefined
-        })
-        if (hasStyle) model.clearCellStyle(r, c)
-        if (hasBorder) model.clearCellBorder(r, c)
-        if (hasFormat) model.clearCellFormat(r, c)
+  // 步骤1: 公式调整
+  if (!bulkOptions?.skipFormulaAdjust) {
+    if (useFastPath) {
+      // 快速路径：先检查公式数量
+      const formulaCount = model.countFormulaCellsFromRow?.(row) ?? -1
+      if (formulaCount !== 0) {
+        await formulaSheet.adjustAllFormulasAsync('insertRow', row, count)
       }
+    } else {
+      // 标准路径：直接调整
+      await formulaSheet.adjustAllFormulasAsync('insertRow', row, count)
     }
   }
   
-  // 设置到新位置
-  dataToMove.forEach(({ row: r, col: c, style, border, format }) => {
-    if (style) model.setCellStyle(r + count, c, style)
-    if (border) model.setCellBorder(r + count, c, border)
-    if (format) model.setCellFormat(r + count, c, format)
-  })
-  
-  // 步骤7: 新行继承样式（所有新插入的行都从相同的源行继承）
-  const sourceRow = row > 0 ? row - 1 : row + count  // 继承源行
-  for (let c = 0; c < sizeConfig.totalCols; c++) {
-    const sourceStyle = model.hasCellStyle(sourceRow, c) ? model.getCellStyle(sourceRow, c) : null
-    const sourceBorder = model.hasCellBorder(sourceRow, c) ? model.getCellBorder(sourceRow, c)! : null
-    const sourceFormat = model.hasCellFormat(sourceRow, c) ? model.getCellFormat(sourceRow, c) : null
+  // 步骤2: 移动数据
+  if (useFastPath && model.shiftAllDataRowsDown) {
+    // 快速路径：一次性移动所有数据（cells + styles + borders + formats）
+    model.shiftAllDataRowsDown(row, count)
+  } else {
+    // 标准路径：分别处理
+    // 收集非公式单元格
+    const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+    model.forEach((r, c, cell) => {
+      if (r >= row && !cell.formulaMetadata) {
+        nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
+      }
+    })
+    nonFormulaCellsToMove.sort((a, b) => b.row - a.row)
+    nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+      model.setValue(r, c, '')
+      model.setValue(r + count, c, value)
+    })
     
-    // 为每个新行设置继承的样式
-    for (let i = 0; i < count; i++) {
-      const newRow = row + i
-      if (sourceStyle) model.setCellStyle(newRow, c, sourceStyle)
-      if (sourceBorder) model.setCellBorder(newRow, c, sourceBorder)
-      if (sourceFormat) model.setCellFormat(newRow, c, sourceFormat)
-    }
+    // 移动样式、边框、格式
+    model.shiftRowsDown?.(row, count)
   }
   
-  // 步骤8-9: 移动自定义行高并继承
+  // 步骤3: 新行继承样式
+  const sourceRow = row > 0 ? row - 1 : row + count
+  if (useFastPath && model.inheritRowStylesSparse) {
+    model.inheritRowStylesSparse(sourceRow, row, count)
+  } else {
+    model.inheritRowStyles?.(sourceRow, row, count, sizeConfig.totalCols)
+  }
+  
+  // 步骤4: 移动自定义行高
   const newRowHeights = new Map<number, number>()
   sizeConfig.rowHeights.forEach((height: number, r: number) => {
     if (r >= row) {
@@ -338,7 +343,7 @@ export async function insertRowsAboveBatch(row: number, count: number, config: R
     }
   }
   
-  // 步骤10: 调整合并区域
+  // 步骤5: 调整合并区域
   const mergedRegions = model.getAllMergedRegions()
   for (const region of mergedRegions) {
     model.unmergeCells(region.startRow, region.startCol)
@@ -360,11 +365,11 @@ export async function insertRowsAboveBatch(row: number, count: number, config: R
     }
   }
   
-  // 步骤11-12: 调整图片位置
+  // 步骤6: 调整图片位置
   model.adjustCellImagesForRowInsert(row, count)
   model.adjustImagesForRowInsert(row, count)
   
-  // 重新绘制（只绘制一次！）
+  // 重新绘制
   if (!config.skipRedraw) {
     onRedraw()
   }
@@ -693,6 +698,8 @@ export async function insertColLeft(col: number, config: RowColConfig): Promise<
 
 /**
  * 批量在指定列左侧插入多列（优化版本）
+ * - count < 100: 使用标准路径
+ * - count >= 100: 自动切换高性能稀疏键移动
  */
 export async function insertColsLeftBatch(col: number, count: number, config: RowColConfig): Promise<void> {
   if (count <= 0) return
@@ -700,82 +707,101 @@ export async function insertColsLeftBatch(col: number, count: number, config: Ro
     return insertColLeft(col, config)
   }
   
-  const { formulaSheet, sizeConfig, onRedraw } = config
-  
-  // 步骤1: 批量调整所有公式
-  await formulaSheet.adjustAllFormulasAsync('insertCol', col, count)
-  
-  // 步骤2: 获取底层模型，收集需要移动的非公式单元格数据
+  const { formulaSheet, sizeConfig, onRedraw, bulkOptions } = config
   const model = formulaSheet.getModel()
-  const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
   
-  model.forEach((r, c, cell) => {
-    if (c >= col && !cell.formulaMetadata) {
-      nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
+  // 大批量阈值（默认 100）
+  const BULK_THRESHOLD = bulkOptions?.bulkThreshold ?? 100
+  const useFastPath = count >= BULK_THRESHOLD
+  
+  // 大批量操作时，如果有清空撤销栈的回调则调用
+  if (useFastPath && bulkOptions?.onClearUndoStack) {
+    bulkOptions.onClearUndoStack()
+  }
+  
+  // 步骤1: 公式调整
+  if (!bulkOptions?.skipFormulaAdjust) {
+    if (useFastPath) {
+      const formulaCount = model.countFormulaCellsFromCol?.(col) ?? -1
+      if (formulaCount !== 0) {
+        await formulaSheet.adjustAllFormulasAsync('insertCol', col, count)
+      }
+    } else {
+      await formulaSheet.adjustAllFormulasAsync('insertCol', col, count)
     }
-  })
+  }
   
-  nonFormulaCellsToMove.sort((a, b) => b.col - a.col)
-  
-  // 步骤3: 移动非公式单元格（一次性移动 count 列）
-  nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
-    model.setValue(r, c, '')
-    model.setValue(r, c + count, value)
-  })
-  
-  // 步骤4-6: 合并遍历 - 同时收集样式、边框、格式
-  const dataToMove: Array<{
-    row: number
-    col: number
-    style?: CellStyle
-    border?: CellBorder
-    format?: CellFormat
-  }> = []
-  
-  for (let r = 0; r < sizeConfig.totalRows; r++) {
-    for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
-      const hasStyle = model.hasCellStyle(r, c)
-      const hasBorder = model.hasCellBorder(r, c)
-      const hasFormat = model.hasCellFormat(r, c)
+  // 步骤2: 移动数据
+  if (useFastPath && model.shiftAllDataColsRight) {
+    // 快速路径：一次性移动所有数据
+    model.shiftAllDataColsRight(col, count)
+  } else {
+    // 标准路径：分别处理
+    const nonFormulaCellsToMove: Array<{ row: number; col: number; value: string }> = []
+    model.forEach((r, c, cell) => {
+      if (c >= col && !cell.formulaMetadata) {
+        nonFormulaCellsToMove.push({ row: r, col: c, value: cell.value })
+      }
+    })
+    nonFormulaCellsToMove.sort((a, b) => b.col - a.col)
+    nonFormulaCellsToMove.forEach(({ row: r, col: c, value }) => {
+      model.setValue(r, c, '')
+      model.setValue(r, c + count, value)
+    })
+    
+    // 移动样式、边框、格式
+    const dataToMove: Array<{
+      row: number
+      col: number
+      style?: CellStyle
+      border?: CellBorder
+      format?: CellFormat
+    }> = []
+    
+    for (let r = 0; r < sizeConfig.totalRows; r++) {
+      for (let c = sizeConfig.totalCols - 1; c >= col; c--) {
+        const hasStyle = model.hasCellStyle(r, c)
+        const hasBorder = model.hasCellBorder(r, c)
+        const hasFormat = model.hasCellFormat(r, c)
+        
+        if (hasStyle || hasBorder || hasFormat) {
+          dataToMove.push({
+            row: r,
+            col: c,
+            style: hasStyle ? model.getCellStyle(r, c) : undefined,
+            border: hasBorder ? model.getCellBorder(r, c)! : undefined,
+            format: hasFormat ? model.getCellFormat(r, c) : undefined
+          })
+          if (hasStyle) model.clearCellStyle(r, c)
+          if (hasBorder) model.clearCellBorder(r, c)
+          if (hasFormat) model.clearCellFormat(r, c)
+        }
+      }
+    }
+    
+    dataToMove.forEach(({ row: r, col: c, style, border, format }) => {
+      if (style) model.setCellStyle(r, c + count, style)
+      if (border) model.setCellBorder(r, c + count, border)
+      if (format) model.setCellFormat(r, c + count, format)
+    })
+    
+    // 新列继承样式（标准路径）
+    const sourceCol = col > 0 ? col - 1 : col + count
+    for (let r = 0; r < sizeConfig.totalRows; r++) {
+      const sourceStyle = model.hasCellStyle(r, sourceCol) ? model.getCellStyle(r, sourceCol) : null
+      const sourceBorder = model.hasCellBorder(r, sourceCol) ? model.getCellBorder(r, sourceCol)! : null
+      const sourceFormat = model.hasCellFormat(r, sourceCol) ? model.getCellFormat(r, sourceCol) : null
       
-      if (hasStyle || hasBorder || hasFormat) {
-        dataToMove.push({
-          row: r,
-          col: c,
-          style: hasStyle ? model.getCellStyle(r, c) : undefined,
-          border: hasBorder ? model.getCellBorder(r, c)! : undefined,
-          format: hasFormat ? model.getCellFormat(r, c) : undefined
-        })
-        if (hasStyle) model.clearCellStyle(r, c)
-        if (hasBorder) model.clearCellBorder(r, c)
-        if (hasFormat) model.clearCellFormat(r, c)
+      for (let i = 0; i < count; i++) {
+        const newCol = col + i
+        if (sourceStyle) model.setCellStyle(r, newCol, sourceStyle)
+        if (sourceBorder) model.setCellBorder(r, newCol, sourceBorder)
+        if (sourceFormat) model.setCellFormat(r, newCol, sourceFormat)
       }
     }
   }
   
-  // 设置到新位置
-  dataToMove.forEach(({ row: r, col: c, style, border, format }) => {
-    if (style) model.setCellStyle(r, c + count, style)
-    if (border) model.setCellBorder(r, c + count, border)
-    if (format) model.setCellFormat(r, c + count, format)
-  })
-  
-  // 步骤7: 新列继承样式
-  const sourceCol = col > 0 ? col - 1 : col + count
-  for (let r = 0; r < sizeConfig.totalRows; r++) {
-    const sourceStyle = model.hasCellStyle(r, sourceCol) ? model.getCellStyle(r, sourceCol) : null
-    const sourceBorder = model.hasCellBorder(r, sourceCol) ? model.getCellBorder(r, sourceCol)! : null
-    const sourceFormat = model.hasCellFormat(r, sourceCol) ? model.getCellFormat(r, sourceCol) : null
-    
-    for (let i = 0; i < count; i++) {
-      const newCol = col + i
-      if (sourceStyle) model.setCellStyle(r, newCol, sourceStyle)
-      if (sourceBorder) model.setCellBorder(r, newCol, sourceBorder)
-      if (sourceFormat) model.setCellFormat(r, newCol, sourceFormat)
-    }
-  }
-  
-  // 步骤8-9: 移动自定义列宽并继承
+  // 步骤3: 移动自定义列宽
   const newColWidths = new Map<number, number>()
   sizeConfig.colWidths.forEach((width: number, c: number) => {
     if (c >= col) {

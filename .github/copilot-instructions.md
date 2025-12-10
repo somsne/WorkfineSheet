@@ -42,6 +42,13 @@ WorkfineSheet 是基于 Vue 3 + TypeScript + Canvas 的高性能电子表格组�
 - `clipboard.ts` - 剪贴板处理、`references.ts` - 公式引用解析
 - `renderCells.ts/renderGrid.ts` - Canvas 渲染、`api.ts` - 对外 API
 
+**API 层** (`src/api/`):
+- `SheetAPI.ts` - 单表数据操作 API（包装 SheetModel）
+- `RangeAPI.ts` - 范围批量操作 API
+- `WorkbookAPI.ts` - 多表管理 API
+- `index.ts` - API 导出和常量定义
+- `README.md` - 完整的 API 文档参考
+
 ## 开发命令
 ```bash 
 nvm use 20 && npm run dev           # 开发服务器
@@ -133,3 +140,8 @@ docs/DOCS_INDEX.md      # 完整文档索引
 - **添加键盘快捷键**: 在 `CanvasSheet.vue` 的 `onKeyDown` 处理
 - **添加右键菜单项**: 修改 `uiMenus.ts` 的 `handleContextMenu`
 - **调试公式**: `formulaEngine.evaluate(formula)` 返回 `{result, error}`
+- **添加新 API**:
+  1. 在 `src/lib/SheetModel.ts` 实现底层方法
+  2. 在 `src/api/SheetAPI.ts` 中包装为 API 接口
+  3. 在 `src/components/sheet/api.ts` 的 `SheetAPI` 接口和 `createSheetAPI()` 函数中暴露到组件 API
+  4. 更新 `src/api/README.md` 文档，添加新方法说明和示例

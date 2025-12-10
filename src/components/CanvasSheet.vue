@@ -127,6 +127,8 @@ interface Props {
   externalUndoRedo?: UndoRedoManager
   /** 是否跳过演示数据初始化 */
   skipDemoData?: boolean
+  /** 检测是否处于批量操作模式（batch 模式时跳过中间渲染） */
+  isInBatchMode?: () => boolean
   /** 初始视图状态（多工作表模式切换时恢复） */
   initialViewState?: SheetViewState
   /** 外部剪贴板（Workbook 层级管理，可选） */
@@ -155,6 +157,7 @@ const props = withDefaults(defineProps<Props>(), {
   externalModel: undefined,
   externalUndoRedo: undefined,
   skipDemoData: false,
+  isInBatchMode: undefined,
   initialViewState: undefined,
   clipboard: undefined,
   sheetId: '',
@@ -236,6 +239,8 @@ const emit = defineEmits<{
   }): void
   /** 请求提交当前编辑（填充柄拖拽前触发） */
   (e: 'commit-edit'): void
+  /** 单元格值变化事件（Delete键删除时触发） */
+  (e: 'cell-value-change', payload: { row: number; col: number; value: string }): void
 }>()
 
 // ==================== 初始化状态 ====================
@@ -347,8 +352,8 @@ const fillHandle = useFillHandle({
   getFormulaSheet: () => state.formulaSheet,
   getUndoRedoManager: () => state.undoRedo,
   getSheetId: () => props.sheetId || undefined,
-  totalRows: state.constants.DEFAULT_ROWS,
-  totalCols: state.constants.DEFAULT_COLS,
+  getTotalRows: () => state.totalRows.value,
+  getTotalCols: () => state.totalCols.value,
   scheduleRedraw: () => scheduleRedrawFn(),
   updateSelectionRange: (range) => {
     state.selectionRange.startRow = range.startRow
@@ -392,6 +397,10 @@ const input = useSheetInput({
       mode: payload.mode,
       cellStyle: payload.cellStyle
     })
+  },
+  // 单元格值变化回调（Delete键删除时触发，用于更新 FormulaBar）
+  onCellValueChange: (row, col, value) => {
+    emit('cell-value-change', { row, col, value })
   }
 })
 
@@ -424,7 +433,8 @@ const rowColOps = useRowColOperations({
   state, 
   geometry, 
   onDraw: drawing.draw,
-  undoRedoExecutor: undoRedoWithSheetId
+  undoRedoExecutor: undoRedoWithSheetId,
+  isInBatchMode: props.isInBatchMode
 })
 
 // 7. 键盘处理
@@ -485,8 +495,8 @@ const images = useSheetImages({
   getContainerWidth: () => state.container.value?.clientWidth ?? 0,
   getContainerHeight: () => state.container.value?.clientHeight ?? 0,
   getContainer: () => state.container.value,
-  totalRows: state.constants.DEFAULT_ROWS,
-  totalCols: state.constants.DEFAULT_COLS,
+  getTotalRows: () => state.totalRows.value,
+  getTotalCols: () => state.totalCols.value,
   requestDraw: (() => {
     // 使用 requestAnimationFrame 节流，避免高频重绘（如拖动图片时）
     let rafPending = false
@@ -521,11 +531,9 @@ function drawImages() {
     state.container.value?.clientHeight ?? 0,
     images.imageLoader,
     images.selectedImageId.value,
-    // 图片加载完成后触发重绘
+    // 图片加载完成后触发重绘 - 使用 scheduleRedraw 统一调度
     () => {
-      requestAnimationFrame(() => {
-        drawing.draw()
-      })
+      drawing.scheduleRedraw()
     }
   )
 }
@@ -549,9 +557,8 @@ state.formulaSheet.onQueueStats((stats) => {
 
 state.formulaSheet.onCellStateChange((_row, _col, cellState) => {
   if (cellState.state === 'completed' || cellState.state === 'error') {
-    requestAnimationFrame(() => {
-      drawing.draw()
-    })
+    // 使用 scheduleRedraw 统一调度，避免每个公式完成都触发独立的 RAF
+    drawing.scheduleRedraw()
   }
 })
 
@@ -945,8 +952,8 @@ const api = createSheetAPI({
     }
   },
   setRangeStyleFn: (startRow: number, startCol: number, endRow: number, endCol: number, style) => {
-    const maxRows = state.constants.DEFAULT_ROWS
-    const maxCols = state.constants.DEFAULT_COLS
+    const maxRows = state.totalRows.value
+    const maxCols = state.totalCols.value
     
     // 检测是否为整列选择（startRow=0, endRow=maxRows-1）
     const isFullColumn = startRow === 0 && endRow === maxRows - 1
@@ -1196,8 +1203,8 @@ const api = createSheetAPI({
     }
   },
   setRangeFormatFn: (startRow: number, startCol: number, endRow: number, endCol: number, format) => {
-    const maxRows = state.constants.DEFAULT_ROWS
-    const maxCols = state.constants.DEFAULT_COLS
+    const maxRows = state.totalRows.value
+    const maxCols = state.totalCols.value
     
     // 检测是否为整列选择
     const isFullColumn = startRow === 0 && endRow === maxRows - 1
@@ -1420,8 +1427,8 @@ const api = createSheetAPI({
         }
       )
     } else {
-      const maxRows = state.constants.DEFAULT_ROWS
-      const maxCols = state.constants.DEFAULT_COLS
+      const maxRows = state.totalRows.value
+      const maxCols = state.totalCols.value
       const isFullRow = startCol === 0 && endCol === maxCols - 1
       const isFullColumn = startRow === 0 && endRow === maxRows - 1
       
@@ -1462,8 +1469,8 @@ const api = createSheetAPI({
         }
       )
     } else {
-      const maxRows = state.constants.DEFAULT_ROWS
-      const maxCols = state.constants.DEFAULT_COLS
+      const maxRows = state.totalRows.value
+      const maxCols = state.totalCols.value
       const isFullRow = startCol === 0 && endCol === maxCols - 1
       const isFullColumn = startRow === 0 && endRow === maxRows - 1
       
@@ -1560,7 +1567,47 @@ const api = createSheetAPI({
     images.updateCellImageAlignment(row, col, imageId, horizontalAlign, verticalAlign)
   },
   openCellImagePreviewFn: (row: number, col: number) => images.openCellImagePreview(row, col),
-  closeCellImagePreviewFn: () => images.closeCellImagePreview()
+  closeCellImagePreviewFn: () => images.closeCellImagePreview(),
+  
+  // 批量数据操作（优化版本）
+  clearValuesFn: (startRow: number, startCol: number, endRow: number, endCol: number) => {
+    // 收集旧值用于撤销
+    const oldValues: Array<{ row: number; col: number; value: string }> = []
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const value = state.model.getValue(r, c)
+        if (value !== null && value !== undefined && value !== '') {
+          oldValues.push({ row: r, col: c, value })
+        }
+      }
+    }
+    
+    // 批量清除值
+    state.model.clearValues(startRow, startCol, endRow, endCol)
+    // 清除公式缓存，确保公式结果不会残留
+    state.formulaSheet.clearFormulaCache()
+    
+    undoRedoWithSheetId.record({
+      name: `清除区域值 (${startRow},${startCol})-(${endRow},${endCol})`,
+      undo: () => {
+        // 恢复旧值
+        for (const { row, col, value } of oldValues) {
+          state.model.setValue(row, col, value)
+        }
+        state.formulaSheet.clearFormulaCache()
+        drawing.draw()
+      },
+      redo: () => {
+        state.model.clearValues(startRow, startCol, endRow, endCol)
+        state.formulaSheet.clearFormulaCache()
+        drawing.draw()
+      }
+    })
+    
+    drawing.draw()
+  },
+  getDataRangeFn: () => state.model.getDataRange(),
+  getCellCountFn: () => state.model.getCellCount()
 })
 
 // ==================== 添加视图状态相关方法到 API ====================
@@ -1639,8 +1686,8 @@ function getSelectionRange() {
 /** 选择单元格 */
 function selectCell(row: number, col: number) {
   // 边界检查
-  const maxRow = state.constants.DEFAULT_ROWS - 1
-  const maxCol = state.constants.DEFAULT_COLS - 1
+  const maxRow = state.totalRows.value - 1
+  const maxCol = state.totalCols.value - 1
   
   // 处理超出边界的情况
   let targetRow = row

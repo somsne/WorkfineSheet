@@ -7,14 +7,30 @@ export function devicePixelRatioSafe(): number {
   return (typeof window !== 'undefined' && (window.devicePixelRatio || 1)) || 1
 }
 
-export function setCanvasSize(canvas: HTMLCanvasElement, width: number, height: number) {
+/**
+ * 设置 Canvas 尺寸（仅在尺寸变化时更新，避免 Layout Thrashing）
+ * @returns true 如果尺寸发生了变化
+ */
+export function setCanvasSize(canvas: HTMLCanvasElement, width: number, height: number): boolean {
   const dpr = devicePixelRatioSafe()
-  canvas.width = Math.floor(width * dpr)
-  canvas.height = Math.floor(height * dpr)
+  const newWidth = Math.floor(width * dpr)
+  const newHeight = Math.floor(height * dpr)
+  
+  // 检查是否需要更新（避免不必要的 DOM 操作触发重排）
+  if (canvas.width === newWidth && canvas.height === newHeight) {
+    // 即使尺寸相同，也需要重置变换矩阵（因为 clearRect 等操作可能影响它）
+    const ctx = canvas.getContext('2d')
+    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    return false
+  }
+  
+  canvas.width = newWidth
+  canvas.height = newHeight
   canvas.style.width = width + 'px'
   canvas.style.height = height + 'px'
   const ctx = canvas.getContext('2d')
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return true
 }
 
 export function createRedrawScheduler(drawFn: () => void) {

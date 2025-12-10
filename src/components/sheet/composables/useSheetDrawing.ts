@@ -13,6 +13,7 @@ import { getSelectionRangeText as getSelectionText } from '../selection'
 import type { SheetState } from './useSheetState'
 import type { SheetGeometry } from './useSheetGeometry'
 import type { FillHandleComposable } from './useFillHandle'
+import type { MergedRegion } from '../types'
 
 export interface UseSheetDrawingOptions {
   state: SheetState
@@ -31,7 +32,8 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
     selected, selectionRange, dragState, multiSelection,
     overlay, imeState,
     formulaReferences, hoverState,
-    copyRange, marchingAntsOffset
+    copyRange, marchingAntsOffset,
+    totalRows, totalCols
   } = state
   
   const {
@@ -109,7 +111,7 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
   /**
    * 绘制网格
    */
-  function drawGrid(w: number, h: number) {
+  function drawGrid(w: number, h: number, cachedMergedRegions: MergedRegion[]) {
     const canvas = gridCanvas.value!
     const ctx = canvas.getContext('2d')!
     
@@ -118,14 +120,21 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
       containerHeight: h,
       viewport,
       hoverState,
-      totalRows: constants.DEFAULT_ROWS,
-      totalCols: constants.DEFAULT_COLS,
+      totalRows: totalRows.value,
+      totalCols: totalCols.value,
       sizes: createSizeAccess(),
       geometryConfig: createGeometryConfig(),
-      mergedRegions: model.getAllMergedRegions(),
+      mergedRegions: cachedMergedRegions,
       selected,
       selectionRange,
-      multiSelection
+      multiSelection,
+      // 性能优化：传入缓存的位置访问器
+      positionAccessor: {
+        getRowHeight,
+        getColWidth,
+        getRowTop,
+        getColLeft
+      }
     }
     
     renderGrid(ctx, gridConfig)
@@ -134,7 +143,7 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
   /**
    * 绘制单元格内容
    */
-  function drawCells(w: number, h: number) {
+  function drawCells(w: number, h: number, cachedMergedRegions: MergedRegion[]) {
     const canvas = contentCanvas.value!
     const ctx = canvas.getContext('2d')!
     
@@ -159,7 +168,7 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
       getSelectionRangeText,
       getMergedCellInfo: (r, c) => model.getMergedCellInfo(r, c),
       getMergedRegion: (r, c) => model.getMergedRegion(r, c),
-      mergedRegions: model.getAllMergedRegions(),
+      mergedRegions: cachedMergedRegions,
       startRow,
       endRow,
       startCol,
@@ -168,7 +177,14 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
       getCellDisplayImage: (r, c) => model.getCellDisplayImage(r, c),
       getCellImageCount: (r, c) => model.getCellImageCount(r, c),
       // 跨 Sheet 引用模式下隐藏默认选区
-      hideDefaultSelection: getHideDefaultSelection?.() ?? false
+      hideDefaultSelection: getHideDefaultSelection?.() ?? false,
+      // 性能优化：传入缓存的位置访问器
+      positionAccessor: {
+        getRowHeight,
+        getColWidth,
+        getRowTop,
+        getColLeft
+      }
     }
     
     renderCells(ctx, cellsConfig)
@@ -297,9 +313,12 @@ export function useSheetDrawing({ state, geometry, fillHandle, getHideDefaultSel
       overlay.height = getRowHeight(overlay.row)
     }
     
+    // 缓存合并区域，避免每帧重复调用 getAllMergedRegions()
+    const mergedRegions = model.getAllMergedRegions()
+    
     // 先绘制单元格内容，再绘制网格和表头（确保表头在最上层）
-    drawCells(w, h)
-    drawGrid(w, h)
+    drawCells(w, h, mergedRegions)
+    drawGrid(w, h, mergedRegions)
     
     // 绘制填充柄和预览（跨 Sheet 引用模式下不显示）
     const hideSelection = getHideDefaultSelection?.() ?? false

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WorkfineSheet 演示</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .header h1 {
+      font-size: 1.25rem;
+      flex: 1;
+    }
+    
+    .header a {
+      color: white;
+      text-decoration: none;
+      opacity: 0.8;
+      font-size: 0.9rem;
+    }
+    
+    .header a:hover {
+      opacity: 1;
+    }
+    
+    .toolbar {
+      background: white;
+      padding: 12px 24px;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    
+    .toolbar button {
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .toolbar button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    .toolbar button.secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    
+    .toolbar button.secondary:hover {
+      background: #d1d5db;
+      box-shadow: none;
+    }
+    
+    .toolbar .divider {
+      width: 1px;
+      height: 24px;
+      background: #e5e7eb;
+    }
+    
+    .toolbar .info {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+    
+    .sheet-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .sheet-container {
+      flex: 1;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+      min-height: 600px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📊 WorkfineSheet 演示</h1>
+    <a href="tests/index.html">性能测试 →</a>
+  </div>
+  
+  <div class="toolbar">
+    <button onclick="loadDemoData()">📋 加载示例数据</button>
+    <button onclick="clearData()" class="secondary">🗑️ 清空数据</button>
+    <div class="divider"></div>
+    <button onclick="addSheet()" class="secondary">➕ 新建工作表</button>
+    <div class="divider"></div>
+    <span class="info" id="statusInfo">就绪</span>
+  </div>
+  
+  <div class="sheet-wrapper">
+    <div id="sheet-container" class="sheet-container"></div>
+  </div>
+  
+  <script type="module">
+    import { Workbook } from './src/lib/Workbook.js'
+    import { initializeDemoData } from './src/lib/demoData.js'
+    import { createApp, h, ref, nextTick, shallowRef } from 'vue'
+    import WorkbookSheet from './src/components/WorkbookSheet.vue'
+    
+    // 全局 Workbook 实例
+    let workbookInstance = null
+    let app = null
+    let workbookRef = null
+    
+    // 更新状态信息
+    function updateStatus(message) {
+      document.getElementById('statusInfo').textContent = message
+    }
+    
+    // 初始化表格
+    function initSheet() {
+      workbookInstance = new Workbook()
+      
+      const container = document.getElementById('sheet-container')
+      container.innerHTML = ''
+      
+      // 使用 shallowRef 避免深度响应式
+      workbookRef = shallowRef(workbookInstance)
+      
+      app = createApp({
+        setup() {
+          return () => h(WorkbookSheet, {
+            workbook: workbookRef.value,
+            style: { width: '100%', height: '100%' }
+          })
+        }
+      })
+      
+      app.mount(container)
+      updateStatus('表格已初始化')
+    }
+    
+    // 加载示例数据
+    function loadDemoData() {
+      // 创建新的 workbook 并加载示例数据
+      workbookInstance = new Workbook()
+      initializeDemoData(workbookInstance)
+      
+      // 重新挂载组件
+      if (app) {
+        app.unmount()
+      }
+      
+      const container = document.getElementById('sheet-container')
+      container.innerHTML = ''
+      
+      workbookRef = shallowRef(workbookInstance)
+      
+      app = createApp({
+        setup() {
+          return () => h(WorkbookSheet, {
+            workbook: workbookRef.value,
+            style: { width: '100%', height: '100%' }
+          })
+        }
+      })
+      
+      app.mount(container)
+      updateStatus('示例数据已加载 - 包含样式示例和格式示例两个工作表')
+    }
+    
+    // 清空数据
+    function clearData() {
+      if (app) {
+        app.unmount()
+      }
+      workbookInstance = null
+      initSheet()
+      updateStatus('数据已清空')
+    }
+    
+    // 新建工作表
+    function addSheet() {
+      if (!workbookInstance) {
+        initSheet()
+      }
+      
+      const count = workbookInstance.getSheetCount() + 1
+      const sheetId = workbookInstance.addSheet(`Sheet${count}`)
+      workbookInstance.setActiveSheet(sheetId)
+      
+      // 重新渲染
+      if (app) {
+        app.unmount()
+      }
+      
+      const container = document.getElementById('sheet-container')
+      container.innerHTML = ''
+      
+      workbookRef = shallowRef(workbookInstance)
+      
+      app = createApp({
+        setup() {
+          return () => h(WorkbookSheet, {
+            workbook: workbookRef.value,
+            style: { width: '100%', height: '100%' }
+          })
+        }
+      })
+      
+      app.mount(container)
+      updateStatus(`已添加新工作表: Sheet${count}`)
+    }
+    
+    // 暴露到全局
+    window.loadDemoData = loadDemoData
+    window.clearData = clearData
+    window.addSheet = addSheet
+    
+    // 初始化
+    initSheet()
+  </script>
+</body>
+</html>

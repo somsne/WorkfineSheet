@@ -52,8 +52,10 @@ export interface UseSheetImagesOptions {
   getContainerHeight: () => number
   /** 获取容器元素的函数 */
   getContainer: () => HTMLElement | null
-  totalRows: number
-  totalCols: number
+  /** 获取总行数 */
+  getTotalRows: () => number
+  /** 获取总列数 */
+  getTotalCols: () => number
   requestDraw: () => void
 }
 
@@ -119,8 +121,8 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     getContainerWidth,
     getContainerHeight,
     getContainer,
-    totalRows,
-    totalCols,
+    getTotalRows,
+    getTotalCols,
     requestDraw
   } = options
   
@@ -436,8 +438,8 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
             viewport,
             getSizes(),
             getGeometryConfig(),
-            totalRows,
-            totalCols
+            getTotalRows(),
+            getTotalCols()
           )
 
           // 注册撤销操作
@@ -591,8 +593,8 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
         viewport,
         getSizes(),
         getGeometryConfig(),
-        totalRows,
-        totalCols
+        getTotalRows(),
+        getTotalCols()
       )
 
       // 创建图片对象
@@ -676,8 +678,8 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
         viewport,
         getSizes(),
         getGeometryConfig(),
-        totalRows,
-        totalCols
+        getTotalRows(),
+        getTotalCols()
       )
 
       // 创建图片对象
@@ -1147,6 +1149,8 @@ export function useSheetImages(options: UseSheetImagesOptions): UseSheetImagesRe
     // 计算点击位置对应的行列
     const scrollLeft = viewport.scrollLeft
     const scrollTop = viewport.scrollTop
+    const totalRows = getTotalRows()
+    const totalCols = getTotalCols()
     
     // 简化计算：遍历找到点击位置对应的单元格
     let accY = config.colHeaderHeight - scrollTop

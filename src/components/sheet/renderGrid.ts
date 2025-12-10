@@ -1,10 +1,15 @@
 /**
  * Grid rendering module: draws grid lines, column/row headers, and hover highlights.
  * Depends on geometry module for sizes and positions.
+ * 
+ * 性能优化 v1.2.0：
+ * - 支持通过 positionAccessor 注入缓存的位置计算函数
+ * - 当提供 positionAccessor 时，使用 O(1) 的 PositionIndex 查找
+ * - 否则回退到原来的 O(n) 累加计算
  */
 
-import type { GeometryConfig, SizeAccess, MergedRegion, SelectionRange, MultiSelectionState, SelectedCell } from './types'
-import { getColWidth, getRowHeight, getColLeft, getRowTop, getVisibleRange } from './geometry'
+import type { GeometryConfig, SizeAccess, MergedRegion, SelectionRange, MultiSelectionState, SelectedCell, PositionAccessor } from './types'
+import { getColWidth as geomGetColWidth, getRowHeight as geomGetRowHeight, getColLeft as geomGetColLeft, getRowTop as geomGetRowTop, getVisibleRange } from './geometry'
 
 export interface GridRenderConfig {
   containerWidth: number
@@ -23,6 +28,8 @@ export interface GridRenderConfig {
   selectionRange?: SelectionRange
   /** 多选区 */
   multiSelection?: MultiSelectionState
+  /** 位置访问器（可选，提供时使用缓存的 O(1) 查找） */
+  positionAccessor?: PositionAccessor
 }
 
 /**
@@ -147,10 +154,17 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     mergedRegions = [],
     selected,
     selectionRange,
-    multiSelection
+    multiSelection,
+    positionAccessor
   } = config
   
   const { rowHeaderWidth, colHeaderHeight } = geometryConfig
+  
+  // 使用 positionAccessor（如果提供）或回退到 geometry 函数
+  const getRowHeight = positionAccessor?.getRowHeight ?? ((r: number) => geomGetRowHeight(r, sizes, geometryConfig))
+  const getColWidth = positionAccessor?.getColWidth ?? ((c: number) => geomGetColWidth(c, sizes, geometryConfig))
+  const getRowTop = positionAccessor?.getRowTop ?? ((r: number) => geomGetRowTop(r, sizes, geometryConfig))
+  const getColLeft = positionAccessor?.getColLeft ?? ((c: number) => geomGetColLeft(c, sizes, geometryConfig))
   
   // 计算选中的行和列
   const { selectedRows, selectedCols } = getSelectedRowsAndCols(selected, selectionRange, multiSelection)
@@ -185,14 +199,14 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   if (shouldDrawGridLines && hasMergedRegions) {
     // 绘制垂直网格线（按列绘制，分段跳过合并区域）
     for (let c = startCol; c <= endCol + 1; c++) {
-      const x = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
+      const x = rowHeaderWidth + getColLeft(c) - viewport.scrollLeft
       if (x <= rowHeaderWidth || x >= w) continue
       
       // 对每一列，从上到下分段绘制，跳过合并区域内部
       let currentY = colHeaderHeight
       for (let r = startRow; r <= endRow; r++) {
-        const cellY = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
-        const cellHeight = getRowHeight(r, sizes, geometryConfig)
+        const cellY = colHeaderHeight + getRowTop(r) - viewport.scrollTop
+        const cellHeight = getRowHeight(r)
         
         // 检查这条垂直线段是否在合并区域内部
         // 垂直线在列 c 的左边界，检查它是否穿过合并区域
@@ -213,13 +227,13 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     
     // 绘制水平网格线（按行绘制，分段跳过合并区域）
     for (let r = startRow; r <= endRow + 1; r++) {
-      const y = colHeaderHeight + getRowTop(r, sizes, geometryConfig) - viewport.scrollTop
+      const y = colHeaderHeight + getRowTop(r) - viewport.scrollTop
       if (y <= colHeaderHeight || y >= h) continue
       
       // 对每一行，从左到右分段绘制，跳过合并区域内部
       for (let c = startCol; c <= endCol; c++) {
-        const cellX = rowHeaderWidth + getColLeft(c, sizes, geometryConfig) - viewport.scrollLeft
-        const cellWidth = getColWidth(c, sizes, geometryConfig)
+        const cellX = rowHeaderWidth + getColLeft(c) - viewport.scrollLeft
+        const cellWidth = getColWidth(c)
         
         // 检查这条水平线段是否在合并区域内部
         const isInsideMerge = r > 0 && isHorizontalGridLineInMergedRegion(r - 1, c, mergedRegions)
@@ -237,7 +251,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     // Draw visible columns
     let accumulatedColX = rowHeaderWidth
     for (let c = 0; c < totalCols; c++) {
-      const colWidth = getColWidth(c, sizes, geometryConfig)
+      const colWidth = getColWidth(c)
       const x = accumulatedColX - viewport.scrollLeft
       
       if (x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
@@ -263,7 +277,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
     // Draw visible rows
     let accumulatedRowY = colHeaderHeight
     for (let r = 0; r < totalRows; r++) {
-      const rowHeight = getRowHeight(r, sizes, geometryConfig)
+      const rowHeight = getRowHeight(r)
       const y = accumulatedRowY - viewport.scrollTop
       
       if (y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
@@ -290,7 +304,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // 绘制列标签
   let accumulatedColX = rowHeaderWidth
   for (let c = 0; c < totalCols; c++) {
-    const colWidth = getColWidth(c, sizes, geometryConfig)
+    const colWidth = getColWidth(c)
     const x = accumulatedColX - viewport.scrollLeft
     
     if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
@@ -306,7 +320,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // 绘制行标签
   let accumulatedRowY = colHeaderHeight
   for (let r = 0; r < totalRows; r++) {
-    const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    const rowHeight = getRowHeight(r)
     const y = accumulatedRowY - viewport.scrollTop
     
     if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
@@ -330,7 +344,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // Draw selected column header backgrounds first
   accumulatedColX = rowHeaderWidth
   for (let c = 0; c < totalCols; c++) {
-    const colWidth = getColWidth(c, sizes, geometryConfig)
+    const colWidth = getColWidth(c)
     const x = accumulatedColX - viewport.scrollLeft
     
     if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
@@ -348,7 +362,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // Draw selected row header backgrounds first
   accumulatedRowY = colHeaderHeight
   for (let r = 0; r < totalRows; r++) {
-    const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    const rowHeight = getRowHeight(r)
     const y = accumulatedRowY - viewport.scrollTop
     
     if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
@@ -375,7 +389,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   
   accumulatedColX = rowHeaderWidth
   for (let c = 0; c < totalCols; c++) {
-    const colWidth = getColWidth(c, sizes, geometryConfig)
+    const colWidth = getColWidth(c)
     const x = accumulatedColX - viewport.scrollLeft
     
     if (colWidth > 0 && x + colWidth > rowHeaderWidth && x < w && c >= startCol && c <= endCol) {
@@ -420,7 +434,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   // Redraw row labels and separator lines
   accumulatedRowY = colHeaderHeight
   for (let r = 0; r < totalRows; r++) {
-    const rowHeight = getRowHeight(r, sizes, geometryConfig)
+    const rowHeight = getRowHeight(r)
     const y = accumulatedRowY - viewport.scrollTop
     
     if (rowHeight > 0 && y + rowHeight > colHeaderHeight && y < h && r >= startRow && r <= endRow) {
@@ -499,7 +513,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   if (hoverState.type === 'col' && hoverState.index >= 0) {
     // Draw column highlight line
     const c = hoverState.index
-    const rightX = rowHeaderWidth + getColLeft(c + 1, sizes, geometryConfig) - viewport.scrollLeft
+    const rightX = rowHeaderWidth + getColLeft(c + 1) - viewport.scrollLeft
     if (rightX > rowHeaderWidth && rightX < w) {
       ctx.strokeStyle = '#3b82f6'
       ctx.lineWidth = 2
@@ -517,7 +531,7 @@ export function drawGrid(ctx: CanvasRenderingContext2D, config: GridRenderConfig
   } else if (hoverState.type === 'row' && hoverState.index >= 0) {
     // Draw row highlight line
     const r = hoverState.index
-    const bottomY = colHeaderHeight + getRowTop(r + 1, sizes, geometryConfig) - viewport.scrollTop
+    const bottomY = colHeaderHeight + getRowTop(r + 1) - viewport.scrollTop
     if (bottomY > colHeaderHeight && bottomY < h) {
       ctx.strokeStyle = '#3b82f6'
       ctx.lineWidth = 2

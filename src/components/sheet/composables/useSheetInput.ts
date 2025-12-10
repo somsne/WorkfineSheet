@@ -42,13 +42,17 @@ export interface UseSheetInputOptions {
   sheetId?: string
   /** 打开 Overlay 的回调 */
   onOpenOverlay?: (payload: OpenOverlayPayload) => void
+  /** 单元格值变化回调（用于通知 FormulaBar 更新） */
+  onCellValueChange?: (row: number, col: number, value: string) => void
 }
 
 export function useSheetInput({ 
   state, 
   geometry, 
   onDraw,
-  onOpenOverlay
+  onOpenOverlay,
+  onCellValueChange,
+  undoRedoExecutor
 }: UseSheetInputOptions) {
   const {
     constants,
@@ -58,7 +62,9 @@ export function useSheetInput({
     selected, selectionRange,
     overlay, imeState,
     updateFormulaReferences,
-    copyRange, internalClipboard, lastCopyTs
+    copyRange, internalClipboard, lastCopyTs,
+    totalRows, totalCols,
+    undoRedo
   } = state
   
   
@@ -256,11 +262,11 @@ export function useSheetInput({
       if (selected.row >= 0 && selected.col >= 0) {
         let newRow = selected.row + 1
         let newCol = selected.col
-        if (newRow >= constants.DEFAULT_ROWS) {
+        if (newRow >= totalRows.value) {
           newRow = 0
           newCol = selected.col + 1
-          if (newCol >= constants.DEFAULT_COLS) {
-            newCol = constants.DEFAULT_COLS - 1
+          if (newCol >= totalCols.value) {
+            newCol = totalCols.value - 1
           }
         }
         selected.row = newRow
@@ -289,8 +295,56 @@ export function useSheetInput({
       if (selected.row >= 0 && selected.col >= 0) {
         // 如果修改了复制区域内的单元格，清除蚂蚁线
         checkAndClearCopyRange(selected.row, selected.col)
-        formulaSheet.setValue(selected.row, selected.col, '')
-        onDraw()
+        
+        // 确定要清空的范围（选区或单个单元格）
+        const startRow = selectionRange.startRow >= 0 ? selectionRange.startRow : selected.row
+        const startCol = selectionRange.startCol >= 0 ? selectionRange.startCol : selected.col
+        const endRow = selectionRange.endRow >= 0 ? selectionRange.endRow : selected.row
+        const endCol = selectionRange.endCol >= 0 ? selectionRange.endCol : selected.col
+        
+        // 保存旧值用于撤销（二维数组）
+        const oldValues: string[][] = []
+        let hasContent = false
+        for (let r = startRow; r <= endRow; r++) {
+          const rowValues: string[] = []
+          for (let c = startCol; c <= endCol; c++) {
+            const val = formulaSheet.getDisplayValue(r, c) ?? ''
+            rowValues.push(val)
+            if (val !== '') hasContent = true
+          }
+          oldValues.push(rowValues)
+        }
+        
+        // 如果选区内没有内容，不需要执行删除操作
+        if (!hasContent) {
+          return
+        }
+        
+        // 使用 undoRedo 执行删除操作（支持撤销）
+        const executor = undoRedoExecutor ?? undoRedo
+        executor.execute({
+          name: '删除单元格内容',
+          redo: () => {
+            for (let r = startRow; r <= endRow; r++) {
+              for (let c = startCol; c <= endCol; c++) {
+                formulaSheet.setValue(r, c, '')
+              }
+            }
+            onDraw()
+            // 通知 FormulaBar 更新（使用选区起始单元格）
+            onCellValueChange?.(startRow, startCol, '')
+          },
+          undo: () => {
+            for (let r = startRow; r <= endRow; r++) {
+              for (let c = startCol; c <= endCol; c++) {
+                const oldVal = oldValues[r - startRow]?.[c - startCol] ?? ''
+                formulaSheet.setValue(r, c, oldVal)
+              }
+            }
+            onDraw()
+            onCellValueChange?.(startRow, startCol, oldValues[0]?.[0] ?? '')
+          }
+        })
       }
       return
     }

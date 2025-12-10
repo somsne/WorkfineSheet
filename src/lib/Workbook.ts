@@ -9,7 +9,6 @@
  */
 
 import { SheetModel, type ModelSnapshot } from './SheetModel'
-import { initializeDemoData } from './demoData'
 
 /**
  * 工作表视图状态（用于切换时保存/恢复）
@@ -133,11 +132,117 @@ export class Workbook {
   /** 工作表名称计数器（用于生成默认名称） */
   private sheetCounter: number = 0
 
+  /** 批量操作模式标志 */
+  private batchMode: boolean = false
+  
+  /** 批量操作完成回调 */
+  private batchCompleteCallbacks: Array<() => void> = []
+
   constructor() {
-    // 默认创建一个工作表
+    // 默认创建一个空白工作表
     this.addSheet('Sheet1')
-    // 加载演示数据（会重命名工作表并创建第二个）
-    initializeDemoData(this)
+  }
+
+  // ==================== 批量操作 ====================
+
+  /**
+   * 批量操作模式
+   * 在回调函数执行期间，表格不重绘，公式不计算
+   * 执行完成后统一触发计算和绘制
+   * 
+   * @param callback 批量操作回调函数，可以是同步或异步函数
+   * @returns 如果 callback 返回值，则返回该值
+   * 
+   * @example
+   * // 同步批量操作
+   * workbook.batch(() => {
+   *   for (let i = 0; i < 1000; i++) {
+   *     model.setValue(i, 0, `Row ${i}`)
+   *   }
+   * })
+   * 
+   * @example
+   * // 异步批量操作
+   * await workbook.batch(async () => {
+   *   const data = await fetchData()
+   *   for (const item of data) {
+   *     model.setValue(item.row, item.col, item.value)
+   *   }
+   * })
+   */
+  batch<T>(callback: () => T): T {
+    // 如果已经在批量模式中，直接执行（支持嵌套）
+    if (this.batchMode) {
+      return callback()
+    }
+    
+    // 进入批量模式
+    this.batchMode = true
+    
+    try {
+      const result = callback()
+      
+      // 处理异步函数
+      if (result instanceof Promise) {
+        return result.then((value) => {
+          this.endBatch()
+          return value
+        }).catch((error) => {
+          this.endBatch()
+          throw error
+        }) as T
+      }
+      
+      // 同步函数，直接结束批量模式
+      this.endBatch()
+      return result
+    } catch (error) {
+      // 发生错误也要结束批量模式
+      this.endBatch()
+      throw error
+    }
+  }
+
+  /**
+   * 结束批量操作
+   */
+  private endBatch(): void {
+    this.batchMode = false
+    
+    // 触发批量完成回调
+    for (const callback of this.batchCompleteCallbacks) {
+      try {
+        callback()
+      } catch (err) {
+        console.error('[Workbook] 批量完成回调错误:', err)
+      }
+    }
+  }
+
+  /**
+   * 是否处于批量操作模式
+   */
+  isInBatchMode(): boolean {
+    return this.batchMode
+  }
+
+  /**
+   * 注册批量操作完成回调
+   * 当批量操作完成后会调用所有注册的回调
+   * 组件可以在回调中执行重绘等操作
+   */
+  onBatchComplete(callback: () => void): void {
+    this.batchCompleteCallbacks.push(callback)
+  }
+
+  /**
+   * 移除批量操作完成回调
+   */
+  offBatchComplete(callback: () => void): void {
+    const index = this.batchCompleteCallbacks.indexOf(callback)
+    if (index !== -1) {
+      this.batchCompleteCallbacks.splice(index, 1)
+    }
   }
 
   // ==================== 工作表查询方法 ====================

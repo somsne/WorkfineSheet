@@ -4,11 +4,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Workbook } from '../Workbook'
 
-// Mock initializeDemoData 以避免在测试中加载演示数据
-vi.mock('../demoData', () => ({
-  initializeDemoData: vi.fn()
-}))
-
 describe('Workbook', () => {
   let workbook: Workbook
 
@@ -310,6 +305,118 @@ describe('Workbook', () => {
       expect(newWorkbook.getSheetCount()).toBe(1)
       const newSheet = newWorkbook.getSheetByName('Sheet1')
       expect(newSheet?.model.getValue(0, 0)).toBe('Test')
+    })
+  })
+
+  describe('批量操作 (batch)', () => {
+    it('应该正确执行同步批量操作', () => {
+      const model = workbook.getActiveModel()!
+      
+      workbook.batch(() => {
+        model.setValue(0, 0, 'A1')
+        model.setValue(0, 1, 'B1')
+        model.setValue(1, 0, 'A2')
+      })
+      
+      expect(model.getValue(0, 0)).toBe('A1')
+      expect(model.getValue(0, 1)).toBe('B1')
+      expect(model.getValue(1, 0)).toBe('A2')
+    })
+
+    it('批量操作期间应该处于批量模式', () => {
+      let wasInBatchMode = false
+      
+      workbook.batch(() => {
+        wasInBatchMode = workbook.isInBatchMode()
+      })
+      
+      expect(wasInBatchMode).toBe(true)
+      expect(workbook.isInBatchMode()).toBe(false)
+    })
+
+    it('批量操作完成后应该触发回调', () => {
+      const callback = vi.fn()
+      workbook.onBatchComplete(callback)
+      
+      workbook.batch(() => {
+        // 执行一些操作
+        workbook.getActiveModel()!.setValue(0, 0, 'test')
+      })
+      
+      expect(callback).toHaveBeenCalledTimes(1)
+    })
+
+    it('应该支持移除批量完成回调', () => {
+      const callback = vi.fn()
+      workbook.onBatchComplete(callback)
+      workbook.offBatchComplete(callback)
+      
+      workbook.batch(() => {
+        workbook.getActiveModel()!.setValue(0, 0, 'test')
+      })
+      
+      expect(callback).not.toHaveBeenCalled()
+    })
+
+    it('应该支持嵌套批量操作', () => {
+      const callback = vi.fn()
+      workbook.onBatchComplete(callback)
+      
+      workbook.batch(() => {
+        // 嵌套的批量操作
+        workbook.batch(() => {
+          workbook.getActiveModel()!.setValue(0, 0, 'nested')
+        })
+        workbook.getActiveModel()!.setValue(0, 1, 'outer')
+      })
+      
+      // 嵌套时只在最外层结束时触发一次回调
+      expect(callback).toHaveBeenCalledTimes(1)
+      expect(workbook.getActiveModel()!.getValue(0, 0)).toBe('nested')
+      expect(workbook.getActiveModel()!.getValue(0, 1)).toBe('outer')
+    })
+
+    it('批量操作返回值应该正确传递', () => {
+      const result = workbook.batch(() => {
+        return 'result'
+      })
+      
+      expect(result).toBe('result')
+    })
+
+    it('应该正确处理异步批量操作', async () => {
+      const callback = vi.fn()
+      workbook.onBatchComplete(callback)
+      
+      const result = await workbook.batch(async () => {
+        await new Promise(resolve => setTimeout(resolve, 10))
+        workbook.getActiveModel()!.setValue(0, 0, 'async')
+        return 'async-result'
+      })
+      
+      expect(result).toBe('async-result')
+      expect(workbook.getActiveModel()!.getValue(0, 0)).toBe('async')
+      expect(callback).toHaveBeenCalledTimes(1)
+    })
+
+    it('批量操作出错时应该结束批量模式', () => {
+      expect(() => {
+        workbook.batch(() => {
+          throw new Error('test error')
+        })
+      }).toThrow('test error')
+      
+      expect(workbook.isInBatchMode()).toBe(false)
+    })
+
+    it('异步批量操作出错时应该结束批量模式', async () => {
+      await expect(
+        workbook.batch(async () => {
+          throw new Error('async error')
+        })
+      ).rejects.toThrow('async error')
+      
+      expect(workbook.isInBatchMode()).toBe(false)
     })
   })
 })

@@ -41,6 +41,7 @@
         :external-model="activeSheetData.model"
         :external-undo-redo="workbookUndoRedo"
         :skip-demo-data="true"
+        :is-in-batch-mode="isWorkbookInBatchMode"
         :initial-view-state="activeSheetData.viewState"
         :clipboard="workbookClipboard"
         :sheet-id="activeSheetId ?? ''"
@@ -52,6 +53,7 @@
         @cut-source-clear="handleCutSourceClear"
         @selection-change="handleSelectionChange"
         @editing-state-change="handleEditingStateChange"
+        @cell-value-change="handleCellValueChange"
         @open-overlay="handleOpenOverlay"
         @close-overlay="handleCloseOverlay"
         @overlay-position-update="handleOverlayPositionUpdate"
@@ -104,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Workbook, type WorkbookEventType, type WorkbookEvent, type SheetInfo } from '../lib/Workbook'
 import { UndoRedoManager } from '../lib/UndoRedoManager'
 import { 
@@ -144,12 +146,15 @@ function log(category: string, message: string, data?: any) {
 
 // Props
 interface Props {
-  /** 初始工作表名称列表 */
+  /** 初始工作表名称列表（当不传入 workbook 时使用） */
   initialSheets?: string[]
+  /** 外部传入的工作簿实例（可选，不传则内部创建） */
+  workbook?: InstanceType<typeof Workbook>
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  initialSheets: () => ['Sheet1']
+  initialSheets: () => ['Sheet1'],
+  workbook: undefined
 })
 
 // Emits
@@ -168,8 +173,18 @@ const emit = defineEmits<{
 
 // ==================== 核心状态 ====================
 
-/** 工作簿实例 */
-const workbook = ref(new Workbook())
+/** 工作簿实例（使用外部传入的或内部创建） */
+const workbook = ref(props.workbook || new Workbook())
+
+/** 检测工作簿是否处于批量操作模式（用于跳过中间渲染） */
+const isWorkbookInBatchMode = () => workbook.value.isInBatchMode()
+
+// 监听外部 workbook 变化
+watch(() => props.workbook, (newWorkbook) => {
+  if (newWorkbook) {
+    workbook.value = newWorkbook
+  }
+})
 
 /** 工作簿级别的撤销/重做管理器（所有 Sheet 共享） */
 const workbookUndoRedo = new UndoRedoManager(100)
@@ -549,10 +564,8 @@ function handleSelectionChange(payload: SelectionChangePayload) {
       // 先保存当前编辑
       const result = formulaEditManager.confirmEdit()
       if (result) {
-        const sheetData = workbook.value.getSheetById(result.sheetId)
-        if (sheetData) {
-          sheetData.model.setValue(result.row, result.col, result.value)
-        }
+        // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+        canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
       }
       formulaBarIsEditing.value = false
       globalOverlay.value.visible = false
@@ -602,6 +615,18 @@ function handleEditingStateChange(payload: EditingStateChangePayload) {
     formulaEditManager.reset()
     formulaBarIsEditing.value = false
   }
+}
+
+/**
+ * 处理单元格值变化事件
+ * 当 Delete 键删除单元格内容时触发，用于更新 FormulaBar
+ */
+function handleCellValueChange(payload: { row: number; col: number; value: string }) {
+  // 如果正在编辑中，不处理
+  if (formulaEditManager.state.active) return
+  
+  // 更新公式栏显示的值
+  formulaBarCellValue.value = payload.value
 }
 
 /**
@@ -941,19 +966,13 @@ function confirmFormulaEdit() {
     workbook.value.setActiveSheet(result.sheetId)
     // 等待 Sheet 切换完成后保存值
     nextTick(() => {
-      const sheetData = workbook.value.getSheetById(result.sheetId)
-      if (sheetData) {
-        sheetData.model.setValue(result.row, result.col, result.value)
-        canvasSheetRef.value?.redraw?.()
-      }
+      // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+      canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
     })
   } else {
     // 同 Sheet，直接保存
-    const sheetData = workbook.value.getSheetById(result.sheetId)
-    if (sheetData) {
-      sheetData.model.setValue(result.row, result.col, result.value)
-      canvasSheetRef.value?.redraw?.()
-    }
+    // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+    canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
   }
   
   formulaBarIsEditing.value = false
@@ -1335,11 +1354,8 @@ function handleOverlayKeyDown(event: KeyboardEvent) {
     // 确认编辑并获取源单元格位置
     const editResult = formulaEditManager.confirmEdit()
     if (editResult) {
-      // 保存值
-      const sheetData = workbook.value.getSheetById(editResult.sheetId)
-      if (sheetData) {
-        sheetData.model.setValue(editResult.row, editResult.col, editResult.value)
-      }
+      // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+      canvasSheetRef.value?.setCellValue?.(editResult.row, editResult.col, editResult.value)
       
       // 如果是跨 Sheet 模式，切回源 Sheet
       if (wasInCrossSheetMode) {
@@ -1548,23 +1564,17 @@ function confirmOverlayEdit() {
     saveCurrentSheetState()
     workbook.value.setActiveSheet(result.sheetId)
     nextTick(() => {
-      const sheetData = workbook.value.getSheetById(result.sheetId)
-      if (sheetData) {
-        sheetData.model.setValue(result.row, result.col, result.value)
-        // 选中编辑的单元格
-        canvasSheetRef.value?.selectRange?.(result.row, result.col, result.row, result.col)
-        canvasSheetRef.value?.redraw?.()
-        // 聚焦回 imeProxy
-        canvasSheetRef.value?.focusImeProxy?.()
-      }
+      // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+      canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
+      // 选中编辑的单元格
+      canvasSheetRef.value?.selectRange?.(result.row, result.col, result.row, result.col)
+      // 聚焦回 imeProxy
+      canvasSheetRef.value?.focusImeProxy?.()
     })
   } else {
     // 同 Sheet，直接保存
-    const sheetData = workbook.value.getSheetById(result.sheetId)
-    if (sheetData) {
-      sheetData.model.setValue(result.row, result.col, result.value)
-      canvasSheetRef.value?.redraw?.()
-    }
+    // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+    canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
   }
   
   formulaBarIsEditing.value = false
@@ -1672,6 +1682,9 @@ function initWorkbook() {
 /** 事件处理器引用（用于卸载） */
 const eventHandlers: { [K in WorkbookEventType]?: (event: WorkbookEvent) => void } = {}
 
+/** 批量操作完成回调（用于卸载） */
+let batchCompleteHandler: (() => void) | null = null
+
 /** 设置工作簿事件监听 */
 function setupEventListeners() {
   eventHandlers.sheetActivated = (event) => {
@@ -1704,12 +1717,29 @@ function setupEventListeners() {
   for (const [event, handler] of Object.entries(eventHandlers)) {
     workbook.value.on(event as WorkbookEventType, handler as any)
   }
+  
+  // 注册批量操作完成回调
+  batchCompleteHandler = () => {
+    // 批量操作完成后，刷新当前表格
+    nextTick(() => {
+      if (canvasSheetRef.value?.redraw) {
+        canvasSheetRef.value.redraw()
+      }
+    })
+  }
+  workbook.value.onBatchComplete(batchCompleteHandler)
 }
 
 /** 清理事件监听 */
 function cleanupEventListeners() {
   for (const [event, handler] of Object.entries(eventHandlers)) {
     workbook.value.off(event as WorkbookEventType, handler as any)
+  }
+  
+  // 清理批量操作完成回调
+  if (batchCompleteHandler) {
+    workbook.value.offBatchComplete(batchCompleteHandler)
+    batchCompleteHandler = null
   }
 }
 
@@ -1794,11 +1824,8 @@ function handleSheetChange(sheetId: string) {
     
     const result = formulaEditManager.confirmEdit()
     if (result) {
-      // 保存值到源 Sheet
-      const sourceSheetData = workbook.value.getSheetById(result.sheetId)
-      if (sourceSheetData) {
-        sourceSheetData.model.setValue(result.row, result.col, result.value)
-      }
+      // 使用 setCellValue 确保触发 FormulaSheet 缓存清除和公式重算
+      canvasSheetRef.value?.setCellValue?.(result.row, result.col, result.value)
     }
     formulaBarIsEditing.value = false
   }
@@ -2299,6 +2326,11 @@ function canRedo(): boolean {
   return canvasSheetRef.value?.canRedo?.() ?? false
 }
 
+/** 清空指定范围的单元格值 */
+function clearValues(startRow: number, startCol: number, endRow: number, endCol: number) {
+  canvasSheetRef.value?.clearValues?.(startRow, startCol, endRow, endCol)
+}
+
 /** 刷新绘制 */
 function redraw() {
   canvasSheetRef.value?.redraw?.()
@@ -2325,33 +2357,33 @@ function unhideColumn(col: number) {
 }
 
 /** 在指定行上方插入行 */
-function insertRowAbove(row: number) {
-  return canvasSheetRef.value?.insertRowAbove?.(row)
+function insertRowAbove(row: number, count?: number) {
+  return canvasSheetRef.value?.insertRowAbove?.(row, count)
 }
 
 /** 在指定行下方插入行 */
-function insertRowBelow(row: number) {
-  return canvasSheetRef.value?.insertRowBelow?.(row)
+function insertRowBelow(row: number, count?: number) {
+  return canvasSheetRef.value?.insertRowBelow?.(row, count)
 }
 
 /** 删除指定行 */
-function deleteRow(row: number) {
-  return canvasSheetRef.value?.deleteRow?.(row)
+function deleteRow(row: number, count?: number) {
+  return canvasSheetRef.value?.deleteRow?.(row, count)
 }
 
 /** 在指定列左侧插入列 */
-function insertColLeft(col: number) {
-  return canvasSheetRef.value?.insertColLeft?.(col)
+function insertColLeft(col: number, count?: number) {
+  return canvasSheetRef.value?.insertColLeft?.(col, count)
 }
 
 /** 在指定列右侧插入列 */
-function insertColRight(col: number) {
-  return canvasSheetRef.value?.insertColRight?.(col)
+function insertColRight(col: number, count?: number) {
+  return canvasSheetRef.value?.insertColRight?.(col, count)
 }
 
 /** 删除指定列 */
-function deleteCol(col: number) {
-  return canvasSheetRef.value?.deleteCol?.(col)
+function deleteCol(col: number, count?: number) {
+  return canvasSheetRef.value?.deleteCol?.(col, count)
 }
 
 /** 获取行高 */
@@ -2609,6 +2641,9 @@ defineExpose({
   redo,
   canUndo,
   canRedo,
+  
+  // 清空数据
+  clearValues,
   
   // 绘制
   redraw,

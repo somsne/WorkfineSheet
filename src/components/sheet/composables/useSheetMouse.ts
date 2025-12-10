@@ -85,6 +85,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     resizeState, hoverState,
     rowHeights, colWidths, manualRowHeights,
     hiddenRows, hiddenCols,
+    totalRows, totalCols,
     formulaReferences,
     contextMenu, inputDialog,
     formatPainter
@@ -244,7 +245,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 检测是否在行高调整区域 - 如果是则不处理点击
     if (x < constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
       let accumulatedY = constants.COL_HEADER_HEIGHT - viewport.scrollTop
-      for (let r = 0; r < constants.DEFAULT_ROWS; r++) {
+      for (let r = 0; r < totalRows.value; r++) {
         const rowHeight = getRowHeight(r)
         accumulatedY += rowHeight
         
@@ -260,7 +261,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 检测是否在列宽调整区域 - 如果是则不处理点击
     if (y < constants.COL_HEADER_HEIGHT && x > constants.ROW_HEADER_WIDTH) {
       let accumulatedX = constants.ROW_HEADER_WIDTH - viewport.scrollLeft
-      for (let c = 0; c < constants.DEFAULT_COLS; c++) {
+      for (let c = 0; c < totalCols.value; c++) {
         const colWidth = getColWidth(c)
         accumulatedX += colWidth
         
@@ -282,8 +283,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       viewport,
       geometryConfig: createGeometryConfig(),
       sizes: createSizeAccess(),
-      defaultRows: constants.DEFAULT_ROWS,
-      defaultCols: constants.DEFAULT_COLS,
+      defaultRows: totalRows.value,
+      defaultCols: totalCols.value,
       state: createSelectionState()
     })
     
@@ -313,7 +314,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     if (x < constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
       let accumulatedY = constants.COL_HEADER_HEIGHT - viewport.scrollTop
       let hitResize = false
-      for (let r = 0; r < constants.DEFAULT_ROWS; r++) {
+      for (let r = 0; r < totalRows.value; r++) {
         const rowHeight = getRowHeight(r)
         accumulatedY += rowHeight
         
@@ -325,7 +326,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           resizeState.startSize = rowHeight
           
           // 检查是否选中了多行（整行选择模式）
-          const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === constants.DEFAULT_COLS - 1
+          const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === totalCols.value - 1
           const isInSelection = isRowSelection && r >= selectionRange.startRow && r <= selectionRange.endRow
           
           if (isInSelection && selectionRange.endRow > selectionRange.startRow) {
@@ -363,8 +364,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           viewport,
           geometryConfig: createGeometryConfig(),
           sizes: createSizeAccess(),
-          defaultRows: constants.DEFAULT_ROWS,
-          defaultCols: constants.DEFAULT_COLS,
+          defaultRows: totalRows.value,
+          defaultCols: totalCols.value,
           state: createSelectionState(),
           getMergedRegion: (r, c) => model.getMergedRegion(r, c)
         })
@@ -377,7 +378,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     if (y < constants.COL_HEADER_HEIGHT && x > constants.ROW_HEADER_WIDTH) {
       let accumulatedX = constants.ROW_HEADER_WIDTH - viewport.scrollLeft
       let hitResize = false
-      for (let c = 0; c < constants.DEFAULT_COLS; c++) {
+      for (let c = 0; c < totalCols.value; c++) {
         const colWidth = getColWidth(c)
         accumulatedX += colWidth
         
@@ -389,7 +390,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           resizeState.startSize = colWidth
           
           // 检查是否选中了多列（整列选择模式）
-          const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === constants.DEFAULT_ROWS - 1
+          const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === totalRows.value - 1
           const isInSelection = isColSelection && c >= selectionRange.startCol && c <= selectionRange.endCol
           
           if (isInSelection && selectionRange.endCol > selectionRange.startCol) {
@@ -427,8 +428,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
           viewport,
           geometryConfig: createGeometryConfig(),
           sizes: createSizeAccess(),
-          defaultRows: constants.DEFAULT_ROWS,
-          defaultCols: constants.DEFAULT_COLS,
+          defaultRows: totalRows.value,
+          defaultCols: totalCols.value,
           state: createSelectionState(),
           getMergedRegion: (r, c) => model.getMergedRegion(r, c)
         })
@@ -615,8 +616,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       viewport,
       geometryConfig: createGeometryConfig(),
       sizes: createSizeAccess(),
-      defaultRows: constants.DEFAULT_ROWS,
-      defaultCols: constants.DEFAULT_COLS,
+      defaultRows: totalRows.value,
+      defaultCols: totalCols.value,
       state: createSelectionState(),
       getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
@@ -659,7 +660,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const row = getRowAtY(y)
     const col = getColAtX(x)
     
-    if (row < 0 || col < 0 || row >= constants.DEFAULT_ROWS || col >= constants.DEFAULT_COLS) {
+    if (row < 0 || col < 0 || row >= totalRows.value || col >= totalCols.value) {
       return
     }
     
@@ -744,7 +745,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     const changed = handleWheel(e, viewport, getScrollConfig())
     
     if (changed) {
-      onDraw()
+      // 使用 scheduleRedraw 而不是直接 onDraw，避免每个滚轮事件都立即重绘
+      // 多个滚轮事件会合并到下一帧统一处理
+      scheduleRedraw()
     }
   }
   
@@ -799,7 +802,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 行高调整区域
     if (x < constants.ROW_HEADER_WIDTH && y > constants.COL_HEADER_HEIGHT) {
       let accumulatedY = constants.COL_HEADER_HEIGHT - viewport.scrollTop
-      for (let r = 0; r < constants.DEFAULT_ROWS; r++) {
+      for (let r = 0; r < totalRows.value; r++) {
         const rowHeight = getRowHeight(r)
         accumulatedY += rowHeight
         
@@ -819,7 +822,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 列宽调整区域
     if (!hoverFound && y < constants.COL_HEADER_HEIGHT && x > constants.ROW_HEADER_WIDTH) {
       let accumulatedX = constants.ROW_HEADER_WIDTH - viewport.scrollLeft
-      for (let c = 0; c < constants.DEFAULT_COLS; c++) {
+      for (let c = 0; c < totalCols.value; c++) {
         const colWidth = getColWidth(c)
         accumulatedX += colWidth
         
@@ -928,8 +931,8 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       viewport,
       geometryConfig: createGeometryConfig(),
       sizes: createSizeAccess(),
-      defaultRows: constants.DEFAULT_ROWS,
-      defaultCols: constants.DEFAULT_COLS,
+      defaultRows: totalRows.value,
+      defaultCols: totalCols.value,
       state: createSelectionState(),
       getMergedRegion: (r, c) => model.getMergedRegion(r, c)
     })
@@ -1118,9 +1121,9 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
     // 正常拖拽结束
     const needsRedraw = endDragSelection(
       createSelectionState(), 
-      constants.DEFAULT_COLS, 
+      totalCols.value, 
       (r, c) => model.getMergedRegion(r, c), 
-      constants.DEFAULT_ROWS
+      totalRows.value
     )
     if (needsRedraw) {
       onDraw()
@@ -1144,7 +1147,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       // 点击行头 - 检查是否需要选中该行
       const row = getRowAtY(y)
       // 检查当前是否是整行选择模式（选区覆盖所有列）
-      const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === constants.DEFAULT_COLS - 1
+      const isRowSelection = selectionRange.startCol === 0 && selectionRange.endCol === totalCols.value - 1
       // 检查点击的行是否在选区范围内
       const isRowInSelection = isRowSelection && row >= selectionRange.startRow && row <= selectionRange.endRow
       
@@ -1155,7 +1158,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         selectionRange.startRow = row
         selectionRange.startCol = 0
         selectionRange.endRow = row
-        selectionRange.endCol = constants.DEFAULT_COLS - 1
+        selectionRange.endCol = totalCols.value - 1
         // 清除多选区
         if (multiSelection) {
           multiSelection.ranges = []
@@ -1167,7 +1170,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
       // 点击列头 - 检查是否需要选中该列
       const col = getColAtX(x)
       // 检查当前是否是整列选择模式（选区覆盖所有行）
-      const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === constants.DEFAULT_ROWS - 1
+      const isColSelection = selectionRange.startRow === 0 && selectionRange.endRow === totalRows.value - 1
       // 检查点击的列是否在选区范围内
       const isColInSelection = isColSelection && col >= selectionRange.startCol && col <= selectionRange.endCol
       
@@ -1177,7 +1180,7 @@ export function useSheetMouse({ state, geometry, input, rowColOps, onDraw, sched
         selected.col = col
         selectionRange.startRow = 0
         selectionRange.startCol = col
-        selectionRange.endRow = constants.DEFAULT_ROWS - 1
+        selectionRange.endRow = totalRows.value - 1
         selectionRange.endCol = col
         // 清除多选区
         if (multiSelection) {

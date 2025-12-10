@@ -14,6 +14,10 @@ export interface Cell {
   formulaMetadata?: FormulaMetadata
 }
 
+// 默认行高和列宽
+export const DEFAULT_ROW_HEIGHT = 24
+export const DEFAULT_COL_WIDTH = 100
+
 export class SheetModel {
   // sparse storage
   private cells: Map<CellKey, Cell> = new Map()
@@ -56,6 +60,16 @@ export class SheetModel {
   // 单元格内嵌图片存储
   // Key: "row,col" → 该单元格的图片数组
   private cellImages: Map<CellKey, CellImage[]> = new Map()
+  
+  // 行高存储（非默认行高）
+  private rowHeights: Map<number, number> = new Map()
+  
+  // 列宽存储（非默认列宽）
+  private colWidths: Map<number, number> = new Map()
+  
+  // 默认行高和列宽
+  private defaultRowHeight: number = DEFAULT_ROW_HEIGHT
+  private defaultColWidth: number = DEFAULT_COL_WIDTH
 
   getCell(r: number, c: number): Cell | null {
     const k = keyFor(r, c)
@@ -73,6 +87,62 @@ export class SheetModel {
       this.cells.delete(k)
     } else {
       this.cells.set(k, { value })
+    }
+  }
+
+  /**
+   * 批量设置范围内的值
+   * @param startRow 起始行（0-based）
+   * @param startCol 起始列（0-based）
+   * @param values 值的二维数组
+   */
+  setValues(startRow: number, startCol: number, values: string[][]): void {
+    for (let i = 0; i < values.length; i++) {
+      const row = values[i]
+      if (row) {
+        for (let j = 0; j < row.length; j++) {
+          const value = row[j] ?? ''
+          this.setValue(startRow + i, startCol + j, value)
+        }
+      }
+    }
+  }
+
+  /**
+   * 批量获取范围内的值
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   * @returns 值的二维数组
+   */
+  getValues(startRow: number, startCol: number, endRow: number, endCol: number): string[][] {
+    const result: string[][] = []
+    for (let r = startRow; r <= endRow; r++) {
+      const row: string[] = []
+      for (let c = startCol; c <= endCol; c++) {
+        row.push(this.getValue(r, c))
+      }
+      result.push(row)
+    }
+    return result
+  }
+
+  /**
+   * 清除范围内的所有值（批量优化版本）
+   * @param startRow 起始行
+   * @param startCol 起始列
+   * @param endRow 结束行
+   * @param endCol 结束列
+   */
+  clearValues(startRow: number, startCol: number, endRow: number, endCol: number): void {
+    // 优化：直接从 Map 中删除键，而不是逐个设置为空
+    // 这避免了大量的 setValue 调用和不必要的空字符串存储
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const k = keyFor(r, c)
+        this.cells.delete(k)
+      }
     }
   }
 
@@ -96,6 +166,45 @@ export class SheetModel {
         fn(parseInt(rs, 10), parseInt(cs, 10), v)
       }
     }
+  }
+
+  /**
+   * 获取有数据的范围（数据边界）
+   * @returns 包含数据的最小矩形范围，如果没有数据返回 null
+   */
+  getDataRange(): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
+    if (this.cells.size === 0) {
+      return null
+    }
+    
+    let minRow = Infinity
+    let maxRow = -Infinity
+    let minCol = Infinity
+    let maxCol = -Infinity
+    
+    for (const key of this.cells.keys()) {
+      const parts = key.split(',')
+      const r = parseInt(parts[0]!, 10)
+      const c = parseInt(parts[1]!, 10)
+      
+      if (r < minRow) minRow = r
+      if (r > maxRow) maxRow = r
+      if (c < minCol) minCol = c
+      if (c > maxCol) maxCol = c
+    }
+    
+    if (minRow === Infinity) {
+      return null
+    }
+    
+    return { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol }
+  }
+
+  /**
+   * 获取有数据的单元格总数
+   */
+  getCellCount(): number {
+    return this.cells.size
   }
 
   // ==================== 样式管理方法 ====================
@@ -1222,6 +1331,777 @@ export class SheetModel {
     this.cellImages = newCellImages
   }
 
+  // ==================== 行高列宽管理方法 ====================
+
+  /**
+   * 获取行高
+   * @param row 行号（0-based）
+   * @returns 行高（像素），未设置返回默认行高
+   */
+  getRowHeight(row: number): number {
+    return this.rowHeights.get(row) ?? this.defaultRowHeight
+  }
+
+  /**
+   * 设置行高
+   * @param row 行号（0-based）
+   * @param height 行高（像素），设置为 0 或负数表示隐藏行
+   */
+  setRowHeight(row: number, height: number): void {
+    if (height === this.defaultRowHeight) {
+      this.rowHeights.delete(row)
+    } else {
+      this.rowHeights.set(row, height)
+    }
+  }
+
+  /**
+   * 批量设置行高
+   * @param rows 行号数组
+   * @param height 行高（像素）
+   */
+  setRowsHeight(rows: number[], height: number): void {
+    for (const row of rows) {
+      this.setRowHeight(row, height)
+    }
+  }
+
+  /**
+   * 获取列宽
+   * @param col 列号（0-based）
+   * @returns 列宽（像素），未设置返回默认列宽
+   */
+  getColWidth(col: number): number {
+    return this.colWidths.get(col) ?? this.defaultColWidth
+  }
+
+  /**
+   * 设置列宽
+   * @param col 列号（0-based）
+   * @param width 列宽（像素），设置为 0 或负数表示隐藏列
+   */
+  setColWidth(col: number, width: number): void {
+    if (width === this.defaultColWidth) {
+      this.colWidths.delete(col)
+    } else {
+      this.colWidths.set(col, width)
+    }
+  }
+
+  /**
+   * 批量设置列宽
+   * @param cols 列号数组
+   * @param width 列宽（像素）
+   */
+  setColsWidth(cols: number[], width: number): void {
+    for (const col of cols) {
+      this.setColWidth(col, width)
+    }
+  }
+
+  /**
+   * 获取默认行高
+   */
+  getDefaultRowHeight(): number {
+    return this.defaultRowHeight
+  }
+
+  /**
+   * 设置默认行高
+   */
+  setDefaultRowHeight(height: number): void {
+    this.defaultRowHeight = height
+  }
+
+  /**
+   * 获取默认列宽
+   */
+  getDefaultColWidth(): number {
+    return this.defaultColWidth
+  }
+
+  /**
+   * 设置默认列宽
+   */
+  setDefaultColWidth(width: number): void {
+    this.defaultColWidth = width
+  }
+
+  /**
+   * 检查行是否隐藏（行高 <= 0 表示隐藏）
+   * @param row 行号
+   */
+  isRowHidden(row: number): boolean {
+    const height = this.rowHeights.get(row)
+    return height !== undefined && height <= 0
+  }
+
+  /**
+   * 隐藏行
+   * @param row 行号
+   */
+  hideRow(row: number): void {
+    // 保存原始行高（用于恢复），使用负数表示隐藏前的高度
+    const currentHeight = this.getRowHeight(row)
+    if (currentHeight > 0) {
+      this.rowHeights.set(row, -currentHeight)
+    }
+  }
+
+  /**
+   * 批量隐藏行
+   * @param rows 行号数组
+   */
+  hideRows(rows: number[]): void {
+    for (const row of rows) {
+      this.hideRow(row)
+    }
+  }
+
+  /**
+   * 隐藏行范围
+   * @param startRow 起始行
+   * @param endRow 结束行
+   */
+  hideRowRange(startRow: number, endRow: number): void {
+    for (let row = startRow; row <= endRow; row++) {
+      this.hideRow(row)
+    }
+  }
+
+  /**
+   * 显示行
+   * @param row 行号
+   */
+  showRow(row: number): void {
+    const height = this.rowHeights.get(row)
+    if (height !== undefined && height <= 0) {
+      // 恢复原始行高
+      const originalHeight = -height
+      if (originalHeight === this.defaultRowHeight) {
+        this.rowHeights.delete(row)
+      } else {
+        this.rowHeights.set(row, originalHeight)
+      }
+    }
+  }
+
+  /**
+   * 批量显示行
+   * @param rows 行号数组
+   */
+  showRows(rows: number[]): void {
+    for (const row of rows) {
+      this.showRow(row)
+    }
+  }
+
+  /**
+   * 显示行范围
+   * @param startRow 起始行
+   * @param endRow 结束行
+   */
+  showRowRange(startRow: number, endRow: number): void {
+    for (let row = startRow; row <= endRow; row++) {
+      this.showRow(row)
+    }
+  }
+
+  /**
+   * 检查列是否隐藏（列宽 <= 0 表示隐藏）
+   * @param col 列号
+   */
+  isColHidden(col: number): boolean {
+    const width = this.colWidths.get(col)
+    return width !== undefined && width <= 0
+  }
+
+  /**
+   * 隐藏列
+   * @param col 列号
+   */
+  hideCol(col: number): void {
+    // 保存原始列宽（用于恢复），使用负数表示隐藏前的宽度
+    const currentWidth = this.getColWidth(col)
+    if (currentWidth > 0) {
+      this.colWidths.set(col, -currentWidth)
+    }
+  }
+
+  /**
+   * 批量隐藏列
+   * @param cols 列号数组
+   */
+  hideCols(cols: number[]): void {
+    for (const col of cols) {
+      this.hideCol(col)
+    }
+  }
+
+  /**
+   * 隐藏列范围
+   * @param startCol 起始列
+   * @param endCol 结束列
+   */
+  hideColRange(startCol: number, endCol: number): void {
+    for (let col = startCol; col <= endCol; col++) {
+      this.hideCol(col)
+    }
+  }
+
+  /**
+   * 显示列
+   * @param col 列号
+   */
+  showCol(col: number): void {
+    const width = this.colWidths.get(col)
+    if (width !== undefined && width <= 0) {
+      // 恢复原始列宽
+      const originalWidth = -width
+      if (originalWidth === this.defaultColWidth) {
+        this.colWidths.delete(col)
+      } else {
+        this.colWidths.set(col, originalWidth)
+      }
+    }
+  }
+
+  /**
+   * 批量显示列
+   * @param cols 列号数组
+   */
+  showCols(cols: number[]): void {
+    for (const col of cols) {
+      this.showCol(col)
+    }
+  }
+
+  /**
+   * 显示列范围
+   * @param startCol 起始列
+   * @param endCol 结束列
+   */
+  showColRange(startCol: number, endCol: number): void {
+    for (let col = startCol; col <= endCol; col++) {
+      this.showCol(col)
+    }
+  }
+
+  /**
+   * 获取所有隐藏的行
+   * @returns 隐藏的行号数组
+   */
+  getHiddenRows(): number[] {
+    const hidden: number[] = []
+    for (const [row, height] of this.rowHeights) {
+      if (height <= 0) {
+        hidden.push(row)
+      }
+    }
+    return hidden.sort((a, b) => a - b)
+  }
+
+  /**
+   * 获取所有隐藏的列
+   * @returns 隐藏的列号数组
+   */
+  getHiddenCols(): number[] {
+    const hidden: number[] = []
+    for (const [col, width] of this.colWidths) {
+      if (width <= 0) {
+        hidden.push(col)
+      }
+    }
+    return hidden.sort((a, b) => a - b)
+  }
+
+  /**
+   * 获取所有行高（包括默认行高的行）
+   * 用于序列化
+   */
+  getAllRowHeights(): Map<number, number> {
+    return new Map(this.rowHeights)
+  }
+
+  /**
+   * 获取所有列宽（包括默认列宽的列）
+   * 用于序列化
+   */
+  getAllColWidths(): Map<number, number> {
+    return new Map(this.colWidths)
+  }
+
+  // ==================== 稀疏键批量移动方法（性能优化）====================
+
+  /**
+   * 批量向下移动行的样式数据（用于插入行）
+   * 只移动样式、边框、格式，不移动单元格值（由其他逻辑处理）
+   * 只遍历有数据的稀疏 Map，而不是整个网格
+   * @param startRow 从此行开始移动
+   * @param count 移动的行数
+   */
+  shiftRowsDown(startRow: number, count: number): void {
+    if (count <= 0) return
+    
+    // 注意：不移动 cells，因为公式单元格由公式引擎处理，非公式单元格由调用方处理
+    
+    // 移动样式
+    this._shiftMapRowsDown(this.cellStyles, startRow, count)
+    
+    // 移动边框
+    this._shiftMapRowsDown(this.cellBorders, startRow, count)
+    
+    // 移动格式
+    this._shiftMapRowsDown(this.cellFormats, startRow, count)
+    
+    // 移动单元格图片
+    this._shiftMapRowsDown(this.cellImages, startRow, count)
+  }
+
+  /**
+   * 批量向上移动行的样式数据（用于删除行）
+   * @param startRow 从此行开始移动
+   * @param count 移动的行数（删除的行数）
+   */
+  shiftRowsUp(startRow: number, count: number): void {
+    if (count <= 0) return
+    
+    // 先删除被删除行范围内的数据
+    this._deleteRowRange(this.cellStyles, startRow, count)
+    this._deleteRowRange(this.cellBorders, startRow, count)
+    this._deleteRowRange(this.cellFormats, startRow, count)
+    this._deleteRowRange(this.cellImages, startRow, count)
+    
+    // 然后上移
+    this._shiftMapRowsUp(this.cellStyles, startRow + count, count)
+    this._shiftMapRowsUp(this.cellBorders, startRow + count, count)
+    this._shiftMapRowsUp(this.cellFormats, startRow + count, count)
+    this._shiftMapRowsUp(this.cellImages, startRow + count, count)
+  }
+
+  /**
+   * 批量向右移动列的样式数据（用于插入列）
+   * @param startCol 从此列开始移动
+   * @param count 移动的列数
+   */
+  shiftColsRight(startCol: number, count: number): void {
+    if (count <= 0) return
+    
+    this._shiftMapColsRight(this.cellStyles, startCol, count)
+    this._shiftMapColsRight(this.cellBorders, startCol, count)
+    this._shiftMapColsRight(this.cellFormats, startCol, count)
+    this._shiftMapColsRight(this.cellImages, startCol, count)
+  }
+
+  /**
+   * 批量向左移动列的样式数据（用于删除列）
+   * @param startCol 从此列开始移动
+   * @param count 移动的列数（删除的列数）
+   */
+  shiftColsLeft(startCol: number, count: number): void {
+    if (count <= 0) return
+    
+    // 先删除被删除列范围内的数据
+    this._deleteColRange(this.cellStyles, startCol, count)
+    this._deleteColRange(this.cellBorders, startCol, count)
+    this._deleteColRange(this.cellFormats, startCol, count)
+    this._deleteColRange(this.cellImages, startCol, count)
+    
+    // 然后左移
+    this._shiftMapColsLeft(this.cellStyles, startCol + count, count)
+    this._shiftMapColsLeft(this.cellBorders, startCol + count, count)
+    this._shiftMapColsLeft(this.cellFormats, startCol + count, count)
+    this._shiftMapColsLeft(this.cellImages, startCol + count, count)
+  }
+
+  /**
+   * 内部方法：向下移动 Map 中的行键
+   */
+  private _shiftMapRowsDown<T>(map: Map<CellKey, T>, startRow: number, count: number): void {
+    // 收集需要移动的条目（从大到小排序避免覆盖）
+    const entries: Array<{ row: number; col: number; value: T }> = []
+    
+    for (const [key, value] of map.entries()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (r >= startRow) {
+        entries.push({ row: r, col: c, value })
+      }
+    }
+    
+    // 按行号从大到小排序
+    entries.sort((a, b) => b.row - a.row)
+    
+    // 删除旧键并设置新键
+    for (const { row, col, value } of entries) {
+      map.delete(keyFor(row, col))
+      map.set(keyFor(row + count, col), value)
+    }
+  }
+
+  /**
+   * 内部方法：向上移动 Map 中的行键
+   */
+  private _shiftMapRowsUp<T>(map: Map<CellKey, T>, startRow: number, count: number): void {
+    // 收集需要移动的条目（从小到大排序避免覆盖）
+    const entries: Array<{ row: number; col: number; value: T }> = []
+    
+    for (const [key, value] of map.entries()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (r >= startRow) {
+        entries.push({ row: r, col: c, value })
+      }
+    }
+    
+    // 按行号从小到大排序
+    entries.sort((a, b) => a.row - b.row)
+    
+    // 删除旧键并设置新键
+    for (const { row, col, value } of entries) {
+      map.delete(keyFor(row, col))
+      map.set(keyFor(row - count, col), value)
+    }
+  }
+
+  /**
+   * 内部方法：删除指定行范围的数据
+   */
+  private _deleteRowRange<T>(map: Map<CellKey, T>, startRow: number, count: number): void {
+    const toDelete: CellKey[] = []
+    
+    for (const key of map.keys()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      if (r >= startRow && r < startRow + count) {
+        toDelete.push(key)
+      }
+    }
+    
+    for (const key of toDelete) {
+      map.delete(key)
+    }
+  }
+
+  /**
+   * 内部方法：向右移动 Map 中的列键
+   */
+  private _shiftMapColsRight<T>(map: Map<CellKey, T>, startCol: number, count: number): void {
+    // 收集需要移动的条目（按列从大到小排序避免覆盖）
+    const entries: Array<{ row: number; col: number; value: T }> = []
+    
+    for (const [key, value] of map.entries()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (c >= startCol) {
+        entries.push({ row: r, col: c, value })
+      }
+    }
+    
+    // 按列号从大到小排序
+    entries.sort((a, b) => b.col - a.col)
+    
+    // 删除旧键并设置新键
+    for (const { row, col, value } of entries) {
+      map.delete(keyFor(row, col))
+      map.set(keyFor(row, col + count), value)
+    }
+  }
+
+  /**
+   * 内部方法：向左移动 Map 中的列键
+   */
+  private _shiftMapColsLeft<T>(map: Map<CellKey, T>, startCol: number, count: number): void {
+    // 收集需要移动的条目（按列从小到大排序避免覆盖）
+    const entries: Array<{ row: number; col: number; value: T }> = []
+    
+    for (const [key, value] of map.entries()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (c >= startCol) {
+        entries.push({ row: r, col: c, value })
+      }
+    }
+    
+    // 按列号从小到大排序
+    entries.sort((a, b) => a.col - b.col)
+    
+    // 删除旧键并设置新键
+    for (const { row, col, value } of entries) {
+      map.delete(keyFor(row, col))
+      map.set(keyFor(row, col - count), value)
+    }
+  }
+
+  /**
+   * 内部方法：删除指定列范围的数据
+   */
+  private _deleteColRange<T>(map: Map<CellKey, T>, startCol: number, count: number): void {
+    const toDelete: CellKey[] = []
+    
+    for (const key of map.keys()) {
+      const parts = key.split(',').map(Number)
+      const c = parts[1]!
+      if (c >= startCol && c < startCol + count) {
+        toDelete.push(key)
+      }
+    }
+    
+    for (const key of toDelete) {
+      map.delete(key)
+    }
+  }
+
+  /**
+   * 继承样式到新行（从源行复制样式到指定行范围）
+   * @param sourceRow 源行（从此行复制样式）
+   * @param targetStartRow 目标起始行
+   * @param count 要设置的行数
+   * @param totalCols 总列数（用于遍历列）
+   * @deprecated 使用 inheritRowStylesSparse 代替，性能更好
+   */
+  inheritRowStyles(sourceRow: number, targetStartRow: number, count: number, totalCols: number): void {
+    // 收集源行的所有样式/边框/格式
+    const sourceData: Array<{
+      col: number
+      style?: CellStyle
+      border?: CellBorder
+      format?: CellFormat
+    }> = []
+    
+    for (let c = 0; c < totalCols; c++) {
+      const key = keyFor(sourceRow, c)
+      const style = this.cellStyles.get(key)
+      const border = this.cellBorders.get(key)
+      const format = this.cellFormats.get(key)
+      
+      if (style || border || format) {
+        sourceData.push({ col: c, style, border, format })
+      }
+    }
+    
+    // 应用到目标行
+    for (const { col, style, border, format } of sourceData) {
+      for (let i = 0; i < count; i++) {
+        const targetKey = keyFor(targetStartRow + i, col)
+        if (style) this.cellStyles.set(targetKey, { ...style })
+        if (border) this.cellBorders.set(targetKey, { ...border })
+        if (format) this.cellFormats.set(targetKey, { ...format })
+      }
+    }
+  }
+
+  /**
+   * 继承样式到新行（稀疏优化版本）
+   * 直接从源行的 Map 条目中收集样式，避免遍历 totalCols
+   * @param sourceRow 源行（从此行复制样式）
+   * @param targetStartRow 目标起始行
+   * @param count 要设置的行数
+   */
+  inheritRowStylesSparse(sourceRow: number, targetStartRow: number, count: number): void {
+    // 从 cellStyles 收集源行样式
+    const sourceStyleCols = new Set<number>()
+    for (const key of this.cellStyles.keys()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (r === sourceRow) {
+        sourceStyleCols.add(c)
+      }
+    }
+    
+    // 从 cellBorders 收集源行边框
+    const sourceBorderCols = new Set<number>()
+    for (const key of this.cellBorders.keys()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (r === sourceRow) {
+        sourceBorderCols.add(c)
+      }
+    }
+    
+    // 从 cellFormats 收集源行格式
+    const sourceFormatCols = new Set<number>()
+    for (const key of this.cellFormats.keys()) {
+      const parts = key.split(',').map(Number)
+      const r = parts[0]!
+      const c = parts[1]!
+      if (r === sourceRow) {
+        sourceFormatCols.add(c)
+      }
+    }
+    
+    // 应用样式到目标行
+    for (const col of sourceStyleCols) {
+      const sourceKey = keyFor(sourceRow, col)
+      const style = this.cellStyles.get(sourceKey)
+      if (style) {
+        for (let i = 0; i < count; i++) {
+          this.cellStyles.set(keyFor(targetStartRow + i, col), { ...style })
+        }
+      }
+    }
+    
+    // 应用边框到目标行
+    for (const col of sourceBorderCols) {
+      const sourceKey = keyFor(sourceRow, col)
+      const border = this.cellBorders.get(sourceKey)
+      if (border) {
+        for (let i = 0; i < count; i++) {
+          this.cellBorders.set(keyFor(targetStartRow + i, col), { ...border })
+        }
+      }
+    }
+    
+    // 应用格式到目标行
+    for (const col of sourceFormatCols) {
+      const sourceKey = keyFor(sourceRow, col)
+      const format = this.cellFormats.get(sourceKey)
+      if (format) {
+        for (let i = 0; i < count; i++) {
+          this.cellFormats.set(keyFor(targetStartRow + i, col), { ...format })
+        }
+      }
+    }
+  }
+
+  // ==================== 高性能批量操作方法 ====================
+
+  /**
+   * 高性能批量向下移动所有数据（包括单元格、样式、边框、格式）
+   * 用于在表格末尾或空白区域批量插入空行场景
+   * @param startRow 从此行开始移动
+   * @param count 移动的行数
+   */
+  shiftAllDataRowsDown(startRow: number, count: number): void {
+    if (count <= 0) return
+    
+    // 移动单元格（包括公式）
+    this._shiftMapRowsDown(this.cells, startRow, count)
+    
+    // 移动样式
+    this._shiftMapRowsDown(this.cellStyles, startRow, count)
+    
+    // 移动边框
+    this._shiftMapRowsDown(this.cellBorders, startRow, count)
+    
+    // 移动格式
+    this._shiftMapRowsDown(this.cellFormats, startRow, count)
+    
+    // 移动单元格图片
+    this._shiftMapRowsDown(this.cellImages, startRow, count)
+  }
+
+  /**
+   * 高性能批量向右移动所有数据（包括单元格、样式、边框、格式）
+   * 用于在表格末尾或空白区域批量插入空列场景
+   * @param startCol 从此列开始移动
+   * @param count 移动的列数
+   */
+  shiftAllDataColsRight(startCol: number, count: number): void {
+    if (count <= 0) return
+    
+    // 移动单元格（包括公式）
+    this._shiftMapColsRight(this.cells, startCol, count)
+    
+    // 移动样式
+    this._shiftMapColsRight(this.cellStyles, startCol, count)
+    
+    // 移动边框
+    this._shiftMapColsRight(this.cellBorders, startCol, count)
+    
+    // 移动格式
+    this._shiftMapColsRight(this.cellFormats, startCol, count)
+    
+    // 移动单元格图片
+    this._shiftMapColsRight(this.cellImages, startCol, count)
+  }
+
+  /**
+   * 获取所有包含公式的单元格位置
+   * 用于批量插入时只调整公式引用，而不是遍历全部单元格
+   */
+  getFormulaCells(): Array<{ row: number; col: number; formula: string }> {
+    const result: Array<{ row: number; col: number; formula: string }> = []
+    for (const [key, cell] of this.cells.entries()) {
+      if (cell.formulaMetadata) {
+        const parts = key.split(',').map(Number)
+        result.push({ row: parts[0]!, col: parts[1]!, formula: cell.value })
+      }
+    }
+    return result
+  }
+
+  /**
+   * 获取位于指定行及以下的公式单元格数量
+   * 用于评估是否需要异步处理公式调整
+   */
+  countFormulaCellsFromRow(startRow: number): number {
+    let count = 0
+    for (const [key, cell] of this.cells.entries()) {
+      if (cell.formulaMetadata) {
+        const parts = key.split(',').map(Number)
+        if (parts[0]! >= startRow) {
+          count++
+        }
+      }
+    }
+    return count
+  }
+
+  /**
+   * 获取位于指定列及以后的公式单元格数量
+   */
+  countFormulaCellsFromCol(startCol: number): number {
+    let count = 0
+    for (const [key, cell] of this.cells.entries()) {
+      if (cell.formulaMetadata) {
+        const parts = key.split(',').map(Number)
+        if (parts[1]! >= startCol) {
+          count++
+        }
+      }
+    }
+    return count
+  }
+
+  /**
+   * 继承样式到新列
+   */
+  inheritColStyles(sourceCol: number, targetStartCol: number, count: number, totalRows: number): void {
+    const sourceData: Array<{
+      row: number
+      style?: CellStyle
+      border?: CellBorder
+      format?: CellFormat
+    }> = []
+    
+    for (let r = 0; r < totalRows; r++) {
+      const key = keyFor(r, sourceCol)
+      const style = this.cellStyles.get(key)
+      const border = this.cellBorders.get(key)
+      const format = this.cellFormats.get(key)
+      
+      if (style || border || format) {
+        sourceData.push({ row: r, style, border, format })
+      }
+    }
+    
+    for (const { row, style, border, format } of sourceData) {
+      for (let i = 0; i < count; i++) {
+        const targetKey = keyFor(row, targetStartCol + i)
+        if (style) this.cellStyles.set(targetKey, { ...style })
+        if (border) this.cellBorders.set(targetKey, { ...border })
+        if (format) this.cellFormats.set(targetKey, { ...format })
+      }
+    }
+  }
+
   // ==================== 浮动图片管理方法 ====================
 
   /**
@@ -1492,6 +2372,113 @@ export class SheetModel {
         this.cellImages.set(key, images.map(img => ({ ...img })))
       }
     }
+  }
+  
+  // ==================== 增量快照支持方法 ====================
+  
+  /**
+   * 获取所有单元格 keys 的迭代器
+   */
+  cellsKeys(): IterableIterator<CellKey> {
+    return this.cells.keys()
+  }
+  
+  /**
+   * 获取所有样式 keys 的迭代器
+   */
+  cellStylesKeys(): IterableIterator<CellKey> {
+    return this.cellStyles.keys()
+  }
+  
+  /**
+   * 获取所有边框 keys 的迭代器
+   */
+  cellBordersKeys(): IterableIterator<CellKey> {
+    return this.cellBorders.keys()
+  }
+  
+  /**
+   * 获取所有格式 keys 的迭代器
+   */
+  cellFormatsKeys(): IterableIterator<CellKey> {
+    return this.cellFormats.keys()
+  }
+  
+  /**
+   * 直接设置单元格（含 formulaMetadata，用于增量恢复）
+   */
+  setCellRaw(r: number, c: number, cell: Cell): void {
+    const k = keyFor(r, c)
+    this.cells.set(k, cell)
+  }
+  
+  /**
+   * 删除单元格
+   */
+  deleteCell(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cells.delete(k)
+  }
+  
+  /**
+   * 删除单元格样式
+   */
+  deleteCellStyle(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cellStyles.delete(k)
+  }
+  
+  /**
+   * 设置单元格样式（完全替换，用于增量恢复）
+   * 不会与现有样式合并
+   */
+  setCellStyleRaw(r: number, c: number, style: CellStyle): void {
+    const k = keyFor(r, c)
+    this.cellStyles.set(k, style)
+  }
+  
+  /**
+   * 删除单元格边框
+   */
+  deleteCellBorder(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cellBorders.delete(k)
+  }
+  
+  /**
+   * 删除单元格格式
+   */
+  deleteCellFormat(r: number, c: number): void {
+    const k = keyFor(r, c)
+    this.cellFormats.delete(k)
+  }
+  
+  /**
+   * 获取合并区域 Map（用于增量快照）
+   */
+  getMergedRegionsMap(): Map<CellKey, MergedRegion> {
+    return this.mergedRegions
+  }
+  
+  /**
+   * 设置合并区域 Map（用于增量恢复）
+   */
+  setMergedRegionsMap(regions: Map<CellKey, MergedRegion>): void {
+    this.mergedRegions = new Map(regions)
+  }
+  
+  /**
+   * 获取合并单元格索引 Map（用于增量快照）
+   */
+  getMergedCellIndexMap(): Map<CellKey, CellKey> {
+    return this.mergedCellIndex
+  }
+  
+  /**
+   * 设置合并单元格索引 Map（用于增量恢复）
+   */
+  setMergedCellIndexMap(index: Map<CellKey, CellKey>): void {
+    this.mergedCellIndex = new Map(index)
   }
 }
 

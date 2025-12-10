@@ -243,16 +243,16 @@
       
       <div class="stats-bar">
         <div class="stat-item">
-          <div class="stat-value">6</div>
-          <div class="stat-label">测试大类</div>
+          <div class="stat-value">19</div>
+          <div class="stat-label">测试页面</div>
         </div>
         <div class="stat-item">
-          <div class="stat-value">30+</div>
+          <div class="stat-value">50+</div>
           <div class="stat-label">性能指标</div>
         </div>
         <div class="stat-item">
-          <div class="stat-value">100K+</div>
-          <div class="stat-label">测试规模</div>
+          <div class="stat-value">1M</div>
+          <div class="stat-label">最大测试规模</div>
         </div>
       </div>
     </header>
@@ -283,10 +283,33 @@
         </div>
       </div>
       
+      <!-- 表格渲染性能测试 -->
+      <div class="test-card">
+        <div class="test-card-header">
+          <div class="test-icon render">📊</div>
+          <div class="test-card-title">
+            <h2>表格渲染性能测试</h2>
+            <span class="badge">NEW</span>
+          </div>
+        </div>
+        <p class="test-card-desc">
+          测试完整表格组件在不同数据规模下的渲染性能，支持预设规模和自定义行列测试，自动生成评分报告。仅测量渲染时间，不含数据生成。
+        </p>
+        <div class="test-metrics">
+          <span class="metric-tag">预设规模</span>
+          <span class="metric-tag">自定义行列</span>
+          <span class="metric-tag">批量对比</span>
+          <span class="metric-tag">压力测试</span>
+        </div>
+        <div class="test-card-actions">
+          <a href="sheet-render-test.html" class="btn btn-primary">进入测试</a>
+        </div>
+      </div>
+      
       <!-- 公式计算 -->
       <div class="test-card">
         <div class="test-card-header">
-          <div class="test-icon formula">📐</div>
+          <div class="test-icon formula">�</div>
           <div class="test-card-title">
             <h2>公式计算性能</h2>
             <span class="badge">FormulaEngine</span>
@@ -309,7 +332,7 @@
       <!-- 数据操作 -->
       <div class="test-card">
         <div class="test-card-header">
-          <div class="test-icon data">💾</div>
+          <div class="test-icon data">�</div>
           <div class="test-card-title">
             <h2>数据操作性能</h2>
             <span class="badge">SheetModel</span>
@@ -463,7 +486,6 @@
         <div class="test-metrics">
           <span class="metric-tag">全面覆盖</span>
           <span class="metric-tag">综合报告</span>
-          <span class="metric-tag">基准对比</span>
         </div>
         <div class="test-card-actions">
           <a href="performance-test.html" class="btn btn-primary">进入测试</a>
@@ -550,7 +572,7 @@
           测试复制粘贴功能，包括公式复制、相对/绝对引用、TSV/CSV格式、选区填充等。
         </p>
         <div class="test-card-actions">
-          <a href="test-copy-paste-final.html" class="btn btn-primary">进入测试</a>
+          <a href="test-copy-paste.html" class="btn btn-primary">进入测试</a>
         </div>
       </div>
       

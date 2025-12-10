@@ -146,6 +146,17 @@ export interface SizeAccess {
   showGridFlag?: boolean
 }
 
+/**
+ * 位置访问器接口 - 用于渲染模块获取行列位置
+ * 通过接口注入而非直接导入 geometry.ts，以便使用 PositionIndex 缓存
+ */
+export interface PositionAccessor {
+  getRowHeight: (row: number) => number
+  getColWidth: (col: number) => number
+  getRowTop: (row: number) => number
+  getColLeft: (col: number) => number
+}
+
 // ==================== 单元格样式 ====================
 
 /**

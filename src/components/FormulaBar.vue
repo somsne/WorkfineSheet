@@ -808,7 +808,7 @@ defineExpose({
 .formula-bar {
   display: flex;
   align-items: stretch;
-  min-height: 26px;
+  min-height: 30px;
   background: #f3f3f3;
   border-bottom: 1px solid #d4d4d4;
   padding: 0;
